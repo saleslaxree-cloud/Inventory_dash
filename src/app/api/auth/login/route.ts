@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDb } from '@/lib/db'
 
 // POST /api/auth/login
-export async function POST(req: NextRequest) {
+export const POST = withDb(async (req: NextRequest) => {
   const { email, password } = await req.json()
   if (!email || !password) {
     return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
@@ -22,4 +22,4 @@ export async function POST(req: NextRequest) {
     httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 7,
   })
   return res
-}
+})

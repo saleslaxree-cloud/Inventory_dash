@@ -29,8 +29,10 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Login failed')
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : null
+      if (!res.ok) throw new Error(data?.error || `Login failed (${res.status})`)
+      if (!data) throw new Error('Server returned an empty response. The database may be unavailable.')
       onLogin(data)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Login failed')

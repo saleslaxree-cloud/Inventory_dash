@@ -19,23 +19,31 @@ export default function Home() {
   // Check existing session on mount
   useEffect(() => {
     fetch('/api/auth/me')
-      .then((r) => r.ok ? r.json() : null)
+      .then(async (r) => {
+        if (!r.ok) return null
+        const text = await r.text()
+        try { return text ? JSON.parse(text) : null } catch { return null }
+      })
       .then((d) => { if (d?.user) setUser(d.user) })
+      .catch(() => {})
       .finally(() => setChecking(false))
   }, [])
 
   const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
     setUser(null)
     setActiveTab('overview')
   }
 
   const refreshUser = async () => {
-    const res = await fetch('/api/auth/me')
-    if (res.ok) {
-      const d = await res.json()
-      if (d?.user) setUser(d.user)
-    }
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const text = await res.text()
+        const d = text ? JSON.parse(text) : null
+        if (d?.user) setUser(d.user)
+      }
+    } catch {}
   }
 
   if (checking) {
