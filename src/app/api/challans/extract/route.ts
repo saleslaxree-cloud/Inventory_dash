@@ -150,7 +150,7 @@ async function loadProvider(): Promise<VlmProvider | null> {
     return {
       kind: 'gemini',
       apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     }
   }
 
@@ -205,21 +205,22 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
   //   - 429 / "quota exceeded" / "rate limit"                → per-model free-tier quota exhausted
   // Different Gemini models have SEPARATE free-tier quotas, so if one is
   // quota-blocked or deprecated, others often still work.
-  // Chain order (newest first, but include lite/8b variants as they have
-  // separate quotas and are very generous on the free tier):
-  //   1. gemini-2.5-flash      (newest; may be deprecated for new keys)
-  //   2. gemini-2.0-flash      (stable; quota may be exhausted)
-  //   3. gemini-2.0-flash-lite (lighter; separate quota, very generous free tier)
-  //   4. gemini-1.5-flash      (older; most generous free tier — 1500 req/day)
-  //   5. gemini-1.5-flash-8b   (smallest; separate quota, last-resort fallback)
-  const requestedModel = cfg.model || 'gemini-2.5-flash'
+  // Chain (only valid, currently-available PDF-capable models):
+  //   1. gemini-2.0-flash       (stable, widely available)
+  //   2. gemini-2.0-flash-exp   (experimental variant, separate quota)
+  //   3. gemini-1.5-flash       (older, most generous free tier — 1500 req/day)
+  //   4. gemini-1.5-pro         (Pro tier, separate quota, higher quality)
+  //   5. gemini-2.5-pro         (newest Pro, if available)
+  // NOTE: gemini-2.5-flash is deprecated ("no longer available to new users")
+  // so it's intentionally NOT in the chain.
+  const requestedModel = cfg.model || 'gemini-2.0-flash'
   const fallbackChain = [
     requestedModel,
-    'gemini-2.5-flash',
     'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash-exp',
     'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
+    'gemini-1.5-pro',
+    'gemini-2.5-pro',
   ].filter((m, i, arr) => arr.indexOf(m) === i) // dedupe
 
   let lastError: Error | null = null
@@ -244,16 +245,24 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
     }
   }
   // All models in the chain failed. If the last failure was a quota error,
-  // surface a clear, actionable message (the user's free tier is exhausted
-  // across all models — they need to enable billing or wait for reset).
+  // surface a clear, actionable message. The most common cause of "limit: 0"
+  // is that the Google Cloud project doesn't have billing enabled AND the free
+  // tier isn't available (either already used up, or not available in the
+  // project's region). The fix is to enable billing (very cheap) or use a
+  // fresh API key from a different Google account.
   if (lastError && /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(lastError.message)) {
+    const isLimitZero = /limit:\s*0/i.test(lastError.message)
     throw new Error(
-      'Gemini free-tier quota exhausted on all available models. Options:\n' +
-        '  1. Wait for the daily quota to reset (usually resets at midnight Pacific time).\n' +
-        '  2. Enable billing on your Google Cloud project at https://console.cloud.google.com/billing ' +
-        '(pay-as-you-go, very cheap — ~$0.075 per 1M input tokens for Flash models).\n' +
-        '  3. Generate a new API key from a different Google account at https://aistudio.google.com/apikey ' +
-        'and update GEMINI_API_KEY in Vercel.\n' +
+      (isLimitZero
+        ? 'Your Gemini API key has quota limit = 0 (free tier is disabled for this key). '
+        : 'Gemini free-tier quota exhausted on all available models. '
+      ) +
+        'This usually means the Google Cloud project does not have billing enabled. Fix options:\n' +
+        '  1. ENABLE BILLING (recommended, very cheap — ~$0.075 per 1M tokens for Flash models):\n' +
+        '     Go to https://console.cloud.google.com/billing → link a billing account to your project.\n' +
+        '  2. USE A FRESH API KEY: create a new Google Cloud project at https://aistudio.google.com/apikey ' +
+        '(new projects get a fresh free tier), then update GEMINI_API_KEY in Vercel → Settings → Environment Variables.\n' +
+        '  3. WAIT: if you just made many requests, the per-day quota resets at midnight Pacific time.\n' +
         'Meanwhile, you can fill the form manually below.'
     )
   }
