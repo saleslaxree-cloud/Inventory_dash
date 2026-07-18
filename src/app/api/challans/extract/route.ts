@@ -6,24 +6,20 @@ import os from 'os'
 
 // POST /api/challans/extract
 // Accepts multipart/form-data with a `file` field (PDF).
-// Calls the ZAI VLM (glm-4.6v) DIRECTLY to parse the Laxree challan format and
-// returns structured data matching the Sales upload form's Section A/B/C fields.
+// Uses a VLM to parse the Laxree challan format and returns structured data
+// matching the Sales upload form's Section A/B/C fields.
 //
-// Why direct (not via mini-service)?
-//   The original design proxied to a mini-service on port 3031, but that only
-//   works inside the sandbox. On Vercel (or any other host) the mini-service
-//   doesn't exist, so the proxy always failed. Calling VLM directly here means
-//   the feature works anywhere the ZAI SDK can reach its API endpoint.
+// Provider resolution (first available wins):
+//   1. ZAI (sandbox)        — /etc/.z-ai-config OR ZAI_BASE_URL+ZAI_API_KEY env vars
+//   2. Google Gemini        — GEMINI_API_KEY env var (recommended for Vercel)
 //
-// Config resolution (in priority order):
-//   1. /etc/.z-ai-config            (sandbox auto-provisioned)
-//   2. <cwd>/.z-ai-config           (project-local override)
-//   3. ~/.z-ai-config               (home dir override)
-//   4. Env vars: ZAI_BASE_URL, ZAI_API_KEY, ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID
-//      (use these on Vercel — set them in Project Settings → Environment Variables)
+// The sandbox auto-provisions a ZAI config pointing at internal-api.z.ai which
+// is only reachable inside the Z.ai sandbox network. On Vercel (or any other
+// public cloud) set GEMINI_API_KEY instead — Gemini supports PDF understanding
+// natively, has a generous free tier, and works everywhere.
 //
-// If no config is found, OR the VLM call fails, the route returns a clear error
-// so the Sales person can fall back to filling the form manually.
+// If no provider is configured, returns a clear error so the Sales person can
+// fall back to filling the form manually.
 export const runtime = 'nodejs'
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
@@ -100,16 +96,17 @@ Rules:
 - For clientCity use the city from Site Add.
 - For clientMobile use the primary phone digits (include country code 91 only if 10 digits).`
 
-type ZaiConfig = {
-  baseUrl: string
-  apiKey: string
-  chatId?: string
-  token?: string
-  userId?: string
-}
+// ── Provider types ──
+type VlmProvider =
+  | { kind: 'zai'; baseUrl: string; apiKey: string; chatId?: string; token?: string; userId?: string }
+  | { kind: 'gemini'; apiKey: string; model?: string }
 
-async function loadZaiConfig(): Promise<ZaiConfig | null> {
-  // 1-3. Try file-based config (sandbox / local override)
+/**
+ * Resolve which VLM provider is available.
+ * Priority: ZAI config file → ZAI env vars → Gemini env var.
+ */
+async function loadProvider(): Promise<VlmProvider | null> {
+  // ── 1. ZAI config file (sandbox auto-provisioned at /etc/.z-ai-config) ──
   const candidates = [
     '/etc/.z-ai-config',
     path.join(process.cwd(), '.z-ai-config'),
@@ -121,6 +118,7 @@ async function loadZaiConfig(): Promise<ZaiConfig | null> {
       const config = JSON.parse(configStr)
       if (config.baseUrl && config.apiKey) {
         return {
+          kind: 'zai',
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
           chatId: config.chatId,
@@ -132,13 +130,13 @@ async function loadZaiConfig(): Promise<ZaiConfig | null> {
       if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.error(`[challans/extract] error reading ${filePath}:`, err)
       }
-      // continue to next candidate
     }
   }
 
-  // 4. Fall back to env vars (for Vercel — set in Project Settings → Environment Variables)
+  // ── 2. ZAI env vars (if user has their own public ZAI key) ──
   if (process.env.ZAI_BASE_URL && process.env.ZAI_API_KEY) {
     return {
+      kind: 'zai',
       baseUrl: process.env.ZAI_BASE_URL,
       apiKey: process.env.ZAI_API_KEY,
       chatId: process.env.ZAI_CHAT_ID,
@@ -147,7 +145,167 @@ async function loadZaiConfig(): Promise<ZaiConfig | null> {
     }
   }
 
+  // ── 3. Gemini env var (recommended for Vercel / public clouds) ──
+  if (process.env.GEMINI_API_KEY) {
+    return {
+      kind: 'gemini',
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    }
+  }
+
   return null
+}
+
+/**
+ * Call the VLM with the PDF + extraction prompt. Returns the raw text response.
+ * Dispatches to the configured provider.
+ */
+async function callVlm(provider: VlmProvider, pdfBuffer: Buffer, fileName: string): Promise<string> {
+  const base64 = pdfBuffer.toString('base64')
+
+  if (provider.kind === 'zai') {
+    return callZai(provider, base64)
+  }
+  return callGemini(provider, base64, fileName)
+}
+
+/** ZAI (glm-4.6v) — used in the sandbox via /etc/.z-ai-config */
+async function callZai(cfg: Extract<VlmProvider, { kind: 'zai' }>, base64: string): Promise<string> {
+  const dataUrl = `data:application/pdf;base64,${base64}`
+  // Dynamic import so the heavy SDK only loads when ZAI is actually used
+  const ZAIModule = (await import('z-ai-web-dev-sdk')).default
+  const zai = new ZAIModule({
+    baseUrl: cfg.baseUrl,
+    apiKey: cfg.apiKey,
+    chatId: cfg.chatId,
+    token: cfg.token,
+    userId: cfg.userId,
+  })
+  const response = await zai.chat.completions.createVision({
+    model: 'glm-4.6v',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: EXTRACTION_PROMPT },
+          { type: 'file_url', file_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    thinking: { type: 'disabled' },
+  })
+  return response.choices?.[0]?.message?.content || ''
+}
+
+/** Google Gemini — recommended for Vercel / public clouds (supports PDF natively) */
+async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64: string, fileName: string): Promise<string> {
+  const model = cfg.model || 'gemini-2.0-flash'
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cfg.apiKey}`
+
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: EXTRACTION_PROMPT },
+          { inline_data: { mime_type: 'application/pdf', data: base64 } },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      topP: 0.95,
+      maxOutputTokens: 8192,
+      responseMimeType: 'application/json',
+    },
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text()
+    let errMsg = `Gemini API error (${res.status})`
+    try {
+      const errJson = JSON.parse(errText)
+      errMsg = errJson.error?.message || errMsg
+    } catch {
+      errMsg = `${errMsg}: ${errText.slice(0, 200)}`
+    }
+    throw new Error(errMsg)
+  }
+
+  const data = await res.json()
+  const text = data?.candidates?.[0]?.content?.parts
+    ?.map((p: { text?: string }) => p.text || '')
+    .join('') || ''
+
+  if (!text) {
+    const blockReason = data?.promptFeedback?.blockReason
+    if (blockReason) {
+      throw new Error(`Gemini blocked the request: ${blockReason}`)
+    }
+    throw new Error('Gemini returned an empty response')
+  }
+  return text
+}
+
+/** Extract the JSON object from a VLM text response (handles code fences + leading/trailing prose). */
+function parseVlmJson(raw: string): Record<string, unknown> {
+  let jsonStr = raw.trim()
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenceMatch) jsonStr = fenceMatch[1].trim()
+  const firstBrace = jsonStr.indexOf('{')
+  const lastBrace = jsonStr.lastIndexOf('}')
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    jsonStr = jsonStr.slice(firstBrace, lastBrace + 1)
+  }
+  return JSON.parse(jsonStr)
+}
+
+/** Normalize the parsed JSON into the final response shape. */
+function normalizeResult(parsed_json: Record<string, unknown>, fileName: string, fileSize: number) {
+  const items = Array.isArray(parsed_json.items) ? parsed_json.items : []
+  const normalizedItems = items.map((it: Record<string, unknown>, idx: number) => ({
+    category: typeof it.category === 'string' ? it.category : null,
+    itemName: typeof it.itemName === 'string' ? it.itemName : (typeof it.model === 'string' ? it.model : `Item ${idx + 1}`),
+    itemNumber: typeof it.itemNumber === 'string' ? it.itemNumber : null,
+    model: typeof it.model === 'string' ? it.model : null,
+    colour: typeof it.colour === 'string' ? it.colour : null,
+    quantity: Number(it.quantity) || 1,
+    unitPrice: Number(it.unitPrice) || 0,
+    totalPrice: Number(it.totalPrice) || (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0),
+  }))
+
+  return {
+    challanNumber: typeof parsed_json.challanNumber === 'string' ? parsed_json.challanNumber : null,
+    challanDate: typeof parsed_json.challanDate === 'string' ? parsed_json.challanDate : null,
+    quotationNumber: typeof parsed_json.quotationNumber === 'string' ? parsed_json.quotationNumber : null,
+    clientName: typeof parsed_json.clientName === 'string' ? parsed_json.clientName : null,
+    clientCity: typeof parsed_json.clientCity === 'string' ? parsed_json.clientCity : null,
+    clientMobile: typeof parsed_json.clientMobile === 'string' ? parsed_json.clientMobile : null,
+    billingName: typeof parsed_json.billingName === 'string' ? parsed_json.billingName : null,
+    billingAddress: typeof parsed_json.billingAddress === 'string' ? parsed_json.billingAddress : null,
+    shippingAddress: typeof parsed_json.shippingAddress === 'string' ? parsed_json.shippingAddress : null,
+    gstNumber: typeof parsed_json.gstNumber === 'string' ? parsed_json.gstNumber : null,
+    expectedDeliveryDate: typeof parsed_json.expectedDeliveryDate === 'string' ? parsed_json.expectedDeliveryDate : null,
+    amountWithoutGst: typeof parsed_json.amountWithoutGst === 'number' ? parsed_json.amountWithoutGst : null,
+    gstPercentage: typeof parsed_json.gstPercentage === 'number' ? parsed_json.gstPercentage : null,
+    packingCharge: typeof parsed_json.packingCharge === 'number' ? parsed_json.packingCharge : null,
+    amountWithGst: typeof parsed_json.amountWithGst === 'number' ? parsed_json.amountWithGst : null,
+    amountTotal: typeof parsed_json.amountTotal === 'number' ? parsed_json.amountTotal : null,
+    items: normalizedItems,
+    pdfFileName: fileName,
+    _meta: {
+      fileName,
+      fileSize,
+      extractedAt: new Date().toISOString(),
+    },
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -167,57 +325,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 })
     }
 
-    // Load ZAI config (file in sandbox, env vars on Vercel)
-    const config = await loadZaiConfig()
-    if (!config) {
+    // ── Resolve VLM provider ──
+    const provider = await loadProvider()
+    if (!provider) {
       return NextResponse.json(
         {
           error:
-            'PDF auto-extraction is not configured on this server. Set ZAI_BASE_URL, ZAI_API_KEY, ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID environment variables, or fill the form manually below.',
+            'PDF auto-extraction is not configured. Set GEMINI_API_KEY (recommended — free tier at aistudio.google.com/apikey) OR ZAI_BASE_URL + ZAI_API_KEY in environment variables. You can also fill the form manually below.',
         },
         { status: 503 }
       )
     }
 
-    // Read PDF → base64 data URL
+    // ── Read PDF ──
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const base64 = buffer.toString('base64')
-    const dataUrl = `data:application/pdf;base64,${base64}`
+    console.log(`[challans/extract] Processing PDF: ${file.name} (${buffer.length} bytes) via ${provider.kind}`)
 
-    console.log(`[challans/extract] Processing PDF: ${file.name} (${buffer.length} bytes)`)
+    // ── Call VLM ──
+    const raw = await callVlm(provider, buffer, file.name)
 
-    // Dynamic import so the heavy SDK only loads when extraction is actually called
-    const ZAIModule = (await import('z-ai-web-dev-sdk')).default
-    const zai = new ZAIModule(config)
-
-    const response = await zai.chat.completions.createVision({
-      model: 'glm-4.6v',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: EXTRACTION_PROMPT },
-            { type: 'file_url', file_url: { url: dataUrl } },
-          ],
-        },
-      ],
-      thinking: { type: 'disabled' },
-    })
-
-    const raw = response.choices?.[0]?.message?.content || ''
-    let jsonStr = raw.trim()
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
-    if (fenceMatch) jsonStr = fenceMatch[1].trim()
-    const firstBrace = jsonStr.indexOf('{')
-    const lastBrace = jsonStr.lastIndexOf('}')
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      jsonStr = jsonStr.slice(firstBrace, lastBrace + 1)
-    }
-
+    // ── Parse + normalize ──
     let parsed_json: Record<string, unknown>
     try {
-      parsed_json = JSON.parse(jsonStr)
+      parsed_json = parseVlmJson(raw)
     } catch {
       return NextResponse.json(
         { error: 'Could not parse VLM output as JSON. Please try again or fill the form manually.', raw },
@@ -225,58 +356,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const items = Array.isArray(parsed_json.items) ? parsed_json.items : []
-    const normalizedItems = items.map((it: Record<string, unknown>, idx: number) => ({
-      category: typeof it.category === 'string' ? it.category : null,
-      itemName: typeof it.itemName === 'string' ? it.itemName : (typeof it.model === 'string' ? it.model : `Item ${idx + 1}`),
-      itemNumber: typeof it.itemNumber === 'string' ? it.itemNumber : null,
-      model: typeof it.model === 'string' ? it.model : null,
-      colour: typeof it.colour === 'string' ? it.colour : null,
-      quantity: Number(it.quantity) || 1,
-      unitPrice: Number(it.unitPrice) || 0,
-      totalPrice: Number(it.totalPrice) || (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0),
-    }))
-
-    const result = {
-      challanNumber: typeof parsed_json.challanNumber === 'string' ? parsed_json.challanNumber : null,
-      challanDate: typeof parsed_json.challanDate === 'string' ? parsed_json.challanDate : null,
-      quotationNumber: typeof parsed_json.quotationNumber === 'string' ? parsed_json.quotationNumber : null,
-      clientName: typeof parsed_json.clientName === 'string' ? parsed_json.clientName : null,
-      clientCity: typeof parsed_json.clientCity === 'string' ? parsed_json.clientCity : null,
-      clientMobile: typeof parsed_json.clientMobile === 'string' ? parsed_json.clientMobile : null,
-      billingName: typeof parsed_json.billingName === 'string' ? parsed_json.billingName : null,
-      billingAddress: typeof parsed_json.billingAddress === 'string' ? parsed_json.billingAddress : null,
-      shippingAddress: typeof parsed_json.shippingAddress === 'string' ? parsed_json.shippingAddress : null,
-      gstNumber: typeof parsed_json.gstNumber === 'string' ? parsed_json.gstNumber : null,
-      expectedDeliveryDate: typeof parsed_json.expectedDeliveryDate === 'string' ? parsed_json.expectedDeliveryDate : null,
-      amountWithoutGst: typeof parsed_json.amountWithoutGst === 'number' ? parsed_json.amountWithoutGst : null,
-      gstPercentage: typeof parsed_json.gstPercentage === 'number' ? parsed_json.gstPercentage : null,
-      packingCharge: typeof parsed_json.packingCharge === 'number' ? parsed_json.packingCharge : null,
-      amountWithGst: typeof parsed_json.amountWithGst === 'number' ? parsed_json.amountWithGst : null,
-      amountTotal: typeof parsed_json.amountTotal === 'number' ? parsed_json.amountTotal : null,
-      items: normalizedItems,
-      pdfFileName: file.name,
-      _meta: {
-        fileName: file.name,
-        fileSize: buffer.length,
-        extractedAt: new Date().toISOString(),
-      },
-    }
-
-    console.log(`[challans/extract] Success: challan=${result.challanNumber}, items=${normalizedItems.length}`)
-    return NextResponse.json({ ok: true, data: result })
+    const result = normalizeResult(parsed_json, file.name, buffer.length)
+    console.log(`[challans/extract] Success: challan=${result.challanNumber}, items=${result.items.length}`)
+    return NextResponse.json({ ok: true, data: result, provider: provider.kind })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[challans/extract] error:', msg)
 
-    // Distinguish "not configured" from "VLM call failed"
     const isNetworkError =
       /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|getaddrinfo|connect ETIMEDOUT/i.test(msg)
 
     return NextResponse.json(
       {
         error: isNetworkError
-          ? 'PDF auto-extraction failed — the ZAI VLM service is not reachable from this deployment. Please fill the form manually below.'
+          ? 'PDF auto-extraction failed — the VLM service is not reachable from this server. Fill the form manually below, or configure GEMINI_API_KEY.'
           : `PDF extraction failed: ${msg}. You can still fill the form manually below.`,
         detail: msg,
       },
@@ -286,23 +379,21 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // Health check — reports whether ZAI config is available
-  const config = await loadZaiConfig()
-  if (!config) {
+  // Health check — reports which VLM provider is configured
+  const provider = await loadProvider()
+  if (!provider) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          'ZAI VLM not configured. Set ZAI_BASE_URL, ZAI_API_KEY, ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID env vars (or provide /etc/.z-ai-config).',
+          'No VLM configured. Set GEMINI_API_KEY (recommended) or ZAI_BASE_URL + ZAI_API_KEY env vars.',
       },
       { status: 503 }
     )
   }
   return NextResponse.json({
     ok: true,
-    configured: true,
-    baseUrl: config.baseUrl,
-    hasApiKey: true,
-    hasToken: Boolean(config.token),
+    provider: provider.kind,
+    ...(provider.kind === 'gemini' ? { model: provider.model } : { baseUrl: provider.baseUrl }),
   })
 }
