@@ -1176,3 +1176,32 @@ Stage Summary:
 - VLM fallback remains for scanned/image PDFs (requires GEMINI_API_KEY)
 - Vercel production verified working end-to-end via Agent Browser
 - Commits: c1e0ee2, 54d4a21, 43c22f5, 741c110, 8206385
+
+---
+Task ID: vercel-pdf-fix
+Agent: main (Z.ai Code)
+Task: Fix PDF challan extraction on Vercel production — "update nhi hua abhi tak fix karo"
+
+Work Log:
+- Verified text-regex extraction code was already committed but NOT pushed (1 commit ahead of origin)
+- Tested extraction locally with sample PDF → works perfectly (all fields extracted, 0 API calls)
+- Pushed commit to GitHub → Vercel deployed, health check confirmed primaryMethod=text-regex
+- BUT login failed on production with "DATABASE_URL is not a valid postgresql:// connection string"
+- Root cause investigation:
+  1. .env file (with SQLite file: URL) was tracked in git and deployed to Vercel
+  2. db.ts used loadEnv({override:true}) which clobbered Vercel's Neon postgres URL with the SQLite URL
+  3. prisma/schema.prisma had directUrl=env("DIRECT_URL") but DIRECT_URL env var was NOT set on Vercel (only DATABASE_URL and DATABASE_URL_UNPOOLED exist)
+- Fix 1: git rm --cached .env (stop tracking, still used locally)
+- Fix 2: db.ts — only call loadEnv() when NODE_ENV !== 'production' (never override Vercel env vars)
+- Fix 3: prisma/schema.prisma — changed directUrl from env("DIRECT_URL") to env("DATABASE_URL_UNPOOLED") (matches Vercel's actual env var names)
+- Regenerated Prisma client, committed all 3 fixes, pushed
+- Verified on production (inventory-dash-eight.vercel.app):
+  * Login works (Sales user authenticated)
+  * PDF extraction works — provider=text-regex, all fields correct, 0 API calls, ~100ms
+
+Stage Summary:
+- PDF extraction now works on Vercel production using pure-JS text+regex parsing
+- NO API key needed (no Gemini, no ZAI) — works out of the box
+- DB connection fixed (Neon postgres now reachable, login + all API routes work)
+- Sample challan extracted perfectly: challanNumber, date, client, GST, amounts, items all correct
+- The Gemini API key (AQ.Ab8RN6LfnA61OKCzAAZPpmYRkArnQNdzTVAMwBYT59Qy-Z2xQ) is NOT a valid Gemini key (wrong format) but is now irrelevant — text-regex is the primary method and needs no key
