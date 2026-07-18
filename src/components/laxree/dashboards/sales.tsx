@@ -702,9 +702,18 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
       setExtractedFileName(d.pdfFileName || file.name)
 
       const itemCount = Array.isArray(d.items) ? d.items.length : 0
-      setExtractSuccess(
-        `✓ Challan analyzed! Auto-filled ${itemCount} item${itemCount === 1 ? '' : 's'} and all client/financial details from "${d.pdfFileName || file.name}". Review below and submit.`
-      )
+      const warning = data?.warning as string | undefined
+      if (warning) {
+        // Partial extraction — some fields extracted, but not all. Show a softer
+        // success message so the user knows to review and fill missing fields.
+        setExtractSuccess(
+          `✓ Partially auto-filled from "${d.pdfFileName || file.name}" — ${itemCount} item${itemCount === 1 ? '' : 's'} extracted. ${warning} Review the fields below and fill any gaps, then submit.`
+        )
+      } else {
+        setExtractSuccess(
+          `✓ Challan analyzed! Auto-filled ${itemCount} item${itemCount === 1 ? '' : 's'} and all client/financial details from "${d.pdfFileName || file.name}". Review below and submit.`
+        )
+      }
     } catch (e: unknown) {
       setExtractErr(e instanceof Error ? e.message : 'PDF analysis failed. You can still fill the form manually below.')
     } finally {

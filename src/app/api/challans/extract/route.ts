@@ -443,53 +443,108 @@ export async function POST(req: NextRequest) {
 
     // ── METHOD 1: Text + Regex extraction (default — no API key needed) ──
     // This works on Vercel out of the box. Only fails on scanned PDFs (no text layer).
+    // We accept PARTIAL results too — if we extracted ANY useful field, return it
+    // as a success so the user gets pre-filled data they can correct, instead of
+    // an error. This avoids the bad UX of falling back to a broken Gemini key.
+    let textResult: Awaited<ReturnType<typeof extractChallanFromText>> | null = null
     let textExtractionError: string | null = null
     try {
-      const result = await extractChallanFromText(buffer, file.name)
-      // If we got a challan number OR at least one item, consider it a success
-      if (result.challanNumber || result.items.length > 0) {
-        console.log(`[challans/extract] Text extraction success: challan=${result.challanNumber}, items=${result.items.length}`)
-        return NextResponse.json({ ok: true, data: result, provider: 'text-regex' })
+      textResult = await extractChallanFromText(buffer, file.name)
+      // Count how many useful fields we actually extracted
+      const filledFields = [
+        textResult.challanNumber,
+        textResult.clientName,
+        textResult.clientCity,
+        textResult.billingName,
+        textResult.gstNumber,
+        textResult.clientMobile,
+        textResult.amountWithoutGst,
+        textResult.amountWithGst,
+        textResult.amountTotal,
+      ].filter((v) => v !== null && v !== undefined && v !== '').length
+      const hasItems = textResult.items.length > 0
+
+      // Success if we got a challan number, OR any items, OR at least 3 other fields
+      if (textResult.challanNumber || hasItems || filledFields >= 3) {
+        console.log(
+          `[challans/extract] Text extraction success: challan=${textResult.challanNumber}, items=${textResult.items.length}, fields=${filledFields}`
+        )
+        return NextResponse.json({ ok: true, data: textResult, provider: 'text-regex' })
       }
-      textExtractionError = 'Text extraction returned no challan number or items'
-      console.warn('[challans/extract] Text extraction returned no challan number/items — falling back to VLM')
+      textExtractionError = `Text extraction returned too little data (fields=${filledFields}, items=${textResult.items.length})`
+      console.warn(`[challans/extract] Text extraction returned too little data — will try VLM if available`)
     } catch (textErr: unknown) {
       const textMsg = textErr instanceof Error ? textErr.message : String(textErr)
       textExtractionError = textMsg
-      console.warn(`[challans/extract] Text extraction failed: ${textMsg} — falling back to VLM`)
+      console.warn(`[challans/extract] Text extraction threw: ${textMsg}`)
     }
 
     // ── METHOD 2: VLM fallback (for scanned PDFs without text layer) ──
+    // Only attempt this if a VLM provider is configured. If it fails (e.g. Gemini
+    // quota error), we DO NOT surface the scary quota message — instead we return
+    // whatever partial text-regex data we have (or a friendly manual-fill message).
     const provider = await loadProvider()
-    if (!provider) {
-      // No VLM configured AND text extraction failed — tell user to fill manually
-      return NextResponse.json(
-        {
-          error:
-            'Could not extract text from this PDF. ' +
-            (textExtractionError ? `Text extraction error: ${textExtractionError}. ` : '') +
-            'Either fill the form manually below, or set GEMINI_API_KEY env var to enable VLM-based extraction.',
-        },
-        { status: 503 }
-      )
+    if (provider) {
+      try {
+        console.log(`[challans/extract] Falling back to VLM provider: ${provider.kind}`)
+        const raw = await callVlm(provider, buffer, file.name)
+        let parsed_json: Record<string, unknown>
+        try {
+          parsed_json = parseVlmJson(raw)
+        } catch {
+          // VLM returned non-JSON — fall through to partial/manual below
+          console.warn('[challans/extract] VLM output was not valid JSON')
+          parsed_json = {}
+        }
+        const vlmResult = normalizeResult(parsed_json, file.name, buffer.length)
+        // Only accept VLM result if it got something useful
+        if (vlmResult.challanNumber || vlmResult.items.length > 0) {
+          console.log(`[challans/extract] VLM success: challan=${vlmResult.challanNumber}, items=${vlmResult.items.length}`)
+          return NextResponse.json({ ok: true, data: vlmResult, provider: provider.kind })
+        }
+      } catch (vlmErr: unknown) {
+        const vlmMsg = vlmErr instanceof Error ? vlmErr.message : String(vlmErr)
+        console.warn(`[challans/extract] VLM fallback failed (suppressed, not shown to user): ${vlmMsg.slice(0, 150)}`)
+        // Intentionally DO NOT rethrow — we fall through to partial/manual below
+        // so the user never sees a scary "quota limit = 0" / "API key invalid" error.
+      }
     }
 
-    console.log(`[challans/extract] Falling back to VLM provider: ${provider.kind}`)
-    const raw = await callVlm(provider, buffer, file.name)
-
-    let parsed_json: Record<string, unknown>
-    try {
-      parsed_json = parseVlmJson(raw)
-    } catch {
-      return NextResponse.json(
-        { error: 'Could not parse VLM output as JSON. Please try again or fill the form manually.', raw },
-        { status: 502 }
-      )
+    // ── FALLBACK: Return partial text-regex data if we have ANY, else friendly error ──
+    if (textResult) {
+      const filledFields = [
+        textResult.challanNumber,
+        textResult.clientName,
+        textResult.clientCity,
+        textResult.billingName,
+        textResult.gstNumber,
+        textResult.clientMobile,
+        textResult.amountWithoutGst,
+        textResult.amountWithGst,
+        textResult.amountTotal,
+      ].filter((v) => v !== null && v !== undefined && v !== '').length
+      if (filledFields >= 1 || textResult.items.length > 0) {
+        console.log(`[challans/extract] Returning partial text-regex result (fields=${filledFields})`)
+        return NextResponse.json({
+          ok: true,
+          data: textResult,
+          provider: 'text-regex-partial',
+          warning:
+            'Some fields could not be auto-extracted from this PDF. Please review and fill any missing fields manually.',
+        })
+      }
     }
 
-    const result = normalizeResult(parsed_json, file.name, buffer.length)
-    console.log(`[challans/extract] VLM success: challan=${result.challanNumber}, items=${result.items.length}`)
-    return NextResponse.json({ ok: true, data: result, provider: provider.kind })
+    // Nothing extracted at all — friendly message, NEVER the scary quota error
+    return NextResponse.json(
+      {
+        error:
+          'Could not auto-extract data from this PDF. This usually means the PDF is a scanned image (no selectable text). ' +
+          'Please fill the form manually below — the fields are ready for you to enter. ' +
+          (textExtractionError ? `(Technical detail: ${textExtractionError})` : ''),
+      },
+      { status: 503 }
+    )
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[challans/extract] error:', msg)
