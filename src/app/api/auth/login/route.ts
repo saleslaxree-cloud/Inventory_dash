@@ -12,10 +12,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
   }
   if (!user.active) {
-    return NextResponse.json({ error: 'Account disabled' }, { status: 403 })
+    return NextResponse.json({ error: 'Account disabled. Contact Admin.' }, { status: 403 })
   }
   const res = NextResponse.json({
     id: user.id, email: user.email, name: user.name, role: user.role, phone: user.phone,
+    forcePasswordChange: user.forcePasswordChange,
   })
   res.cookies.set('laxree_uid', user.id, {
     httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 7,

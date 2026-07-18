@@ -7,6 +7,7 @@ export type SessionUser = {
   name: string
   role: string
   phone: string | null
+  forcePasswordChange: boolean
 }
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -15,7 +16,7 @@ export async function getSession(): Promise<SessionUser | null> {
   if (!userId) return null
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, phone: true },
+    select: { id: true, email: true, name: true, role: true, phone: true, forcePasswordChange: true },
   })
   return user
 }

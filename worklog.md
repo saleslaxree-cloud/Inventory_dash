@@ -1,30 +1,34 @@
 ---
-Task ID: 1-12
+Task ID: v4-audit
 Agent: main (Z.ai Code)
-Task: Build complete multi-role LaxRee Inventory Management System with 6 role-based credentials, workflow, challan analysis, PR generation, and dispatch tracking.
+Task: Full system audit & upgrade — remove old person names, use department names, add Admin credential, password change, fix bugs, clean cache/unused code, make all data real & working.
 
 Work Log:
-- Designed Prisma schema: User, Item, Challan, ChallanItem, PurchaseRequest, PurchaseRequestItem, WorkflowStage, Message, SupportChecklist
-- Ran db:push + seed script (6 users, 35 master items, 1 sample challan with workflow + messages)
-- Built auth: login/logout/me API routes with cookie-based session
-- Built API routes: items (CRUD), challans (list + upload with auto-analysis), verify-payment, workflow (stages), purchase-requests (auto PR), messages, support-checklist, analytics, users
-- Built shared UI primitives (Card, Badge, StatCard, Btn, Input, Select, Textarea, Modal, EmptyState) with LaxRee navy+gold theme
-- Built LoginScreen with 6 quick-login role buttons
-- Built AppShell (sidebar + topbar + footer) with role-based nav
-- Built 6 role dashboards:
-  - Owner: analytics overview, current stock, fast-moving items, challans list+detail, auto PR generation + print
-  - Sales: challan list, upload form with auto-analysis (MATCHED/WRONG_MODEL/NOT_FOUND), amount received, availability summary
-  - Account: payment notifications, verify payment (approve→coordinator), checklist, e-way/item bill
-  - Coordinator: messages from account, dispatch checklist (packing/QC/vehicle), photos/videos upload per item
-  - Support: pending dispatch, 3-step checklist form (dispatch details→mark dispatched→delivery feedback), all checklists
-  - IT Manager: item master (inward/outward), add item, analytics, users, all challans
-- Verified with Agent Browser: logged in as Owner/Sales/Account/Coordinator/IT Manager/Support, tested each dashboard, PR generation, payment verification, dispatch checklist
+- Cleaned cache: .next, node_modules/.cache, temp screenshots, old HTML preview file
+- Audited codebase: found 5 bugs (broken POST in Account MessagesTab, EditItem creates-new instead of update, Support date bug, PHOTOS_VIDEOS missing from workflow stages, negative pending in analytics)
+- Updated Prisma schema: added ADMIN role, forcePasswordChange field, data default "{}" for WorkflowStage
+- Reset database + re-seeded with 7 users (department names; Owner = "Ashish Agarwal")
+- Updated auth API: login returns forcePasswordChange, added PATCH /api/auth/me for password change
+- Added /api/users/[id]/reset-password (Admin resets user password, forces change)
+- Added /api/items/[id] PATCH (real item editing with inward/outward tracking) + DELETE (soft delete)
+- Added /api/users PATCH (Admin toggles user active status)
+- Fixed Account MessagesTab: removed broken apiPost call, proper PATCH for mark-read
+- Fixed IT Manager EditItemForm: uses PATCH /api/items/[id] instead of creating new
+- Fixed Support pending dispatch: fmtDate(c) → fmtDate(c.expectedDeliveryDate)
+- Fixed analytics: Math.max(0, totalPending) prevents negative
+- Fixed Coordinator PhotosTab: only marks PHOTOS_VIDEOS done (DISPATCH handled by Support)
+- Added PHOTOS_VIDEOS stage to initial workflow creation in challan upload
+- Built AdminDashboard: System Overview (KPIs, users by role, challans by status), User Management (reset password, toggle active), All Challans, All Items (read-only), All Messages
+- Built PasswordChangeModal: forced on first login (forcePasswordChange=true), can't be dismissed until changed
+- Updated AppShell: added password change button (🔑) in sidebar, force-change badge in topbar
+- Updated LoginScreen: 7 roles including Admin, shows default credentials + first-login warning
+- Updated page.tsx: ADMIN role routing, onPasswordChanged handler to refresh session
+- Verified with Agent Browser: Admin login + force password change + Admin dashboard (7 users, 6 pending pw, 35 items, ₹2,85,000 revenue); Owner login + password change + Owner dashboard (Ashish Agarwal in sidebar, analytics data loading); User Management tab showing all department-named users
 
 Stage Summary:
-- Complete multi-role workflow system operational on / route
-- 6 demo accounts (password: laxree123): owner/sales/account/coord/support/it @laxree.com
-- Auto-analysis engine matches challan items against master inventory (35 items seeded)
-- Workflow flows: Sales upload → Account verify → Coordinator dispatch → Support delivery → Owner notified
-- Auto PR raised in "LaxRee Hotel" name with print functionality
-- All API routes return 200/201, no runtime errors, lint clean
-- Production-ready with consistent navy+gold luxury hotel theme
+- 7 roles operational: Admin, Owner (Ashish Agarwal), Sales/Account/Coordinator/Support/IT (department names)
+- Password: Admin=admin123 (now admin456), Owner=laxree123 (now owner123), others=laxree123 (force change on login)
+- All bugs fixed, lint clean, no runtime errors
+- All data real & working: 35 items, 1059 stock, 1 challan, analytics flowing
+- Admin can reset any user's password + enable/disable accounts
+- Force password change on first login for all accounts

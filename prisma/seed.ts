@@ -1,6 +1,13 @@
 import { db } from '../src/lib/db'
 
+// LaxRee IMS v4 — Seed
+// Roles: ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
+// Owner = "Ashish Agarwal" (real person). All others use DEPARTMENT names (no person names).
+// Default password: laxree123 — forcePasswordChange=true so users must change on first login.
+// Admin password: admin123 (also forced change).
+
 const ROLES = {
+  ADMIN: 'ADMIN',
   OWNER: 'OWNER',
   SALES: 'SALES',
   ACCOUNT: 'ACCOUNT',
@@ -10,16 +17,17 @@ const ROLES = {
 } as const
 
 async function main() {
-  console.log('🌱 Seeding LaxRee IMS database...')
+  console.log('🌱 Seeding LaxRee IMS v4...')
 
-  // ── Users (6 roles) ──
+  // ── Users (7 roles, department names; Owner = Ashish Agarwal) ──
   const users = [
-    { email: 'owner@laxree.com',    password: 'laxree123', name: 'Rajesh Mehta',     role: ROLES.OWNER,      phone: '+91 98100 11111' },
-    { email: 'sales@laxree.com',    password: 'laxree123', name: 'Priya Sharma',     role: ROLES.SALES,      phone: '+91 98100 22222' },
-    { email: 'account@laxree.com',  password: 'laxree123', name: 'Amit Verma',       role: ROLES.ACCOUNT,    phone: '+91 98100 33333' },
-    { email: 'coord@laxree.com',    password: 'laxree123', name: 'Sneha Gupta',      role: ROLES.COORDINATOR,phone: '+91 98100 44444' },
-    { email: 'support@laxree.com',  password: 'laxree123', name: 'Vikram Singh',     role: ROLES.SUPPORT,    phone: '+91 98100 55555' },
-    { email: 'it@laxree.com',       password: 'laxree123', name: 'Arjun Nair',       role: ROLES.IT_MANAGER, phone: '+91 98100 66666' },
+    { email: 'admin@laxree.com',    password: 'admin123',  name: 'Admin',              role: ROLES.ADMIN,      phone: '+91 98100 00000', forcePasswordChange: true },
+    { email: 'owner@laxree.com',    password: 'laxree123', name: 'Ashish Agarwal',     role: ROLES.OWNER,      phone: '+91 98100 11111', forcePasswordChange: true },
+    { email: 'sales@laxree.com',    password: 'laxree123', name: 'Sales Department',   role: ROLES.SALES,      phone: '+91 98100 22222', forcePasswordChange: true },
+    { email: 'account@laxree.com',  password: 'laxree123', name: 'Account Department', role: ROLES.ACCOUNT,    phone: '+91 98100 33333', forcePasswordChange: true },
+    { email: 'coord@laxree.com',    password: 'laxree123', name: 'Coordinator Department', role: ROLES.COORDINATOR, phone: '+91 98100 44444', forcePasswordChange: true },
+    { email: 'support@laxree.com',  password: 'laxree123', name: 'Support Department', role: ROLES.SUPPORT,    phone: '+91 98100 55555', forcePasswordChange: true },
+    { email: 'it@laxree.com',       password: 'laxree123', name: 'IT Department',      role: ROLES.IT_MANAGER, phone: '+91 98100 66666', forcePasswordChange: true },
   ]
 
   for (const u of users) {
@@ -29,9 +37,9 @@ async function main() {
       create: u,
     })
   }
-  console.log(`✅ ${users.length} users seeded`)
+  console.log(`✅ ${users.length} users seeded (Admin + Owner + 5 departments)`)
 
-  // ── Master Items (inward/outward catalogue) ──
+  // ── Master Items ──
   const items = [
     // Room Amenities
     { category: 'Room Amenities', itemName: 'MiniBar',            model: 'LR-MB-40L',   colour: 'Black',     currentStock: 24, minStock: 10, fastMoving: true },
@@ -91,7 +99,7 @@ async function main() {
   }
   console.log(`✅ ${items.length} master items seeded`)
 
-  // ── Sample challan (so dashboards have data) ──
+  // ── Sample challan (so dashboards have real working data) ──
   const salesUser = await db.user.findUnique({ where: { email: 'sales@laxree.com' } })
   if (salesUser) {
     const existingChallan = await db.challan.findUnique({ where: { challanNumber: 'CH-2026-0001' } })
@@ -127,16 +135,17 @@ async function main() {
         },
       })
 
-      // Create initial workflow stages
+      // Create initial workflow stages (all 8 stages)
       await db.workflowStage.createMany({
         data: [
-          { challanId: ch.id, stage: 'PAYMENT_VERIFY',  assignedRole: 'ACCOUNT',    status: 'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'PACKING',          assignedRole: 'COORDINATOR',status: 'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'QC',               assignedRole: 'COORDINATOR',status: 'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'VEHICLE_ARRANGEMENT',assignedRole:'COORDINATOR',status:'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'EWAY_BILL',        assignedRole: 'ACCOUNT',    status: 'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'ITEM_BILL',        assignedRole: 'ACCOUNT',    status: 'PENDING', data: '{}' },
-          { challanId: ch.id, stage: 'DISPATCH',         assignedRole: 'SUPPORT',    status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'PAYMENT_VERIFY',     assignedRole: 'ACCOUNT',     status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'PACKING',            assignedRole: 'COORDINATOR', status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'QC',                 assignedRole: 'COORDINATOR', status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'VEHICLE_ARRANGEMENT',assignedRole: 'COORDINATOR', status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'PHOTOS_VIDEOS',      assignedRole: 'COORDINATOR', status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'EWAY_BILL',          assignedRole: 'ACCOUNT',     status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'ITEM_BILL',          assignedRole: 'ACCOUNT',     status: 'PENDING', data: '{}' },
+          { challanId: ch.id, stage: 'DISPATCH',           assignedRole: 'SUPPORT',     status: 'PENDING', data: '{}' },
         ],
       })
 
@@ -152,11 +161,15 @@ async function main() {
         },
       })
 
-      console.log('✅ Sample challan CH-2026-0001 seeded with workflow + message')
+      console.log('✅ Sample challan CH-2026-0001 seeded (8 workflow stages + message)')
     }
   }
 
   console.log('🎉 Seed complete!')
+  console.log('   Login credentials:')
+  console.log('   Admin:  admin@laxree.com / admin123')
+  console.log('   Owner:  owner@laxree.com / laxree123')
+  console.log('   Others: sales/account/coord/support/it @laxree.com / laxree123')
 }
 
 main()

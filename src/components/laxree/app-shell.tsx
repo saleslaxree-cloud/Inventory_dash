@@ -1,12 +1,13 @@
 'use client'
 import { ReactNode, useState } from 'react'
-import { Role, ROLE_META, SessionUser } from './types'
-import { Badge } from './ui'
+import { ROLE_META, SessionUser } from './types'
+import { Badge, Btn } from './ui'
+import { PasswordChangeModal } from './password-change-modal'
 
 export type NavItem = { id: string; label: string; icon: string; badge?: number }
 
 export function AppShell({
-  user, navItems, activeTab, onTabChange, onLogout, children,
+  user, navItems, activeTab, onTabChange, onLogout, children, onPasswordChanged,
 }: {
   user: SessionUser
   navItems: NavItem[]
@@ -14,10 +15,13 @@ export function AppShell({
   onTabChange: (id: string) => void
   onLogout: () => void
   children: ReactNode
+  onPasswordChanged: () => void
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const meta = ROLE_META[user.role]
+  const [pwModal, setPwModal] = useState(false)
+  const meta = ROLE_META[user.role as keyof typeof ROLE_META] || ROLE_META.OWNER
   const active = navItems.find((n) => n.id === activeTab)
+  const forcePw = user.forcePasswordChange
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#07101f] text-[#EDE4D0]">
@@ -37,7 +41,7 @@ export function AppShell({
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             LaxRee Hotel
           </div>
-          <div className="text-[8px] uppercase tracking-[1.5px] text-[#4E6180]">IMS v3</div>
+          <div className="text-[8px] uppercase tracking-[1.5px] text-[#4E6180]">IMS v4</div>
         </div>
 
         {/* Nav */}
@@ -78,9 +82,10 @@ export function AppShell({
               <div className="text-[12px] font-semibold text-[#EDE4D0] truncate">{user.name}</div>
               <div className="text-[9.5px] truncate" style={{ color: meta.color }}>{meta.label}</div>
             </div>
-            <button onClick={onLogout} title="Logout" className="text-[#96A8BF] hover:text-[#E05050] text-base p-1">
-              ⏻
-            </button>
+            <div className="flex flex-col gap-1">
+              <button onClick={() => setPwModal(true)} title="Change Password" className="text-[#96A8BF] hover:text-[#E4AF4A] text-sm p-0.5">🔑</button>
+              <button onClick={onLogout} title="Logout" className="text-[#96A8BF] hover:text-[#E05050] text-sm p-0.5">⏻</button>
+            </div>
           </div>
         </div>
       </aside>
@@ -101,6 +106,7 @@ export function AppShell({
           </div>
           <div className="flex items-center gap-2">
             <Badge label={meta.label} color={meta.color} />
+            {forcePw && <Badge label="Change Password" color="#E09E3C" />}
             <span className="text-[10px] text-[#4E6180] hidden sm:inline">{new Date().toLocaleDateString('en-IN', { weekday:'short', day:'2-digit', month:'short' })}</span>
           </div>
         </header>
@@ -113,9 +119,16 @@ export function AppShell({
         {/* Footer */}
         <footer className="flex items-center justify-between px-4 lg:px-6 h-9 border-t border-white/7 bg-[#0c1928] flex-shrink-0 text-[10px] text-[#4E6180]">
           <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#3CB87A] animate-pulse" /> System Online</span>
-          <span>LaxRee IMS v3 • Multi-Role Workflow</span>
+          <span>LaxRee IMS v4 • Multi-Role Workflow</span>
         </footer>
       </div>
+
+      <PasswordChangeModal
+        user={user}
+        open={pwModal || forcePw}
+        onClose={() => { if (!forcePw) setPwModal(false) }}
+        onDone={() => { setPwModal(false); onPasswordChanged() }}
+      />
     </div>
   )
 }

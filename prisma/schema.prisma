@@ -1,4 +1,5 @@
-// LaxRee Inventory Management System — Multi-Role Workflow Schema
+// LaxRee Inventory Management System v4 — Multi-Role Workflow
+// Roles: ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
 
 generator client {
   provider = "prisma-client-js"
@@ -13,41 +14,42 @@ datasource db {
 // USERS & AUTH
 // ═══════════════════════════════════════════
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String   // OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
-  phone     String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String   // Department name (e.g. "Sales Department") — Owner = "Ashish Agarwal"
+  role          String   // ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
+  phone         String?
+  active        Boolean  @default(true)
+  forcePasswordChange Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  challans           Challan[]
-  purchaseRequests   PurchaseRequest[]
-  messagesSent       Message[]       @relation("MessageSender")
-  workflowActions    WorkflowStage[]
-  supportChecklists  SupportChecklist[]
+  challans          Challan[]
+  purchaseRequests  PurchaseRequest[]
+  messagesSent      Message[]         @relation("MessageSender")
+  workflowActions   WorkflowStage[]
+  supportChecklists SupportChecklist[]
 }
 
 // ═══════════════════════════════════════════
-// MASTER INVENTORY (managed by IT Manager)
+// MASTER INVENTORY (managed by IT Manager / Admin)
 // ═══════════════════════════════════════════
 model Item {
-  id          String   @id @default(cuid())
-  category    String   // Room Amenities, Bathroom Amenities, Lobby Items, etc.
-  itemName    String
-  model       String
-  colour      String?
-  unit        String   @default("PCS")
-  currentStock Int     @default(0)
-  minStock    Int      @default(5)
-  fastMoving  Boolean  @default(false)
-  inwardCount Int      @default(0)
-  outwardCount Int     @default(0)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  category     String
+  itemName     String
+  model        String
+  colour       String?
+  unit         String   @default("PCS")
+  currentStock Int      @default(0)
+  minStock     Int      @default(5)
+  fastMoving   Boolean  @default(false)
+  inwardCount  Int      @default(0)
+  outwardCount Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   challanItems ChallanItem[]
   prItems      PurchaseRequestItem[]
@@ -66,19 +68,16 @@ model Challan {
   expectedDeliveryDate DateTime?
   date                DateTime @default(now())
 
-  // Payment
   amountTotal         Float    @default(0)
   amountAdvance       Float    @default(0)
   amountReceived      Float    @default(0)
-  paymentType         String   @default("ADVANCE") // FULL | ADVANCE | NONE
-  paymentStatus       String   @default("PENDING") // PENDING | PARTIAL | PAID
+  paymentType         String   @default("ADVANCE")
+  paymentStatus       String   @default("PENDING")
   accountVerified     Boolean  @default(false)
   accountVerifiedById String?
   accountVerifiedAt   DateTime?
 
-  // Status flow
   status              String   @default("UPLOADED")
-  // UPLOADED -> PAYMENT_VERIFIED -> PACKING -> QC -> VEHICLE -> EWAY_BILL -> DISPATCHED -> IN_TRANSIT -> DELIVERED -> FEEDBACK -> CLOSED
 
   uploadedById        String
   uploadedBy          User     @relation(fields: [uploadedById], references: [id])
@@ -93,7 +92,6 @@ model Challan {
   updatedAt           DateTime @updatedAt
 }
 
-// Items extracted/analyzed from challan upload
 model ChallanItem {
   id          String   @id @default(cuid())
   challanId   String
@@ -105,12 +103,10 @@ model ChallanItem {
   colour      String?
   quantity    Int      @default(1)
 
-  // Analysis result
-  status      String   @default("PENDING") // MATCHED | WRONG_MODEL | NOT_FOUND | PENDING
+  status      String   @default("PENDING")
   matchedItemId String?
   matchedItem Item?    @relation(fields: [matchedItemId], references: [id])
 
-  // Admin correction
   correctedItemId String?
   corrected       Boolean @default(false)
 
@@ -130,7 +126,7 @@ model PurchaseRequest {
   challanId   String?
   challan     Challan? @relation(fields: [challanId], references: [id])
 
-  status      String   @default("DRAFT") // DRAFT | PRINTED | SENT
+  status      String   @default("DRAFT")
   notes       String?
 
   items       PurchaseRequestItem[]
@@ -158,10 +154,10 @@ model WorkflowStage {
   challanId   String
   challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
 
-  stage       String   // PACKING | QC | VEHICLE_ARRANGEMENT | EWAY_BILL | ITEM_BILL | DISPATCH | PHOTOS_VIDEOS | ADMIN_VERIFY
-  assignedRole String  // ACCOUNT | COORDINATOR | SUPPORT
-  status      String   @default("PENDING") // PENDING | IN_PROGRESS | DONE | SKIPPED
-  data        String   // JSON string for stage-specific data
+  stage       String
+  assignedRole String
+  status      String   @default("PENDING")
+  data        String   @default("{}")
   notes       String?
 
   doneById    String?
@@ -187,7 +183,7 @@ model Message {
 
   subject     String
   body        String
-  attachments String?  // JSON array of file names/urls
+  attachments String?
   read        Boolean  @default(false)
 
   createdAt   DateTime @default(now())
@@ -221,7 +217,7 @@ model SupportChecklist {
   createdById           String
   createdBy             User     @relation(fields: [createdById], references: [id])
 
-  status                String   @default("DRAFT") // DRAFT | DISPATCHED | DELIVERED | COMPLETED
+  status                String   @default("DRAFT")
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt

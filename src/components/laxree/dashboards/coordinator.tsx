@@ -212,9 +212,8 @@ function PhotosTab() {
       files.forEach((f) => allFiles.push(`${item}:${f}`))
     })
     if (allFiles.length === 0) { alert('Add at least one photo/video'); return }
+    // Only mark PHOTOS_VIDEOS done — DISPATCH is handled by Support team
     await apiPost(`/api/challans/${sel.id}/workflow`, { stage: 'PHOTOS_VIDEOS', status: 'DONE', data: { attachments: allFiles } })
-    // Also mark DISPATCH done
-    await apiPost(`/api/challans/${sel.id}/workflow`, { stage: 'DISPATCH', status: 'DONE', data: { photosUploaded: allFiles.length } })
     setSel(null); setPhotos({})
   }
 
@@ -265,7 +264,7 @@ function PhotosTab() {
             ))}
             <div className="flex justify-end gap-2">
               <Btn onClick={() => setSel(null)}>Cancel</Btn>
-              <Btn variant="gold" onClick={upload}>📤 Upload & Dispatch → Notify Support</Btn>
+              <Btn variant="gold" onClick={upload}>📤 Upload Photos → Notify Admin</Btn>
             </div>
           </div>
         )}

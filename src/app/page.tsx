@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { SessionUser } from '@/components/laxree/types'
 import { LoginScreen } from '@/components/laxree/login-screen'
 import { AppShell, NavItem } from '@/components/laxree/app-shell'
+import { AdminDashboard } from '@/components/laxree/dashboards/admin'
 import { OwnerDashboard } from '@/components/laxree/dashboards/owner'
 import { SalesDashboard } from '@/components/laxree/dashboards/sales'
 import { AccountDashboard } from '@/components/laxree/dashboards/account'
@@ -15,7 +16,7 @@ export default function Home() {
   const [checking, setChecking] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
 
-  // Check existing session
+  // Check existing session on mount
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.ok ? r.json() : null)
@@ -27,6 +28,14 @@ export default function Home() {
     await fetch('/api/auth/logout', { method: 'POST' })
     setUser(null)
     setActiveTab('overview')
+  }
+
+  const refreshUser = async () => {
+    const res = await fetch('/api/auth/me')
+    if (res.ok) {
+      const d = await res.json()
+      if (d?.user) setUser(d.user)
+    }
   }
 
   if (checking) {
@@ -48,6 +57,13 @@ export default function Home() {
 
   // Role-based nav + default tab
   const roleNav: Record<string, NavItem[]> = {
+    ADMIN: [
+      { id:'overview', label:'System Overview', icon:'📊' },
+      { id:'users', label:'User Management', icon:'👥' },
+      { id:'challans', label:'All Challans', icon:'🧾' },
+      { id:'items', label:'All Items', icon:'📦' },
+      { id:'messages', label:'All Messages', icon:'✉️' },
+    ],
     OWNER: [
       { id:'overview', label:'Overview', icon:'📊' },
       { id:'stock', label:'Current Stock', icon:'📦' },
@@ -93,7 +109,9 @@ export default function Home() {
       activeTab={currentTab}
       onTabChange={setActiveTab}
       onLogout={logout}
+      onPasswordChanged={refreshUser}
     >
+      {user.role === 'ADMIN' && <AdminDashboard user={user} />}
       {user.role === 'OWNER' && <OwnerDashboard user={user} />}
       {user.role === 'SALES' && <SalesDashboard user={user} />}
       {user.role === 'ACCOUNT' && <AccountDashboard user={user} />}

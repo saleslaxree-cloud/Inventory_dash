@@ -6,7 +6,7 @@ import { fmtDate, STATUS_COLORS, SessionUser } from '../types'
 
 type Challan = {
   id:string; challanNumber:string; clientName:string; clientCity:string; clientMobile:string|null; clientLocation:string|null;
-  amountTotal:number; status:string;
+  expectedDeliveryDate:string|null; amountTotal:number; status:string;
   challanItems:{id:string;itemName:string;quantity:number}[];
 }
 type Checklist = {
@@ -69,7 +69,7 @@ function PendingTab({ onChanged }: { onChanged: () => void }) {
                 <div className="font-mono text-[12px] text-[#E4AF4A] mb-1">{c.challanNumber}</div>
                 <div className="text-[13px] text-[#EDE4D0] font-medium">{c.clientName}</div>
                 <div className="text-[11px] text-[#96A8BF]">{c.clientCity}</div>
-                <div className="text-[10px] text-[#4E6180] mt-1">{c.challanItems.length} items • {fmtDate(c)}</div>
+                <div className="text-[10px] text-[#4E6180] mt-1">{c.challanItems.length} items • Exp: {fmtDate(c.expectedDeliveryDate)}</div>
               </button>
             ))}
           </div>

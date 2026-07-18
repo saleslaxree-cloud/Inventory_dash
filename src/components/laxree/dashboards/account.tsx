@@ -49,7 +49,14 @@ function MessagesTab({ onAction }: { onAction: () => void }) {
   if (!data) return null
 
   const markRead = async (m: Message) => {
-    if (!m.read) { await apiPost('/api/messages', {}).catch(()=>{}); fetch('/api/messages', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:m.id})}); refresh() }
+    if (!m.read) {
+      await fetch('/api/messages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: m.id }),
+      })
+      refresh()
+    }
     setSel(m)
   }
 

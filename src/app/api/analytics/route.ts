@@ -30,7 +30,7 @@ export async function GET() {
 
   const totalRevenue = challans.reduce((s, c) => s + c.amountTotal, 0)
   const totalReceived = challans.reduce((s, c) => s + c.amountReceived, 0)
-  const totalPending = totalRevenue - totalReceived
+  const totalPending = Math.max(0, totalRevenue - totalReceived)
 
   return NextResponse.json({
     totalItems,

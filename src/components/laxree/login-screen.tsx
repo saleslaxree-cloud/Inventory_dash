@@ -3,13 +3,14 @@ import { useState } from 'react'
 import { Role, ROLE_META, SessionUser } from './types'
 import { Btn, Input } from './ui'
 
-const DEMO_ACCOUNTS: { role: Role; email: string }[] = [
-  { role: 'OWNER',       email: 'owner@laxree.com' },
-  { role: 'SALES',       email: 'sales@laxree.com' },
-  { role: 'ACCOUNT',     email: 'account@laxree.com' },
-  { role: 'COORDINATOR', email: 'coord@laxree.com' },
-  { role: 'SUPPORT',     email: 'support@laxree.com' },
-  { role: 'IT_MANAGER',  email: 'it@laxree.com' },
+const DEMO_ACCOUNTS: { role: Role; email: string; password: string }[] = [
+  { role: 'ADMIN',       email: 'admin@laxree.com',   password: 'admin123' },
+  { role: 'OWNER',       email: 'owner@laxree.com',   password: 'laxree123' },
+  { role: 'SALES',       email: 'sales@laxree.com',   password: 'laxree123' },
+  { role: 'ACCOUNT',     email: 'account@laxree.com', password: 'laxree123' },
+  { role: 'COORDINATOR', email: 'coord@laxree.com',   password: 'laxree123' },
+  { role: 'SUPPORT',     email: 'support@laxree.com', password: 'laxree123' },
+  { role: 'IT_MANAGER',  email: 'it@laxree.com',      password: 'laxree123' },
 ]
 
 export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) {
@@ -38,9 +39,9 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
     }
   }
 
-  const quickLogin = (em: string) => {
+  const quickLogin = (em: string, pw: string) => {
     setEmail(em)
-    setPassword('laxree123')
+    setPassword(pw)
   }
 
   return (
@@ -59,10 +60,10 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             LaxRee Hotel
           </h1>
-          <p className="text-[11px] uppercase tracking-[3px] text-[#4E6180] mb-6">Inventory Management System v3</p>
+          <p className="text-[11px] uppercase tracking-[3px] text-[#4E6180] mb-6">Inventory Management System v4</p>
           <p className="text-sm text-[#96A8BF] leading-relaxed mb-8">
             Multi-role workflow platform — from challan upload to dispatch &amp; delivery feedback.
-            Owner, Sales, Account, Coordinator, Support &amp; IT Manager — each with their own dashboard.
+            Admin, Owner, Sales, Account, Coordinator, Support &amp; IT Manager — each with their own dashboard.
           </p>
 
           <div className="grid grid-cols-2 gap-2 text-left">
@@ -71,7 +72,7 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
               return (
                 <button
                   key={a.role}
-                  onClick={() => quickLogin(a.email)}
+                  onClick={() => quickLogin(a.email, a.password)}
                   className="group flex items-center gap-2.5 rounded-lg border border-white/7 bg-white/[0.02] px-3 py-2.5 text-left transition-all hover:border-[#C8922A]/30 hover:bg-white/5"
                 >
                   <span className="text-lg">{meta.icon}</span>
@@ -83,7 +84,7 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
               )
             })}
           </div>
-          <p className="mt-4 text-[10px] text-[#4E6180]">Click a role to autofill • Password: <span className="text-[#96A8BF]">laxree123</span></p>
+          <p className="mt-4 text-[10px] text-[#4E6180]">Click a role to autofill credentials</p>
         </div>
       </div>
 
@@ -109,8 +110,10 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
           </Btn>
 
           <div className="mt-6 rounded-lg border border-white/7 bg-white/[0.02] p-3">
-            <p className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-1.5">Demo Credentials</p>
-            <p className="text-[11px] text-[#96A8BF]">All accounts share password <span className="font-mono text-[#E4AF4A]">laxree123</span></p>
+            <p className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-1.5">Default Credentials</p>
+            <p className="text-[11px] text-[#96A8BF]">Admin: <span className="font-mono text-[#E05050]">admin@laxree.com / admin123</span></p>
+            <p className="text-[11px] text-[#96A8BF]">Others: <span className="font-mono text-[#E4AF4A]">/ laxree123</span></p>
+            <p className="text-[10px] text-[#E09E3C] mt-1">⚠ First login requires password change</p>
           </div>
         </form>
       </div>

@@ -106,8 +106,14 @@ function EditItemForm({ item }: { item: Item }) {
     setSaving(true)
     setMsg('')
     try {
-      await apiPost('/api/items', form) // Note: this creates new; for edit we'd need a PATCH endpoint
-      setMsg('✓ Item updated (new entry created)')
+      const res = await fetch(`/api/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed')
+      setMsg('✓ Item updated successfully')
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Failed')
     } finally { setSaving(false) }

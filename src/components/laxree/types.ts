@@ -1,4 +1,4 @@
-export type Role = 'OWNER' | 'SALES' | 'ACCOUNT' | 'COORDINATOR' | 'SUPPORT' | 'IT_MANAGER'
+export type Role = 'ADMIN' | 'OWNER' | 'SALES' | 'ACCOUNT' | 'COORDINATOR' | 'SUPPORT' | 'IT_MANAGER'
 
 export type SessionUser = {
   id: string
@@ -6,15 +6,17 @@ export type SessionUser = {
   name: string
   role: Role
   phone: string | null
+  forcePasswordChange: boolean
 }
 
 export const ROLE_META: Record<Role, { label: string; color: string; icon: string; desc: string }> = {
+  ADMIN:      { label: 'Admin',         color: '#E05050', icon: '🛡️', desc: 'Full system control, user management, password reset' },
   OWNER:      { label: 'Owner',         color: '#E4AF4A', icon: '👑', desc: 'Dashboard, stock, fast-moving, auto PR + print' },
   SALES:      { label: 'Sales',         color: '#4A9EE0', icon: '💼', desc: 'Upload challan, auto-analysis, amount received' },
   ACCOUNT:    { label: 'Account Team',  color: '#3CB87A', icon: '💰', desc: 'Verify payment, e-way bill, item bill' },
   COORDINATOR:{ label: 'Coordinator',   color: '#9B6ED4', icon: '📋', desc: 'Packing, QC, vehicle, photos/videos' },
   SUPPORT:    { label: 'Support',       color: '#E09E3C', icon: '🚚', desc: 'Dispatch checklist, delivery feedback' },
-  IT_MANAGER: { label: 'IT Manager',    color: '#E05050', icon: '⚙️', desc: 'Full edit, item CRUD, analytics' },
+  IT_MANAGER: { label: 'IT Manager',    color: '#9B6ED4', icon: '⚙️', desc: 'Full edit, item CRUD, analytics' },
 }
 
 export const NAVY  = { 0:'#07101f',1:'#0c1928',2:'#111f32',3:'#192b42',4:'#1e3350' }
