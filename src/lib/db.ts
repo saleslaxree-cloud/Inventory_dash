@@ -1,11 +1,18 @@
 import { PrismaClient } from '@prisma/client'
 import { config as loadEnv } from 'dotenv'
 
-// Ensure environment variables are loaded (needed when running scripts
-// like `bun run db:seed` outside of Next.js, which auto-loads .env).
-// `override: true` ensures the .env file always wins over any stale
-// process.env value (e.g. a leftover SQLite URL from a previous session).
-loadEnv({ override: true })
+// Ensure environment variables are loaded when running scripts outside of
+// Next.js (e.g. `bun run db:seed`), which auto-loads .env on its own.
+//
+// CRITICAL: Only load .env in NON-production environments. On Vercel
+// (NODE_ENV=production), env vars are injected by the platform and MUST NOT
+// be overridden by a committed .env file — otherwise a stale local SQLite
+// URL (file:...) would clobber the real Neon postgres URL and break the DB.
+// `override: true` is used in dev so the .env file wins over any stale
+// process.env value from a previous session.
+if (process.env.NODE_ENV !== 'production') {
+  loadEnv({ override: true })
+}
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
