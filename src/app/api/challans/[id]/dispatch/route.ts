@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/[id]/dispatch
 // Body: { }
@@ -62,6 +63,42 @@ DISPATCH IMAGES: ${dispatchImages} item(s) with images
 
 Please send tracking details to client via WhatsApp and email.`,
     },
+  })
+
+  // ── FIRE NOTIFICATION to Support: challan dispatched, send tracking ──
+  await notify({
+    toRole: 'SUPPORT',
+    fromRole: 'COORDINATOR',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'DISPATCHED',
+    title: '🚚 Challan Dispatched',
+    body: `Challan ${challan.challanNumber} dispatched for ${challan.clientName} (${challan.clientCity}). Vehicle: ${challan.vehicleNumber || 'N/A'}. Send tracking details to client.`,
+    icon: '🚚',
+  })
+
+  // ── FIRE NOTIFICATION to Sales: your challan dispatched ──
+  await notify({
+    toRole: 'SALES',
+    fromRole: 'COORDINATOR',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'DISPATCHED',
+    title: '🚚 Challan Dispatched',
+    body: `Your challan ${challan.challanNumber} (${challan.clientName}) has been dispatched. Vehicle: ${challan.vehicleNumber || 'N/A'}.`,
+    icon: '🚚',
+  })
+
+  // ── FIRE NOTIFICATION to Account: challan dispatched (FYI) ──
+  await notify({
+    toRole: 'ACCOUNT',
+    fromRole: 'COORDINATOR',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'DISPATCHED',
+    title: '🚚 Challan Dispatched',
+    body: `Challan ${challan.challanNumber} (${challan.clientName}) dispatched by ${user.name}. Freight: ₹${challan.freightAmount}.`,
+    icon: '🚚',
   })
 
   return NextResponse.json({ ok: true, message: 'Challan dispatched, sent to Support team' })

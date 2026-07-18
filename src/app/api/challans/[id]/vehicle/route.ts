@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/[id]/vehicle
 // Body: { freightAmount, transporterName, vehicleNumber }
@@ -40,6 +41,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     data: { status: 'DONE', doneById: user.id, doneAt: new Date(),
       data: JSON.stringify({ freightAmount, transporterName, vehicleNumber, arrangedBy: user.name }),
     },
+  })
+
+  // ── FIRE NOTIFICATION to Support: vehicle arranged, ready for dispatch ──
+  await notify({
+    toRole: 'SUPPORT',
+    fromRole: 'COORDINATOR',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'VEHICLE_ARRANGED',
+    title: '🚛 Vehicle Arranged',
+    body: `Vehicle arranged for challan ${challan.challanNumber} (${challan.clientName}). Transporter: ${transporterName || 'N/A'}, Vehicle: ${vehicleNumber || 'N/A'}. Ready for dispatch.`,
+    icon: '🚛',
+  })
+
+  // ── FIRE NOTIFICATION to Sales: vehicle arranged for your challan ──
+  await notify({
+    toRole: 'SALES',
+    fromRole: 'COORDINATOR',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'VEHICLE_ARRANGED',
+    title: '🚛 Vehicle Arranged',
+    body: `Vehicle arranged for your challan ${challan.challanNumber} (${challan.clientName}). Dispatch in progress.`,
+    icon: '🚛',
   })
 
   return NextResponse.json({ ok: true, message: 'Vehicle arranged successfully' })

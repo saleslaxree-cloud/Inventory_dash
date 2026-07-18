@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/[id]/verify-payment
 // Body: { verified: boolean, receivedAmount?, rejectReason? }
@@ -44,6 +45,18 @@ Reason: ${rejectReason || 'Payment could not be verified in bank'}
 
 Please follow up with the client and re-upload with corrected payment details.`,
       },
+    })
+
+    // ── FIRE NOTIFICATION to Sales: payment rejected ──
+    await notify({
+      toRole: 'SALES',
+      fromRole: 'ACCOUNT',
+      fromUserId: user.id,
+      challanId: id,
+      type: 'REJECTED',
+      title: '⚠️ Payment Rejected',
+      body: `Payment for challan ${challan.challanNumber} (${challan.clientName}) was rejected by ${user.name}. Reason: ${rejectReason || 'could not be verified'}. Follow up with client.`,
+      icon: '⚠️',
     })
 
     return NextResponse.json({ ok: true, message: 'Payment rejected, sent back to Sales' })
@@ -105,6 +118,30 @@ Please proceed with coordinator audit → warehouse → vehicle arrangement → 
       subject: `✅ Payment verified — proceed with audit — ${challan.challanNumber}`,
       body: checklistMsg,
     },
+  })
+
+  // ── FIRE NOTIFICATION to Coordinator: payment verified, start audit ──
+  await notify({
+    toRole: 'COORDINATOR',
+    fromRole: 'ACCOUNT',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'PAYMENT_VERIFIED',
+    title: '✅ Payment Verified',
+    body: `${user.name} verified payment for challan ${challan.challanNumber} (${challan.clientName}). Received ₹${amtReceived} of ₹${challan.amountTotal}. Proceed with coordinator audit.`,
+    icon: '✅',
+  })
+
+  // ── FIRE NOTIFICATION to Sales: your challan payment is verified ──
+  await notify({
+    toRole: 'SALES',
+    fromRole: 'ACCOUNT',
+    fromUserId: user.id,
+    challanId: id,
+    type: 'PAYMENT_VERIFIED',
+    title: '✅ Payment Verified',
+    body: `Payment for your challan ${challan.challanNumber} (${challan.clientName}) has been verified by ${user.name}. Now in coordinator audit.`,
+    icon: '✅',
   })
 
   return NextResponse.json({ ok: true, message: 'Payment verified, sent to Coordinator' })

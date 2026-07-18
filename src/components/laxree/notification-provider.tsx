@@ -67,7 +67,7 @@ export function NotificationProvider({ user, children }: {
           for (const n of newOnes) {
             setTimeout(() => {
               setToasts((prev) => prev.filter((t) => t.id !== n.id))
-            }, 9000)
+            }, 12000)
           }
         }
       }
@@ -110,10 +110,10 @@ export function NotificationProvider({ user, children }: {
 
       // Show toast popup
       setToasts((prev) => [...prev, n])
-      // Auto-dismiss after 9 seconds
+      // Auto-dismiss after 12 seconds
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== n.id))
-      }, 9000)
+      }, 12000)
     })
 
     return () => { sock.disconnect() }
@@ -188,7 +188,7 @@ export function NotificationProvider({ user, children }: {
       )}
 
       {/* ── Big beautiful toast popups (bottom-right stack) ── */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3 w-[400px] max-w-[calc(100vw-2rem)]">
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3 w-[520px] max-w-[calc(100vw-2rem)]">
         {toasts.map((n) => (
           <Toast key={n.id} n={n} onDismiss={() => dismissToast(n.id)} />
         ))}
@@ -202,7 +202,7 @@ function Toast({ n, onDismiss }: { n: AppNotification; onDismiss: () => void }) 
   const [progress, setProgress] = useState(100)
   useEffect(() => {
     const start = Date.now()
-    const duration = 9000
+    const duration = 12000
     const iv = setInterval(() => {
       const elapsed = Date.now() - start
       const pct = Math.max(0, 100 - (elapsed / duration) * 100)
@@ -213,29 +213,42 @@ function Toast({ n, onDismiss }: { n: AppNotification; onDismiss: () => void }) 
   }, [])
   return (
     <div
-      className="relative rounded-2xl overflow-hidden border shadow-2xl bg-[#0c1928] animate-[notifPop_0.45s_cubic-bezier(0.22,1.2,0.36,1)]"
+      className="relative rounded-2xl overflow-hidden border shadow-2xl bg-[#0c1928] animate-[notifPop_0.5s_cubic-bezier(0.22,1.2,0.36,1)]"
       style={{
-        borderColor: `${color.border}66`,
-        boxShadow: `0 12px 40px -8px ${color.glow}, 0 0 0 1px ${color.border}22`,
+        borderColor: `${color.border}88`,
+        boxShadow: `0 20px 60px -10px ${color.glow}, 0 0 0 1px ${color.border}33, 0 0 80px -20px ${color.glow}`,
       }}
     >
-      {/* Gradient header strip */}
+      {/* Thick gradient header strip */}
       <div
-        className="h-1.5"
-        style={{ background: `linear-gradient(90deg, ${color.border}, ${color.accent})` }}
+        className="h-2"
+        style={{ background: `linear-gradient(90deg, ${color.border}, ${color.accent}, ${color.border})` }}
       />
 
-      {/* Glow halo behind icon */}
-      <div className="p-4">
-        <div className="flex items-start gap-3.5">
+      {/* Glow halo behind entire card */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: `radial-gradient(ellipse at top right, ${color.glow}, transparent 60%)` }}
+      />
+
+      <div className="relative p-5">
+        <div className="flex items-start gap-4">
+          {/* Big icon with pulsing ring */}
           <div className="relative flex-shrink-0">
+            {/* Outer pulsing ring */}
             <div
-              className="absolute inset-0 rounded-2xl blur-lg animate-pulse"
+              className="absolute -inset-1 rounded-2xl animate-ping opacity-40"
               style={{ background: color.glow }}
             />
+            {/* Glow halo */}
             <div
-              className="relative flex h-14 w-14 items-center justify-center rounded-2xl border text-3xl bg-[#07101f]"
-              style={{ borderColor: `${color.border}55`, boxShadow: `inset 0 0 12px ${color.glow}` }}
+              className="absolute inset-0 rounded-2xl blur-xl animate-pulse"
+              style={{ background: color.glow }}
+            />
+            {/* Icon box */}
+            <div
+              className="relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 text-4xl bg-[#07101f]"
+              style={{ borderColor: `${color.border}66`, boxShadow: `inset 0 0 16px ${color.glow}` }}
             >
               {n.icon}
             </div>
@@ -243,43 +256,52 @@ function Toast({ n, onDismiss }: { n: AppNotification; onDismiss: () => void }) 
 
           <div className="min-w-0 flex-1 pt-0.5">
             <div className="flex items-start justify-between gap-2">
-              <div className="text-[15px] font-bold leading-tight" style={{ color: color.accent }}>
-                {n.title}
+              <div className="flex items-center gap-2">
+                {/* NEW badge */}
+                <span
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-black tracking-wider uppercase"
+                  style={{ background: color.border, color: '#07101f' }}
+                >
+                  NEW
+                </span>
+                <div className="text-[18px] font-bold leading-tight" style={{ color: color.accent }}>
+                  {n.title}
+                </div>
               </div>
               <button
                 onClick={onDismiss}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-[#4E6180] hover:text-[#EDE4D0] hover:bg-white/5 transition-all flex-shrink-0"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[#4E6180] hover:text-[#EDE4D0] hover:bg-white/10 transition-all flex-shrink-0"
                 aria-label="Dismiss"
               >
                 ✕
               </button>
             </div>
-            <div className="text-[13px] text-[#EDE4D0] mt-1.5 break-words leading-relaxed">
+            <div className="text-[14.5px] text-[#EDE4D0] mt-2 break-words leading-relaxed">
               {n.body}
             </div>
-            <div className="flex items-center gap-2 mt-2.5">
+            <div className="flex items-center gap-2.5 mt-3">
               <div
-                className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                style={{ background: `${color.border}1a`, color: color.accent, border: `1px solid ${color.border}33` }}
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold"
+                style={{ background: `${color.border}1a`, color: color.accent, border: `1px solid ${color.border}44` }}
               >
-                <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: color.accent }} />
+                <span className="h-2 w-2 rounded-full animate-pulse" style={{ background: color.accent }} />
                 {n.fromRole ? n.fromRole.replace(/_/g, ' ') : 'SYSTEM'}
               </div>
-              <span className="text-[10px] text-[#4E6180]">{fmtRelative(n.createdAt)}</span>
+              <span className="text-[11px] text-[#4E6180]">{fmtRelative(n.createdAt)}</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Auto-dismiss progress bar */}
-      <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
+      <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/40">
         <div
           className="h-full transition-[width] duration-75 ease-linear"
           style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${color.border}, ${color.accent})` }}
         />
       </div>
 
-      <style>{`@keyframes notifPop { 0% { transform: translateX(120%) scale(0.85); opacity: 0 } 60% { transform: translateX(-8px) scale(1.02); opacity: 1 } 100% { transform: translateX(0) scale(1); opacity: 1 } }`}</style>
+      <style>{`@keyframes notifPop { 0% { transform: translateX(120%) scale(0.8); opacity: 0 } 55% { transform: translateX(-10px) scale(1.03); opacity: 1 } 100% { transform: translateX(0) scale(1); opacity: 1 } }`}</style>
     </div>
   )
 }

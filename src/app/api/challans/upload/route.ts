@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/upload
 // Body: { challanNumber, quotationNumber, clientName, clientCity, clientMobile,
@@ -238,6 +239,37 @@ Please verify in bank and approve to proceed.`,
       },
     })
   }
+
+  // ── FIRE NOTIFICATION to Account team: new challan, verify payment ──
+  const paymentNote =
+    pMode === 'FULL'
+      ? `Full payment ₹${amtTotal} received.`
+      : pMode === 'PARTIAL'
+      ? `Advance ₹${amtAdvance} of ₹${amtTotal} received.`
+      : `No payment received yet (total ₹${amtTotal}).`
+
+  await notify({
+    toRole: 'ACCOUNT',
+    fromRole: user.role,
+    fromUserId: user.id,
+    challanId: challan.id,
+    type: 'NEW_CHALLAN',
+    title: '🧾 New Challan Uploaded',
+    body: `${user.name} sent challan ${challanNumber} for ${clientName}. ${paymentNote} Check payment received or not.`,
+    icon: '🧾',
+  })
+
+  // ── FIRE NOTIFICATION to Coordinator: new challan in pipeline ──
+  await notify({
+    toRole: 'COORDINATOR',
+    fromRole: user.role,
+    fromUserId: user.id,
+    challanId: challan.id,
+    type: 'NEW_CHALLAN',
+    title: '🧾 New Challan in Pipeline',
+    body: `Challan ${challanNumber} (${clientName}, ${clientCity || 'N/A'}) uploaded by ${user.name}. Pending account verification.`,
+    icon: '🧾',
+  })
 
   const availableCount = analyzedItems.filter((i) => i.stockStatus === 'AVAILABLE').length
   const willBeAvailableCount = analyzedItems.filter((i) => i.stockStatus === 'WILL_BE_AVAILABLE').length

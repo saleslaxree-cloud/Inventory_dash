@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/[id]/warehouse
 // Body: { itemId, warehouseStatus: 'QUALITY_CHECK'|'PACKAGING'|'DONE', notes? }
@@ -56,6 +57,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         where: { challanId: id, stage: 'VEHICLE_ARRANGEMENT' },
         data: { status: 'IN_PROGRESS' },
       })
+
+      // ── FIRE NOTIFICATION: warehouse done (QC + packing complete) ──
+      const whChallan = await db.challan.findUnique({ where: { id }, select: { challanNumber: true, clientName: true } })
+      if (whChallan) {
+        await notify({
+          toRole: 'ACCOUNT',
+          fromRole: 'COORDINATOR',
+          fromUserId: user.id,
+          challanId: id,
+          type: 'WAREHOUSE_DONE',
+          title: '🏭 Warehouse Complete',
+          body: `QC & packing done for challan ${whChallan.challanNumber} (${whChallan.clientName}). Upload E-Way Bill & Item Bill now.`,
+          icon: '🏭',
+        })
+        await notify({
+          toRole: 'SALES',
+          fromRole: 'COORDINATOR',
+          fromUserId: user.id,
+          challanId: id,
+          type: 'WAREHOUSE_DONE',
+          title: '🏭 Warehouse Complete',
+          body: `QC & packing complete for your challan ${whChallan.challanNumber} (${whChallan.clientName}). Vehicle arrangement in progress.`,
+          icon: '🏭',
+        })
+      }
     }
   }
 
