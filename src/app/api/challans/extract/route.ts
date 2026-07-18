@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { extractChallanFromText } from '@/lib/pdf-text-extract'
+import { extractChallanFromText, extractChallanFields } from '@/lib/pdf-text-extract'
+import { extractPdfTextWithOcr } from '@/lib/pdf-ocr'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
@@ -21,7 +22,7 @@ import os from 'os'
 // This means PDF extraction works OUT OF THE BOX on Vercel with no
 // configuration. The VLM is only needed for edge cases (scanned PDFs).
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 120
 export const dynamic = 'force-dynamic'
 
 const EXTRACTION_PROMPT = `You are a challan/invoice parser for the Laxree Hotel Supplies company.
@@ -510,7 +511,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── FALLBACK: Return partial text-regex data if we have ANY, else friendly error ──
+    // ── FALLBACK 1: Return partial text-regex data if we have ANY ──
     if (textResult) {
       const filledFields = [
         textResult.challanNumber,
@@ -535,11 +536,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Nothing extracted at all — friendly message, NEVER the scary quota error
+    // ── FALLBACK 2: OCR for scanned PDFs (no text layer) ──
+    // If text-regex got literally nothing, the PDF is likely a scanned image.
+    // Run Tesseract.js OCR to extract text from the page images, then re-run
+    // the regex extraction on the OCR'd text. No API key needed — runs in the
+    // serverless function. May take 10-30s.
+    console.log('[challans/extract] Text extraction returned no data — trying OCR fallback')
+    try {
+      const ocrText = await extractPdfTextWithOcr(buffer, 3)
+      if (ocrText && ocrText.trim().length > 20) {
+        console.log(`[challans/extract] OCR extracted ${ocrText.length} chars — re-running regex extraction`)
+        // Re-run the regex extraction on the OCR'd text by creating a temp
+        // function that takes pre-extracted text. We'll reuse extractChallanFromText
+        // by writing the OCR text to a temp buffer... actually, let's just parse
+        // the OCR text directly with the same regex logic.
+        const ocrResult = extractChallanFields(ocrText, file.name, buffer.length)
+        if (ocrResult && (ocrResult.challanNumber || ocrResult.items.length > 0)) {
+          console.log(`[challans/extract] OCR success: challan=${ocrResult.challanNumber}, items=${ocrResult.items.length}`)
+          return NextResponse.json({
+            ok: true,
+            data: ocrResult,
+            provider: 'ocr',
+            warning:
+              'This PDF was a scanned image — data was extracted via OCR. Please review all fields carefully for accuracy before submitting.',
+          })
+        }
+      }
+    } catch (ocrErr: unknown) {
+      const ocrMsg = ocrErr instanceof Error ? ocrErr.message : String(ocrErr)
+      console.warn(`[challans/extract] OCR fallback failed (suppressed): ${ocrMsg.slice(0, 150)}`)
+      // Fall through to the friendly manual-fill message
+    }
+
+    // ── FALLBACK 3: Nothing extracted at all — friendly message ──
     return NextResponse.json(
       {
         error:
-          'Could not auto-extract data from this PDF. This usually means the PDF is a scanned image (no selectable text). ' +
+          'Could not auto-extract data from this PDF. This usually means the PDF is a scanned image with low quality, or uses an unsupported format. ' +
           'Please fill the form manually below — the fields are ready for you to enter. ' +
           (textExtractionError ? `(Technical detail: ${textExtractionError})` : ''),
       },

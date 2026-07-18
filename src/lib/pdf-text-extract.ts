@@ -558,11 +558,16 @@ function extractItems(text: string): ExtractedChallan['items'] {
  *   "Challan No. : LC-123 Committed Delivery : 26/05/2026"
  * So our stop-patterns include all common next-labels.
  */
-export async function extractChallanFromText(
-  pdfBuffer: Buffer,
-  fileName: string
-): Promise<ExtractedChallan> {
-  const text = await extractPdfText(pdfBuffer)
+/**
+ * Parse challan fields from pre-extracted text (from any source — pdfjs or OCR).
+ * This is the core regex extraction logic, separated from the PDF text extraction
+ * so it can be reused with OCR'd text.
+ */
+export function extractChallanFields(
+  text: string,
+  fileName: string,
+  fileSize: number
+): ExtractedChallan {
 
   // ── Challan Number ──
   // Stop at: Committed, Challan Date, or any "Label :" pattern on the same line
@@ -730,12 +735,24 @@ export async function extractChallanFromText(
     pdfFileName: fileName,
     _meta: {
       fileName,
-      fileSize: pdfBuffer.length,
+      fileSize,
       extractedAt: new Date().toISOString(),
       method: 'text-regex',
       textLength: text.length,
     },
   }
+}
+
+/**
+ * Main entry: extract text from a PDF buffer using pdfjs-dist, then parse
+ * challan fields from the text using regex.
+ */
+export async function extractChallanFromText(
+  pdfBuffer: Buffer,
+  fileName: string
+): Promise<ExtractedChallan> {
+  const text = await extractPdfText(pdfBuffer)
+  return extractChallanFields(text, fileName, pdfBuffer.length)
 }
 
 /**
