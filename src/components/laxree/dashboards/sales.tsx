@@ -275,46 +275,6 @@ function DashboardTab({ user }: { user: SessionUser }) {
               </div>
             )}
           </Card>
-
-          {/* Latest 10 challans */}
-          <Card className="p-4">
-            <SectionTitle icon="🧾" title="Latest Challans" sub={`Showing ${data.challans.length} most recent`} />
-            {data.challans.length === 0 ? (
-              <EmptyState icon="🧾" title="No challans yet" sub="Upload your first challan to get started" />
-            ) : (
-              <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-[12px]">
-                  <thead>
-                    <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-                      <th className="py-2 pr-3">Challan #</th>
-                      <th className="py-2 pr-3">Client</th>
-                      <th className="py-2 pr-3">Date</th>
-                      <th className="py-2 pr-3 text-right">Total</th>
-                      <th className="py-2 pr-3 text-right">Advance</th>
-                      <th className="py-2 pr-3">Payment</th>
-                      <th className="py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.challans.map((c) => (
-                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                        <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
-                        <td className="py-2 pr-3 text-[#EDE4D0]">
-                          {c.clientName}
-                          <div className="text-[10px] text-[#4E6180]">{c.clientCity}</div>
-                        </td>
-                        <td className="py-2 pr-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(c.createdAt)}</td>
-                        <td className="py-2 pr-3 text-right text-[#EDE4D0]">{fmtINR(c.amountTotal)}</td>
-                        <td className="py-2 pr-3 text-right text-[#3CB87A]">{fmtINR(c.amountAdvance)}</td>
-                        <td className="py-2 pr-3"><Badge label={c.paymentStatus} color={STATUS_COLORS[c.paymentStatus]} /></td>
-                        <td className="py-2"><Badge label={c.status.replace(/_/g, ' ')} color={STATUS_COLORS[c.status]} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
         </>
       )}
     </div>

@@ -100,7 +100,7 @@ export function AccountDashboard({ user, activeTab, onTabChange }: {
         ))}
       </div>
 
-      {activeTab === 'dashboard' && <DashboardTab user={user} onTabChange={onTabChange} />}
+      {activeTab === 'dashboard' && <DashboardTab user={user} />}
       {activeTab === 'pending'   && <PendingTab user={user} />}
       {activeTab === 'partial'   && <PartialTab />}
       {activeTab === 'fullpaid'  && <FullPaidTab />}
@@ -113,7 +113,7 @@ export function AccountDashboard({ user, activeTab, onTabChange }: {
 /* 1. Dashboard Tab — overview with StatCards + attention list         */
 /* ================================================================== */
 
-function DashboardTab({ user, onTabChange }: { user: SessionUser; onTabChange: (id: string) => void }) {
+function DashboardTab({ user }: { user: SessionUser }) {
   const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
 
   const stats = useMemo(() => {
@@ -131,6 +131,11 @@ function DashboardTab({ user, onTabChange }: { user: SessionUser; onTabChange: (
 
   return (
     <div className="space-y-4">
+      {/* Welcome banner */}
+      <Card className="p-4">
+        <SectionTitle icon="👋" title={`Welcome, ${user.name}`} sub="Account Team — verify payments, generate e-way & item bills" right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>} />
+      </Card>
+
       {/* StatCards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="Total Challans"     value={stats.all.length}                       sub="All time"          accent={ACCOUNT_ACCENT} icon="📦" />
@@ -140,77 +145,7 @@ function DashboardTab({ user, onTabChange }: { user: SessionUser; onTabChange: (
         <StatCard label="Total Amount"       value={fmtINR(stats.totalAmt)}                 sub="Invoiced value"    accent="#E4AF4A"        icon="💰" />
         <StatCard label="Total Received"     value={fmtINR(stats.totalRecv)}                sub="Bank receipts"     accent={ACCOUNT_ACCENT} icon="🏦" />
       </div>
-
-      {/* Pending attention list */}
-      <Card className="p-4">
-        <SectionTitle
-          icon="⚠️"
-          title="Needs Attention — Pending Approval"
-          sub={`${stats.pending.length} challan(s) waiting for account verification`}
-          right={
-            <div className="flex gap-2">
-              <Btn size="sm" onClick={refresh}>↻ Refresh</Btn>
-              <Btn size="sm" variant="success" onClick={() => onTabChange('pending')}>Open →</Btn>
-            </div>
-          }
-        />
-        {stats.pending.length === 0 ? (
-          <EmptyState icon="✅" title="All caught up" sub="No challans are waiting for payment verification" />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {stats.pending.slice(0, 6).map((c) => (
-              <PendingAttentionCard key={c.id} challan={c} onOpen={() => onTabChange('pending')} />
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Welcome banner */}
-      <Card className="p-4">
-        <SectionTitle icon="👋" title={`Welcome, ${user.name}`} sub="Account Team — verify payments, generate e-way & item bills" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <QuickAction icon="⏳" label="Verify Pending Payments" desc={`${stats.pending.length} awaiting`}  onClick={() => onTabChange('pending')} />
-          <QuickAction icon="🔶" label="Follow up Partials"      desc={`${stats.partial.length} outstanding`} onClick={() => onTabChange('partial')} />
-          <QuickAction icon="🧾" label="Upload Bills"            desc="E-Way + Invoice"                          onClick={() => onTabChange('bills')} />
-        </div>
-      </Card>
     </div>
-  )
-}
-
-function PendingAttentionCard({ challan: c, onOpen }: { challan: Challan; onOpen: () => void }) {
-  return (
-    <div className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 p-3">
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="min-w-0">
-          <div className="font-mono text-[13px] font-semibold text-[#E4AF4A]">{c.challanNumber}</div>
-          <div className="text-[13px] text-[#EDE4D0] truncate">{c.clientName} · {c.clientCity}</div>
-        </div>
-        <Badge label={c.paymentMode || c.paymentType} color={STATUS_COLORS[c.paymentMode || c.paymentType] || STATUS_COLORS[c.paymentStatus]} />
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-[11px] mb-2">
-        <div><div className="text-[#4E6180]">Billing</div><div className="text-[#EDE4D0] truncate">{c.billingName || c.clientName}</div></div>
-        <div><div className="text-[#4E6180]">GST</div><div className="text-[#EDE4D0] truncate">{c.gstNumber || '—'}</div></div>
-        <div><div className="text-[#4E6180]">Total</div><div className="text-[#EDE4D0] font-semibold">{fmtINR(c.amountTotal)}</div></div>
-        <div><div className="text-[#4E6180]">Advance</div><div className="text-[#3CB87A] font-semibold">{fmtINR(c.amountAdvance)}</div></div>
-      </div>
-      {c.shippingAddress && (
-        <div className="text-[11px] text-[#96A8BF] line-clamp-2 mb-2">📍 {c.shippingAddress}</div>
-      )}
-      <Btn size="sm" variant="success" className="w-full" onClick={onOpen}>Verify Now →</Btn>
-    </div>
-  )
-}
-
-function QuickAction({ icon, label, desc, onClick }: { icon: string; label: string; desc: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="text-left rounded-lg border border-white/7 bg-white/[0.02] p-3 hover:bg-white/5 hover:border-[#3CB87A]/20 transition-all">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{icon}</span>
-        <span className="text-[13px] font-semibold text-[#EDE4D0]">{label}</span>
-      </div>
-      <div className="text-[11px] text-[#96A8BF]">{desc}</div>
-    </button>
   )
 }
 

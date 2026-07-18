@@ -146,11 +146,6 @@ function DashboardTab({ onChanged }: { onChanged: () => void }) {
   const pendingReviews = all.filter(needsReviewRequest)
   const reviewsCollected = all.filter((c) => c.reviewReceived != null)
 
-  // recent dispatched (latest 5)
-  const recentDispatched = [...dispatched]
-    .sort((a, b) => new Date(b.dispatchDate || b.createdAt).getTime() - new Date(a.dispatchDate || a.createdAt).getTime())
-    .slice(0, 5)
-
   return (
     <div className="space-y-4">
       {/* KPIs */}
@@ -162,86 +157,10 @@ function DashboardTab({ onChanged }: { onChanged: () => void }) {
         <StatCard label="Reviews Collected" value={reviewsCollected.length} accent="#3CB87A" icon="⭐" sub="Client feedback in" />
       </div>
 
-      {/* Recent dispatched */}
-      <Card className="p-4">
-        <SectionTitle
-          icon="🚚"
-          title="Recent Dispatches"
-          sub="Latest 5 dispatched challans — handoff from Coordinator"
-          right={<Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>}
-        />
-        {recentDispatched.length === 0 ? (
-          <EmptyState icon="🚚" title="No dispatches yet" sub="Dispatched challans will appear here" />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recentDispatched.map((c) => {
-              const imgCount = parseImages(c.dispatchImages).length
-              return (
-                <div key={c.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3 hover:bg-white/5 transition-colors">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="font-mono text-[12px] text-[#E4AF4A]">{c.challanNumber}</div>
-                    <Badge label={c.status} color={STATUS_COLORS[c.status]} />
-                  </div>
-                  <div className="text-[13px] text-[#EDE4D0] font-medium">{c.clientName}</div>
-                  <div className="text-[11px] text-[#96A8BF]">{c.clientCity || c.clientLocation || '—'}</div>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 mt-2 text-[10.5px] text-[#4E6180]">
-                    <div>Dispatched: <span className="text-[#96A8BF]">{fmtDate(c.dispatchDate)}</span></div>
-                    <div>Freight: <span className="text-[#96A8BF]">{fmtINR(c.freightAmount || 0)}</span></div>
-                    <div>Transporter: <span className="text-[#96A8BF]">{c.transporterName || '—'}</span></div>
-                    <div>Photos: <span className="text-[#96A8BF]">{imgCount}</span></div>
-                    <div>WhatsApp: <span className={c.whatsappSent ? 'text-[#3CB87A]' : 'text-[#E09E3C]'}>{c.whatsappSent ? 'Sent' : 'Pending'}</span></div>
-                    <div>Email: <span className={c.emailSent ? 'text-[#3CB87A]' : 'text-[#E09E3C]'}>{c.emailSent ? 'Sent' : 'Pending'}</span></div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Card>
-
-      {/* Needs review request */}
-      <Card className="p-4">
-        <SectionTitle icon="⏳" title="Review Requests Due" sub="Dispatched 15+ days ago, no review requested yet" />
-        {pendingReviews.length === 0 ? (
-          <EmptyState icon="✅" title="None due yet" sub="All recent dispatches are within 15 days" />
-        ) : (
-          <div className="overflow-x-auto -mx-4 px-4">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-                  <th className="py-2 pr-3">Challan #</th>
-                  <th className="py-2 pr-3">Client</th>
-                  <th className="py-2 pr-3">Mobile</th>
-                  <th className="py-2 pr-3">Dispatched</th>
-                  <th className="py-2 pr-3">Days Ago</th>
-                  <th className="py-2 pr-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingReviews.map((c) => {
-                  const daysAgo = c.dispatchDate
-                    ? Math.floor((Date.now() - new Date(c.dispatchDate).getTime()) / (24 * 60 * 60 * 1000))
-                    : 0
-                  return (
-                    <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                      <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
-                      <td className="py-2 pr-3 text-[#EDE4D0]">{c.clientName}</td>
-                      <td className="py-2 pr-3 text-[#96A8BF]">{c.clientMobile || '—'}</td>
-                      <td className="py-2 pr-3 text-[#96A8BF]">{fmtDate(c.dispatchDate)}</td>
-                      <td className="py-2 pr-3">
-                        <Badge label={`${daysAgo}d`} color="#E09E3C" />
-                      </td>
-                      <td className="py-2 pr-3">
-                        <Badge label="Review Due" color="#E4AF4A" />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      {/* Refresh button */}
+      <div className="flex justify-end">
+        <Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>
+      </div>
     </div>
   )
 }

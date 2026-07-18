@@ -132,7 +132,7 @@ export function CoordinatorDashboard({ user, activeTab, onTabChange }: { user: S
         ))}
       </div>
 
-      {activeTab === 'dashboard' && <DashboardTab refreshKey={refreshKey} onSelectChallan={(id) => { setSelectedChallanId(id); onTabChange('audit') }} />}
+      {activeTab === 'dashboard' && <DashboardTab refreshKey={refreshKey} />}
       {activeTab === 'process'   && <ProcessTab onSelectChallan={(id) => { setSelectedChallanId(id); onTabChange('audit') }} />}
       {activeTab === 'audit'     && <AuditTab selectedChallanId={selectedChallanId} setSelectedChallanId={setSelectedChallanId} onChanged={triggerRefresh} />}
       {activeTab === 'warehouse' && <WarehouseTab refreshKey={refreshKey} onChanged={triggerRefresh} />}
@@ -153,7 +153,7 @@ function Loading({ label = 'Loading…' }: { label?: string }) {
 // ─────────────────────────────────────────────
 // 1. Dashboard Tab — Overview + Pipeline
 // ─────────────────────────────────────────────
-function DashboardTab({ refreshKey, onSelectChallan }: { refreshKey: number; onSelectChallan: (id: string) => void }) {
+function DashboardTab({ refreshKey }: { refreshKey: number }) {
   const { data, loading } = useFetch<{ challans: Challan[] }>('/api/challans', [refreshKey])
   if (loading) return <Loading />
   if (!data) return null
@@ -167,21 +167,6 @@ function DashboardTab({ refreshKey, onSelectChallan }: { refreshKey: number; onS
 
   // Count by status for pipeline
   const stageCount = (key: string) => all.filter((c) => c.status === key).length
-
-  // Actionable challans (need attention)
-  const actionable = all
-    .filter((c) => c.accountVerified && !c.dispatchDate)
-    .sort((a, b) => {
-      // Sort by priority: pending audit > in warehouse > need vehicle > need dispatch
-      const rank = (c: Challan) => {
-        if (!c.coordinatorApproved) return 0
-        if (!c.warehouseCompleted) return 1
-        if (!c.vehicleArranged) return 2
-        return 3
-      }
-      return rank(a) - rank(b)
-    })
-    .slice(0, 6)
 
   return (
     <div className="space-y-4">
@@ -224,48 +209,6 @@ function DashboardTab({ refreshKey, onSelectChallan }: { refreshKey: number; onS
             )
           })}
         </div>
-      </Card>
-
-      {/* Actionable challans */}
-      <Card className="p-4">
-        <SectionTitle
-          icon="⚡"
-          title="Needs Your Attention"
-          sub={`${actionable.length} challan${actionable.length === 1 ? '' : 's'} in progress`}
-        />
-        {actionable.length === 0 ? (
-          <EmptyState icon="✅" title="All caught up!" sub="No challans pending action" />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {actionable.map((c) => {
-              const stepLabel = !c.coordinatorApproved
-                ? 'Audit'
-                : !c.warehouseCompleted
-                ? 'Warehouse'
-                : !c.vehicleArranged
-                ? 'Vehicle'
-                : 'Dispatch'
-              return (
-                <div key={c.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold">{c.challanNumber}</span>
-                    <Badge label={c.status.replace(/_/g, ' ')} color={STATUS_COLORS[c.status] || '#96A8BF'} />
-                  </div>
-                  <div className="text-[12px] text-[#EDE4D0] mb-0.5">{c.clientName}</div>
-                  <div className="text-[10px] text-[#96A8BF] mb-2">
-                    {c.clientCity} • {fmtINR(c.amountTotal)} • {c.challanItems.length} items
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-[#9B6ED4] font-medium">Next: {stepLabel}</span>
-                    <Btn size="sm" variant="gold" onClick={() => onSelectChallan(c.id)}>
-                      Open →
-                    </Btn>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
       </Card>
     </div>
   )
