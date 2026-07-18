@@ -53,30 +53,8 @@ const STATUS_LABEL_MAP: Record<string, string> = {
 
 export function OwnerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
 
-  const nav = [
-    { id:'overview', label:'Overview', icon:'📊' },
-    { id:'stock', label:'Current Stock', icon:'📦' },
-    { id:'fast', label:'Fast Moving', icon:'⚡' },
-    { id:'challans', label:'Challans', icon:'🧾' },
-    { id:'pr', label:'Purchase Requests', icon:'📋' },
-    { id:'register', label:'Stock Register', icon:'📋' },
-    { id:'forecast', label:'Forecast', icon:'📈' },
-    { id:'activity', label:'Activity Log', icon:'📜' },
-  ]
-
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button key={n.id} onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}>
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab === 'overview' && <OverviewTab onTabChange={onTabChange} />}
       {activeTab === 'stock' && <StockTab />}
       {activeTab === 'fast' && <FastTab />}

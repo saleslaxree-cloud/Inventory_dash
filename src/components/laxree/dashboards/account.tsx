@@ -72,34 +72,13 @@ const ACCOUNT_ACCENT = '#3CB87A'
 /* Main dashboard                                                     */
 /* ================================================================== */
 
-export function AccountDashboard({ user, activeTab, onTabChange }: {
+export function AccountDashboard({ user, activeTab }: {
   user: SessionUser
   activeTab: string
   onTabChange: (id: string) => void
 }) {
-  const nav = [
-    { id: 'dashboard', label: 'Dashboard',          icon: '📊' },
-    { id: 'pending',   label: 'Pending Approval',   icon: '⏳' },
-    { id: 'partial',   label: 'Partial Paid',       icon: '🔶' },
-    { id: 'fullpaid',  label: 'Full Paid',          icon: '✅' },
-    { id: 'bills',     label: 'E-Way / Item Bill',  icon: '🧾' },
-  ]
-
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button key={n.id} onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab === n.id
-                ? 'bg-[#3CB87A]/15 text-[#3CB87A] border-[#3CB87A]/25'
-                : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}>
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab === 'dashboard' && <DashboardTab user={user} />}
       {activeTab === 'pending'   && <PendingTab user={user} />}
       {activeTab === 'partial'   && <PartialTab />}

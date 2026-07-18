@@ -10,25 +10,8 @@ type Item = { id:string; category:string; itemName:string; model:string; colour:
 type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; status:string; paymentStatus:string; amountTotal:number; amountReceived:number; createdAt:string }
 
 export function AdminDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
-  const nav = [
-    { id:'overview', label:'System Overview', icon:'📊' },
-    { id:'users', label:'User Management', icon:'👥' },
-    { id:'challans', label:'All Challans', icon:'🧾' },
-    { id:'items', label:'All Items', icon:'📦' },
-    { id:'messages', label:'All Messages', icon:'✉️' },
-  ]
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button key={n.id} onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}>
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
       {activeTab === 'overview' && <OverviewTab onTabChange={onTabChange} />}
       {activeTab === 'users' && <UsersTab />}
       {activeTab === 'challans' && <ChallansTab />}

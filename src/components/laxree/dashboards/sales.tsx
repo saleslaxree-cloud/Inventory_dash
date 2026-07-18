@@ -163,33 +163,8 @@ export function SalesDashboard({ user, activeTab, onTabChange }: {
   activeTab: string
   onTabChange: (id: string) => void
 }) {
-  const nav = [
-    { id: 'dashboard',   label: 'Dashboard',     icon: '📊' },
-    { id: 'stock-check', label: 'Check Stock',   icon: '📦' },
-    { id: 'list',        label: 'My Challans',   icon: '🧾' },
-    { id: 'hold',        label: 'Stock Hold',    icon: '🔒' },
-    { id: 'upload',      label: 'Upload Challan',icon: '📤' },
-  ]
-
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button
-            key={n.id}
-            onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab === n.id
-                ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25'
-                : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}
-          >
-            <span className="mr-1">{n.icon}</span>
-            {n.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab === 'dashboard'   && <DashboardTab user={user} />}
       {activeTab === 'stock-check' && <StockCheckTab />}
       {activeTab === 'upload'      && <UploadTab user={user} onDone={() => onTabChange('list')} />}

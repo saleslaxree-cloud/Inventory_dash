@@ -96,31 +96,10 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 // ────────────────────────────────────────────────────────────────────────────
 // Main Dashboard
 // ────────────────────────────────────────────────────────────────────────────
-export function SupportDashboard({ activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
+export function SupportDashboard({ activeTab }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const [refreshKey, setRefreshKey] = useState(0)
-  const nav = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'dispatch', label: 'Client Dispatch', icon: '🚚' },
-    { id: 'tracking', label: 'Send Tracking', icon: '📱' },
-    { id: 'review', label: 'Client Reviews', icon: '⭐' },
-  ]
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button
-            key={n.id}
-            onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab === n.id
-                ? 'bg-[#E09E3C]/15 text-[#E09E3C] border-[#E09E3C]/25'
-                : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}
-          >
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
       {activeTab === 'dashboard' && <DashboardTab onChanged={() => setRefreshKey((k) => k + 1)} />}
       {activeTab === 'dispatch' && <DispatchTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
       {activeTab === 'tracking' && <TrackingTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}

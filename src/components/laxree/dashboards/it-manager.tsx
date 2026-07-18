@@ -53,30 +53,9 @@ const STATUS_LABEL_MAP: Record<string, string> = {
   critical: 'CRITICAL', warn: 'WATCH', ok: 'OK', nodata: 'NO DATA',
 }
 
-export function ITManagerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
-  const nav = [
-    { id:'items', label:'Item Master', icon:'📦' },
-    { id:'add', label:'Add Item', icon:'➕' },
-    { id:'inward', label:'Inward Entry', icon:'📥' },
-    { id:'register', label:'Stock Register', icon:'📋' },
-    { id:'activity', label:'Activity Log', icon:'📜' },
-    { id:'forecast', label:'Forecast', icon:'📈' },
-    { id:'analytics', label:'Analytics', icon:'📊' },
-    { id:'users', label:'Users', icon:'👥' },
-    { id:'all-challans', label:'All Challans', icon:'🧾' },
-  ]
+export function ITManagerDashboard({ user, activeTab }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button key={n.id} onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}>
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
       {activeTab === 'items' && <ItemsTab />}
       {activeTab === 'add' && <AddItemTab />}
       {activeTab === 'inward' && <InwardTab />}

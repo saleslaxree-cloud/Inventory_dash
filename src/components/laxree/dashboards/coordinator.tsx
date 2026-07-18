@@ -102,36 +102,10 @@ export function CoordinatorDashboard({ user, activeTab, onTabChange }: { user: S
   const [refreshKey, setRefreshKey] = useState(0)
   const [selectedChallanId, setSelectedChallanId] = useState<string | null>(null)
 
-  const nav = [
-    { id: 'dashboard', label: 'Dashboard',       icon: '📊' },
-    { id: 'process',   label: 'Process Challan', icon: '📋' },
-    { id: 'audit',     label: 'Audit',           icon: '🔍' },
-    { id: 'warehouse', label: 'Warehouse',       icon: '🏭' },
-    { id: 'vehicle',   label: 'Vehicle',         icon: '🚛' },
-    { id: 'review',    label: 'Final Review',    icon: '📸' },
-    { id: 'bills',     label: 'Latest Bills',    icon: '🧾' },
-  ]
-
   const triggerRefresh = () => setRefreshKey((k) => k + 1)
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1.5 flex-wrap">
-        {nav.map((n) => (
-          <button
-            key={n.id}
-            onClick={() => onTabChange(n.id)}
-            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab === n.id
-                ? 'bg-[#9B6ED4]/15 text-[#9B6ED4] border-[#9B6ED4]/25'
-                : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}
-          >
-            <span className="mr-1">{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab === 'dashboard' && <DashboardTab refreshKey={refreshKey} />}
       {activeTab === 'process'   && <ProcessTab onSelectChallan={(id) => { setSelectedChallanId(id); onTabChange('audit') }} />}
       {activeTab === 'audit'     && <AuditTab selectedChallanId={selectedChallanId} setSelectedChallanId={setSelectedChallanId} onChanged={triggerRefresh} />}
