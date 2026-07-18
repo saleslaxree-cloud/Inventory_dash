@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
       uploadedBy: { select: { id: true, name: true, role: true } },
       challanItems: { include: { matchedItem: true } },
       accountVerifiedBy: { select: { name: true, role: true } },
+      billsUploadedBy: { select: { name: true, role: true } },
       _count: { select: { workflowStages: true, messages: true } },
     },
     orderBy: { createdAt: 'desc' },

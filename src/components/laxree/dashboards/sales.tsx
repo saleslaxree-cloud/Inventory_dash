@@ -79,6 +79,13 @@ type Challan = {
   createdAt: string
   uploadedBy: { id: string; name: string; role: string }
   challanItems: ChallanItem[]
+  // Bill files uploaded by Account team
+  ewayBillNo: string | null
+  ewayBillFile: string | null
+  invoiceNo: string | null
+  invoiceFile: string | null
+  billsUploadedAt: string | null
+  billsUploadedBy: { name: string; role: string } | null
 }
 
 type DashboardData = {
@@ -165,11 +172,12 @@ export function SalesDashboard({ user, activeTab, onTabChange }: {
 }) {
   return (
     <div className="space-y-4">
-      {activeTab === 'dashboard'   && <DashboardTab user={user} />}
-      {activeTab === 'stock-check' && <StockCheckTab />}
-      {activeTab === 'upload'      && <UploadTab user={user} onDone={() => onTabChange('list')} />}
-      {activeTab === 'list'        && <MyChallansTab user={user} />}
-      {activeTab === 'hold'        && <StockHoldTab />}
+      {activeTab === 'dashboard'      && <DashboardTab user={user} />}
+      {activeTab === 'stock-check'    && <StockCheckTab />}
+      {activeTab === 'upload'         && <UploadTab user={user} onDone={() => onTabChange('list')} />}
+      {activeTab === 'list'           && <MyChallansTab user={user} />}
+      {activeTab === 'client-status'  && <ClientStatusTab user={user} />}
+      {activeTab === 'hold'           && <StockHoldTab />}
     </div>
   )
 }
@@ -1202,6 +1210,35 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                       </div>
                     )}
 
+                    {/* Bills uploaded by Account team */}
+                    {(c.ewayBillNo || c.ewayBillFile || c.invoiceNo || c.invoiceFile) && (
+                      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3">
+                        <div className="text-[10px] uppercase tracking-wider text-[#3CB87A] font-semibold mb-2">🧾 Bills Uploaded by Account Team</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <div className="text-[10px] text-[#4E6180] uppercase tracking-wide mb-0.5">E-Way Bill</div>
+                            <div className="text-[12px] text-[#EDE4D0]">No: <span className="font-mono">{c.ewayBillNo || '—'}</span></div>
+                            {c.ewayBillFile && (
+                              <a href={`/uploads/bills/${c.ewayBillFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#3CB87A] hover:underline mt-1">📄 View E-Way PDF</a>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-[#4E6180] uppercase tracking-wide mb-0.5">Item Bill / Invoice</div>
+                            <div className="text-[12px] text-[#EDE4D0]">No: <span className="font-mono">{c.invoiceNo || '—'}</span></div>
+                            {c.invoiceFile && (
+                              <a href={`/uploads/bills/${c.invoiceFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#3CB87A] hover:underline mt-1">📄 View Invoice PDF</a>
+                            )}
+                          </div>
+                        </div>
+                        {c.billsUploadedBy && (
+                          <div className="text-[10px] text-[#4E6180] mt-2">
+                            Uploaded by <span className="text-[#96A8BF]">{c.billsUploadedBy.name}</span>
+                            {c.billsUploadedAt && <> at <span className="text-[#96A8BF]">{fmtDate(c.billsUploadedAt)}</span></>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {c.pdfFileName && (
                       <div className="text-[11px] text-[#96A8BF]">📎 PDF: <span className="font-mono text-[#E4AF4A]">{c.pdfFileName}</span></div>
                     )}
@@ -1423,6 +1460,477 @@ function StockHoldTab() {
         )}
       </Card>
     </div>
+  )
+}
+
+/* ============================================================ */
+/* Tab: Client Status — full pipeline tracking timeline         */
+/* ============================================================ */
+
+type StageState = 'done' | 'active' | 'pending' | 'rejected'
+
+type Stage = {
+  key: string
+  icon: string
+  name: string
+  state: StageState
+  badge?: { label: string; color: string }
+  detail: React.ReactNode
+  timestamp?: string | null
+  extra?: React.ReactNode
+}
+
+const STAGE_COLORS: Record<StageState, { ring: string; glow: string; line: string }> = {
+  done:     { ring: '#3CB87A', glow: 'rgba(60,184,122,0.30)',  line: 'rgba(60,184,122,0.55)' },
+  active:   { ring: '#E09E3C', glow: 'rgba(224,158,60,0.40)',  line: 'rgba(224,158,60,0.45)' },
+  pending:  { ring: '#96A8BF', glow: 'rgba(150,168,191,0.10)', line: 'rgba(150,168,191,0.25)' },
+  rejected: { ring: '#E05050', glow: 'rgba(224,80,80,0.30)',   line: 'rgba(224,80,80,0.45)' },
+}
+
+function computeCurrentStage(c: Challan): { label: string; color: string } {
+  if (c.accountRejected)              return { label: 'REJECTED',  color: '#E05050' }
+  if (c.reviewReceived)               return { label: 'REVIEWED',  color: '#3CB87A' }
+  if (c.dispatchDate)                 return { label: 'DISPATCHED',color: '#3CB87A' }
+  if (c.vehicleArranged)              return { label: 'VEHICLE',   color: '#E4AF4A' }
+  if (c.warehouseCompleted)           return { label: 'PACKED',    color: '#E4AF4A' }
+  const started = (c.challanItems || []).some((i) => i.warehouseStatus && i.warehouseStatus !== 'PENDING')
+  if (started || c.coordinatorApproved) return { label: 'WAREHOUSE',color: '#E09E3C' }
+  if (c.accountVerified)              return { label: 'VERIFIED',  color: '#3CB87A' }
+  return { label: 'UPLOADED', color: '#96A8BF' }
+}
+
+function buildStages(c: Challan): Stage[] {
+  const items = c.challanItems || []
+  const total = items.length
+  const approvedCount = items.filter((i) => i.auditStatus === 'APPROVED').length
+  const qcDone       = items.filter((i) => ['QUALITY_CHECK','PACKAGING','DONE'].includes(i.warehouseStatus)).length
+  const packingDone  = items.filter((i) => ['PACKAGING','DONE'].includes(i.warehouseStatus)).length
+  const loadingDone  = items.filter((i) => i.warehouseStatus === 'DONE').length
+  const stages: Stage[] = []
+
+  // 1. Challan Uploaded (always done)
+  stages.push({
+    key: 'uploaded',
+    icon: '📤',
+    name: 'Challan Uploaded',
+    state: 'done',
+    badge: { label: 'DONE', color: '#3CB87A' },
+    detail: (
+      <>Challan created by <strong className="text-[#E4AF4A]">{c.uploadedBy?.name || 'Sales'}</strong> on {fmtDate(c.createdAt)}.</>
+    ),
+    timestamp: c.createdAt,
+  })
+
+  // 2. Account Payment Verification
+  if (c.accountRejected) {
+    stages.push({
+      key: 'account',
+      icon: '💰',
+      name: 'Account Payment Verification',
+      state: 'rejected',
+      badge: { label: 'REJECTED', color: '#E05050' },
+      detail: (
+        <>✗ Rejected: <span className="text-[#E05050]">{c.accountRejectReason || 'No reason provided'}</span></>
+      ),
+    })
+  } else if (c.accountVerified) {
+    stages.push({
+      key: 'account',
+      icon: '💰',
+      name: 'Account Payment Verification',
+      state: 'done',
+      badge: { label: 'VERIFIED', color: '#3CB87A' },
+      detail: (
+        <>✓ Verified by <strong className="text-[#E4AF4A]">{c.accountVerifiedBy?.name || 'Account Team'}</strong> on {fmtDate(c.accountVerifiedAt)}. Received <strong className="text-[#3CB87A]">{fmtINR(c.amountReceived)}</strong> / {fmtINR(c.amountTotal)}.</>
+      ),
+      timestamp: c.accountVerifiedAt,
+    })
+  } else {
+    stages.push({
+      key: 'account',
+      icon: '💰',
+      name: 'Account Payment Verification',
+      state: 'active',
+      badge: { label: 'PENDING', color: '#E09E3C' },
+      detail: (
+        <>⏳ Waiting for Account team to verify payment — received <strong className="text-[#E4AF4A]">{fmtINR(c.amountReceived)}</strong> against total <strong className="text-[#EDE4D0]">{fmtINR(c.amountTotal)}</strong>.</>
+      ),
+    })
+  }
+
+  // 3. Coordinator Audit
+  if (c.coordinatorApproved) {
+    stages.push({
+      key: 'coordinator',
+      icon: '🔍',
+      name: 'Coordinator Audit',
+      state: 'done',
+      badge: { label: 'APPROVED', color: '#3CB87A' },
+      detail: (
+        <>✓ Audited on {fmtDate(c.coordinatorApprovedAt)}. <strong className="text-[#E4AF4A]">{approvedCount}</strong> of {total} item{total === 1 ? '' : 's'} approved.</>
+      ),
+      timestamp: c.coordinatorApprovedAt,
+    })
+  } else {
+    const blocked = c.accountRejected
+    stages.push({
+      key: 'coordinator',
+      icon: '🔍',
+      name: 'Coordinator Audit',
+      state: blocked ? 'pending' : (c.accountVerified ? 'active' : 'pending'),
+      badge: { label: blocked ? 'BLOCKED' : 'PENDING', color: blocked ? '#4E6180' : '#96A8BF' },
+      detail: blocked ? <>🔒 Blocked — payment was rejected.</> : <>⏳ Waiting for Coordinator audit.</>,
+    })
+  }
+
+  // 4. Warehouse (QC → Packing → Loading)
+  const warehouseStarted = qcDone > 0 || packingDone > 0 || loadingDone > 0
+  const warehouseBlocked = c.accountRejected
+  if (c.warehouseCompleted) {
+    stages.push({
+      key: 'warehouse',
+      icon: '🏭',
+      name: 'Warehouse — QC → Packing → Loading',
+      state: 'done',
+      badge: { label: 'COMPLETE', color: '#3CB87A' },
+      detail: (
+        <span>
+          ✓ Warehouse complete on {fmtDate(c.warehouseCompletedAt)}.{' '}
+          QC: <span className="text-[#3CB87A]">{qcDone}/{total}</span> ✓ ·{' '}
+          Packing: <span className="text-[#3CB87A]">{packingDone}/{total}</span> ✓ ·{' '}
+          Loading: <span className="text-[#3CB87A]">{loadingDone}/{total}</span> ✓
+        </span>
+      ),
+      timestamp: c.warehouseCompletedAt,
+    })
+  } else {
+    const isActive = warehouseStarted || (!warehouseBlocked && c.coordinatorApproved)
+    stages.push({
+      key: 'warehouse',
+      icon: '🏭',
+      name: 'Warehouse — QC → Packing → Loading',
+      state: isActive ? 'active' : 'pending',
+      badge: { label: warehouseStarted ? 'IN PROGRESS' : (warehouseBlocked ? 'BLOCKED' : 'PENDING'), color: warehouseStarted ? '#E09E3C' : (warehouseBlocked ? '#4E6180' : '#96A8BF') },
+      detail: warehouseStarted ? (
+        <span>
+          QC: <span className="text-[#3CB87A]">{qcDone}/{total}</span> ✓ ·{' '}
+          Packing: <span className="text-[#3CB87A]">{packingDone}/{total}</span> ✓ ·{' '}
+          Loading: <span className="text-[#3CB87A]">{loadingDone}/{total}</span> ✓
+        </span>
+      ) : warehouseBlocked ? <>🔒 Blocked — payment was rejected.</> : <>⏳ Waiting for warehouse processing.</>,
+      extra: warehouseStarted ? (
+        <div className="mt-2 rounded-md border border-white/7 bg-[#0c1928]/60 overflow-hidden">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] px-2.5 py-1.5 bg-white/[0.02] border-b border-white/7">
+            Per-item warehouse status
+          </div>
+          <div className="divide-y divide-white/5">
+            {items.map((ci) => (
+              <div key={ci.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px]">
+                <div className="min-w-0">
+                  <span className="text-[#EDE4D0] truncate">{ci.itemName}</span>
+                  <span className="text-[#4E6180] ml-1.5">×{ci.quantity}</span>
+                  {ci.model && <span className="text-[#4E6180] ml-1.5 font-mono">{ci.model}</span>}
+                </div>
+                <Badge
+                  label={(ci.warehouseStatus || 'PENDING').replace(/_/g, ' ')}
+                  color={
+                    ci.warehouseStatus === 'DONE' ? '#3CB87A'
+                    : ci.warehouseStatus === 'PACKAGING' ? '#E4AF4A'
+                    : ci.warehouseStatus === 'QUALITY_CHECK' ? '#E09E3C'
+                    : '#96A8BF'
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null,
+    })
+  }
+
+  // 5. Vehicle Arrangement
+  if (c.vehicleArranged) {
+    stages.push({
+      key: 'vehicle',
+      icon: '🚛',
+      name: 'Vehicle Arrangement',
+      state: 'done',
+      badge: { label: 'ARRANGED', color: '#3CB87A' },
+      detail: (
+        <>✓ Vehicle: <strong className="text-[#E4AF4A]">{c.vehicleNumber || '—'}</strong>, Transporter: <strong className="text-[#E4AF4A]">{c.transporterName || '—'}</strong>, Freight: <strong className="text-[#3CB87A]">{fmtINR(c.freightAmount || 0)}</strong></>
+      ),
+      timestamp: c.vehicleArrangedAt,
+    })
+  } else {
+    const blocked = c.accountRejected || !c.warehouseCompleted
+    stages.push({
+      key: 'vehicle',
+      icon: '🚛',
+      name: 'Vehicle Arrangement',
+      state: blocked ? 'pending' : 'active',
+      badge: { label: blocked ? 'BLOCKED' : 'PENDING', color: blocked ? '#4E6180' : '#96A8BF' },
+      detail: blocked ? <>🔒 Waiting — warehouse not complete.</> : <>⏳ Waiting for vehicle arrangement.</>,
+    })
+  }
+
+  // 6. Dispatch
+  if (c.dispatchDate) {
+    stages.push({
+      key: 'dispatch',
+      icon: '📦',
+      name: 'Dispatch',
+      state: 'done',
+      badge: { label: 'DISPATCHED', color: '#3CB87A' },
+      detail: <>✓ Dispatched on {fmtDate(c.dispatchDate)}.</>,
+      timestamp: c.dispatchDate,
+    })
+  } else {
+    const blocked = c.accountRejected || !c.vehicleArranged
+    stages.push({
+      key: 'dispatch',
+      icon: '📦',
+      name: 'Dispatch',
+      state: blocked ? 'pending' : 'active',
+      badge: { label: blocked ? 'BLOCKED' : 'PENDING', color: blocked ? '#4E6180' : '#96A8BF' },
+      detail: blocked ? <>🔒 Waiting — vehicle not arranged.</> : <>⏳ Not yet dispatched.</>,
+    })
+  }
+
+  // 7. Tracking Sent (WhatsApp + Email)
+  const ws = c.whatsappSent
+  const es = c.emailSent
+  if (ws && es) {
+    stages.push({
+      key: 'tracking',
+      icon: '📱',
+      name: 'Tracking Sent',
+      state: 'done',
+      badge: { label: 'SENT', color: '#3CB87A' },
+      detail: <>✓ WhatsApp sent on {fmtDate(c.whatsappSentAt)} · ✓ Email sent on {fmtDate(c.emailSentAt)}</>,
+      timestamp: c.whatsappSentAt || c.emailSentAt,
+    })
+  } else if (ws || es) {
+    stages.push({
+      key: 'tracking',
+      icon: '📱',
+      name: 'Tracking Sent',
+      state: 'active',
+      badge: { label: 'PARTIAL', color: '#E09E3C' },
+      detail: (
+        <>{ws ? <>✓ WhatsApp on {fmtDate(c.whatsappSentAt)}</> : <>✗ WhatsApp pending</>} · {es ? <>✓ Email on {fmtDate(c.emailSentAt)}</> : <>✗ Email pending</>}</>
+      ),
+      timestamp: c.whatsappSentAt || c.emailSentAt,
+    })
+  } else {
+    const blocked = c.accountRejected || !c.dispatchDate
+    stages.push({
+      key: 'tracking',
+      icon: '📱',
+      name: 'Tracking Sent',
+      state: blocked ? 'pending' : 'active',
+      badge: { label: blocked ? 'BLOCKED' : 'PENDING', color: blocked ? '#4E6180' : '#96A8BF' },
+      detail: blocked ? <>🔒 Waiting — not dispatched.</> : <>⏳ Tracking not yet sent to client.</>,
+    })
+  }
+
+  // 8. Client Review
+  if (c.reviewReceived) {
+    stages.push({
+      key: 'review',
+      icon: '⭐',
+      name: 'Client Review',
+      state: 'done',
+      badge: { label: 'REVIEWED', color: '#E4AF4A' },
+      detail: (
+        <>
+          {c.reviewRating != null && (
+            <>Rating: <strong className="text-[#E4AF4A] font-mono">{'★'.repeat(c.reviewRating)}<span className="text-[#3a4a5e]">{'★'.repeat(Math.max(0, 5 - c.reviewRating))}</span></strong> · </>
+          )}
+          <span className="text-[#EDE4D0]">"{c.reviewReceived}"</span>
+        </>
+      ),
+      timestamp: c.reviewReceivedAt,
+    })
+  } else {
+    const blocked = c.accountRejected || !c.dispatchDate
+    stages.push({
+      key: 'review',
+      icon: '⭐',
+      name: 'Client Review',
+      state: blocked ? 'pending' : 'active',
+      badge: { label: blocked ? 'BLOCKED' : 'PENDING', color: blocked ? '#4E6180' : '#96A8BF' },
+      detail: blocked ? <>🔒 Waiting — not dispatched.</> : <>⏳ Awaiting client review.</>,
+    })
+  }
+
+  return stages
+}
+
+function StageRow({ stage, isLast }: { stage: Stage; isLast: boolean }) {
+  const c = STAGE_COLORS[stage.state]
+  const pulse = stage.state === 'active'
+  return (
+    <div className="flex gap-3">
+      {/* Icon + connecting line column */}
+      <div className="flex flex-col items-center">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 bg-[#0c1928] text-base ${pulse ? 'animate-pulse' : ''}`}
+          style={{ borderColor: c.ring, boxShadow: `0 0 0 3px ${c.glow}` }}
+        >
+          {stage.icon}
+        </div>
+        {!isLast && (
+          <div
+            className="w-0.5 flex-1 my-1 min-h-[24px]"
+            style={{ background: `linear-gradient(to bottom, ${c.line}, ${c.line}22)` }}
+          />
+        )}
+      </div>
+      {/* Content */}
+      <div className={`flex-1 min-w-0 ${isLast ? 'pb-0' : 'pb-5'}`}>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="font-serif text-sm font-bold text-[#EDE4D0]">{stage.name}</span>
+          {stage.badge && <Badge label={stage.badge.label} color={stage.badge.color} />}
+        </div>
+        <div className="text-[12px] mt-1 text-[#96A8BF] leading-relaxed">{stage.detail}</div>
+        {stage.timestamp && (
+          <div className="text-[10px] mt-1 text-[#4E6180] font-mono">🕒 {fmtDate(stage.timestamp)}</div>
+        )}
+        {stage.extra}
+      </div>
+    </div>
+  )
+}
+
+function ClientStatusTab({ user }: { user: SessionUser }) {
+  const url = `/api/challans?role=SALES&userId=${user.id}`
+  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>(url)
+  const [search, setSearch] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const challans = data?.challans || []
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return challans
+    return challans.filter((c) =>
+      c.challanNumber.toLowerCase().includes(q) ||
+      c.clientName.toLowerCase().includes(q) ||
+      c.clientCity.toLowerCase().includes(q),
+    )
+  }, [challans, search])
+
+  // Derive the effective selection during render: keep the user's explicit pick
+  // if it still exists, otherwise fall back to the first challan (or null).
+  // This avoids cascading setState-in-effect re-renders.
+  const explicitMatch = selectedId ? challans.find((c) => c.id === selectedId) : null
+  const selected = explicitMatch || challans[0] || null
+
+  const summary = useMemo(() => ({
+    total: challans.length,
+    pendingAccount: challans.filter((c) => !c.accountVerified && !c.accountRejected).length,
+    inWarehouse: challans.filter((c) => c.coordinatorApproved && !c.warehouseCompleted).length,
+    dispatched: challans.filter((c) => !!c.dispatchDate).length,
+  }), [challans])
+
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+  if (error) return (
+    <Card className="p-4">
+      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+    </Card>
+  )
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Total Challans"   value={summary.total}          accent="#E4AF4A" icon="🧾" />
+        <StatCard label="Pending Account"  value={summary.pendingAccount} accent="#E09E3C" icon="⏳" />
+        <StatCard label="In Warehouse"     value={summary.inWarehouse}    accent="#E4AF4A" icon="🏭" />
+        <StatCard label="Dispatched"       value={summary.dispatched}     accent="#3CB87A" icon="🚚" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
+        {/* Left: searchable list */}
+        <Card className="p-3 lg:p-4 lg:sticky lg:top-4 lg:self-start">
+          <SectionTitle
+            icon="📍"
+            title="Client Status"
+            sub="Pick a challan to trace"
+            right={<Btn size="sm" onClick={refresh}>↻</Btn>}
+          />
+          <Input value={search} onChange={setSearch} placeholder="Search client / challan no…" />
+          {filtered.length === 0 ? (
+            <div className="mt-3">
+              <EmptyState icon="🔍" title="No matches" sub={challans.length === 0 ? 'Upload a challan first' : 'Try a different search'} />
+            </div>
+          ) : (
+            <div
+              className="mt-3 space-y-1.5 max-h-[70vh] overflow-y-auto pr-1"
+              style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: '#1e3350 transparent',
+              }}
+            >
+              {filtered.map((c) => {
+                const stage = computeCurrentStage(c)
+                const isActive = c.id === selectedId
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSelectedId(c.id)}
+                    className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+                      isActive
+                        ? 'border-[#C8922A]/50 bg-[#C8922A]/10 shadow-[0_0_0_1px_rgba(200,146,42,0.25)]'
+                        : 'border-white/7 bg-[#0c1928]/40 hover:bg-white/[0.03] hover:border-white/15'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold truncate">{c.challanNumber}</span>
+                      <span className="text-[10px] text-[#96A8BF] whitespace-nowrap">{fmtDate(c.createdAt)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="text-[13px] text-[#EDE4D0] truncate">{c.clientName}</span>
+                      <Badge label={stage.label} color={stage.color} />
+                    </div>
+                    <div className="text-[10px] text-[#4E6180] truncate mt-0.5">{c.clientCity} · {fmtINR(c.amountTotal)}</div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Right: pipeline timeline */}
+        <Card className="p-4">
+          {!selected ? (
+            <EmptyState icon="📍" title="No challan selected" sub="Pick one from the left to view its full pipeline" />
+          ) : (
+            <PipelineTimeline challan={selected} />
+          )}
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function PipelineTimeline({ challan }: { challan: Challan }) {
+  const cur = computeCurrentStage(challan)
+  const stages = useMemo(() => buildStages(challan), [challan])
+  return (
+    <>
+      <SectionTitle
+        icon="🧭"
+        title={`Pipeline · ${challan.challanNumber}`}
+        sub={`${challan.clientName} · ${challan.clientCity} · ${fmtINR(challan.amountTotal)}`}
+        right={<Badge label={cur.label} color={cur.color} />}
+      />
+      <div>
+        {stages.map((s, idx) => (
+          <StageRow key={s.key} stage={s} isLast={idx === stages.length - 1} />
+        ))}
+      </div>
+    </>
   )
 }
 

@@ -10,6 +10,7 @@ import { AccountDashboard } from '@/components/laxree/dashboards/account'
 import { CoordinatorDashboard } from '@/components/laxree/dashboards/coordinator'
 import { SupportDashboard } from '@/components/laxree/dashboards/support'
 import { ITManagerDashboard } from '@/components/laxree/dashboards/it-manager'
+import { NotificationProvider } from '@/components/laxree/notification-provider'
 
 export default function Home() {
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -88,6 +89,7 @@ export default function Home() {
       { id:'dashboard', label:'Dashboard', icon:'📊' },
       { id:'stock-check', label:'Check Stock', icon:'📦' },
       { id:'list', label:'My Challans', icon:'🧾' },
+      { id:'client-status', label:'Client Status', icon:'📍' },
       { id:'hold', label:'Stock Hold', icon:'🔒' },
       { id:'upload', label:'Upload Challan', icon:'📤' },
     ],
@@ -130,21 +132,23 @@ export default function Home() {
   const currentTab = nav.find((n) => n.id === activeTab) ? activeTab : nav[0]?.id
 
   return (
-    <AppShell
-      user={user}
-      navItems={nav}
-      activeTab={currentTab}
-      onTabChange={setActiveTab}
-      onLogout={logout}
-      onPasswordChanged={refreshUser}
-    >
-      {user.role === 'ADMIN' && <AdminDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'OWNER' && <OwnerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'SALES' && <SalesDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'ACCOUNT' && <AccountDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'COORDINATOR' && <CoordinatorDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'SUPPORT' && <SupportDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-      {user.role === 'IT_MANAGER' && <ITManagerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
-    </AppShell>
+    <NotificationProvider user={user}>
+      <AppShell
+        user={user}
+        navItems={nav}
+        activeTab={currentTab}
+        onTabChange={setActiveTab}
+        onLogout={logout}
+        onPasswordChanged={refreshUser}
+      >
+        {user.role === 'ADMIN' && <AdminDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'OWNER' && <OwnerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'SALES' && <SalesDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'ACCOUNT' && <AccountDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'COORDINATOR' && <CoordinatorDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'SUPPORT' && <SupportDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+        {user.role === 'IT_MANAGER' && <ITManagerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      </AppShell>
+    </NotificationProvider>
   )
 }

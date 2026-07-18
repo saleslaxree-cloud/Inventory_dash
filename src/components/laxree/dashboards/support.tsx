@@ -7,33 +7,96 @@ import { fmtINR, fmtDate, STATUS_COLORS, SessionUser } from '../types'
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
+type ChallanItem = {
+  id: string
+  itemName: string
+  itemNumber: string | null
+  model: string | null
+  colour: string | null
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  auditStatus: string     // PENDING | APPROVED | REJECTED | ON_HOLD
+  warehouseStatus: string // PENDING | QUALITY_CHECK | PACKAGING | DONE
+  matchedItem?: {
+    id: string
+    currentStock: number
+    unit: string
+  } | null
+}
+
 type Challan = {
   id: string
   challanNumber: string
+  quotationNumber: string | null
   clientName: string
   clientCity: string
   clientMobile: string | null
   clientLocation: string | null
   expectedDeliveryDate: string | null
+
+  // Billing & shipping
+  billingName: string | null
+  billingAddress: string | null
+  shippingAddress: string | null
+  gstNumber: string | null
+
+  // Financials
+  amountWithoutGst: number
+  amountWithGst: number
+  gstPercentage: number
   amountTotal: number
+  amountAdvance: number
+  amountReceived: number
+  packingCharge: number
+  shippingCharge: number
   freightAmount: number
+  paymentType: string
+  paymentStatus: string
+  paymentMode: string | null
+
+  // Account verification
+  accountVerified: boolean
+  accountVerifiedAt: string | null
+  accountRejected: boolean
+  accountRejectReason: string | null
+
+  // Coordinator / warehouse
+  coordinatorApproved: boolean
+  warehouseCompleted: boolean
+  warehouseCompletedAt: string | null
+  vehicleArranged: boolean
+
+  // Bills
+  ewayBillNo: string | null
+  ewayBillFile: string | null
+  invoiceNo: string | null
+  invoiceFile: string | null
+  billsUploadedAt: string | null
+
+  // Dispatch & tracking
   status: string
   dispatchDate: string | null
   trackingLink: string | null
   transporterName: string | null
   vehicleNumber: string | null
   dispatchImages: string | null
+
+  // Communication
   whatsappSent: boolean
   whatsappSentAt: string | null
   emailSent: boolean
   emailSentAt: string | null
+
+  // Reviews
   reviewRequested: boolean
   reviewRequestedAt: string | null
   reviewReceived: string | null
   reviewRating: number | null
   reviewReceivedAt: string | null
+
   createdAt: string
-  challanItems: { id: string; itemName: string; quantity: number }[]
+  challanItems: ChallanItem[]
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -300,63 +363,348 @@ function DispatchList({ challans, onSelect }: { challans: Challan[]; onSelect: (
   )
 }
 
+// Per-item warehouse status pill
+function WarehouseStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string }> = {
+    PENDING: { label: 'Pending', color: '#96A8BF' },
+    QUALITY_CHECK: { label: 'QC', color: '#E09E3C' },
+    PACKAGING: { label: 'Packing', color: '#E4AF4A' },
+    DONE: { label: 'Done', color: '#3CB87A' },
+  }
+  const m = map[status] || map.PENDING
+  return <Badge label={m.label} color={m.color} />
+}
+
+// Mini progress card for one warehouse stage
+function WarehouseStep({ label, done, total, accent }: { label: string; done: number; total: number; accent: string }) {
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+  const complete = total > 0 && done === total
+  return (
+    <div className="rounded-md border border-white/7 bg-[#0c1928] p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-[#96A8BF] font-semibold">{label}</div>
+        <div className="text-[11px] font-mono" style={{ color: complete ? '#3CB87A' : accent }}>
+          {complete ? '✓ ' : ''}{done}/{total}
+        </div>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: accent }} />
+      </div>
+    </div>
+  )
+}
+
+// E-Way / Invoice bill block with file link
+function BillBlock({ title, number, file, uploadedAt }: {
+  title: string
+  number: string | null
+  file: string | null
+  uploadedAt: string | null
+}) {
+  const has = !!number || !!file
+  return (
+    <div className={`rounded-md border p-3 ${has ? 'border-white/10 bg-[#0c1928]' : 'border-dashed border-white/10 bg-white/[0.01]'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold">{title}</div>
+        <Badge label={has ? 'Uploaded' : 'Pending'} color={has ? '#3CB87A' : '#E09E3C'} />
+      </div>
+      <div className="space-y-1">
+        <div className="text-[11px]">
+          <span className="text-[#4E6180]">No: </span>
+          <span className="text-[#EDE4D0] font-mono">{number || '—'}</span>
+        </div>
+        <div className="text-[11px]">
+          <span className="text-[#4E6180]">File: </span>
+          {file
+            ? (
+              <a
+                href={`/uploads/bills/${file}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#3CB87A] hover:underline break-all"
+              >
+                📄 View {title}
+              </a>
+            )
+            : <span className="text-[#4E6180] italic">No file</span>}
+        </div>
+        {uploadedAt && (
+          <div className="text-[10px] text-[#4E6180]">Uploaded: {fmtDate(uploadedAt)}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function DispatchDetailModal({ challan, onClose }: { challan: Challan; onClose: () => void }) {
   const images = parseImages(challan.dispatchImages)
+  const items = challan.challanItems
+
+  // Warehouse tracking aggregates (per-item warehouseStatus)
+  const total = items.length
+  const qcDone = items.filter((i) => ['QUALITY_CHECK', 'PACKAGING', 'DONE'].includes(i.warehouseStatus)).length
+  const packDone = items.filter((i) => ['PACKAGING', 'DONE'].includes(i.warehouseStatus)).length
+  const loadDone = items.filter((i) => i.warehouseStatus === 'DONE').length
+  const allDone = total > 0 && loadDone === total
+  const pendingCount = total - qcDone
+  const inQcCount = qcDone - packDone
+  const inPackCount = packDone - loadDone
+
+  const accountOk = challan.accountVerified
+  const gstAmt = Math.max(0, (challan.amountWithGst || 0) - (challan.amountWithoutGst || 0))
+  const itemsTotal = items.reduce((s, i) => s + (i.totalPrice || 0), 0)
+
   return (
     <Modal open onClose={onClose} title={`Dispatch — ${challan.challanNumber}`} wide>
       <div className="space-y-4">
+
+        {/* Handoff banner (kept from original) */}
         <div className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 p-3 text-[12px] text-[#E09E3C]">
-          <strong>Handoff from Coordinator.</strong> Send the WhatsApp tracking link from the "Send Tracking" tab to move this to "In Transit".
+          <strong>Handoff from Coordinator.</strong> Send the WhatsApp tracking link from the &quot;Send Tracking&quot; tab to move this to &quot;In Transit&quot;.
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-          <Row label="Challan #" value={challan.challanNumber} mono />
-          <Row label="Status" value={<Badge label={challan.status} color={STATUS_COLORS[challan.status]} />} />
-          <Row label="Client" value={challan.clientName} />
-          <Row label="Mobile" value={challan.clientMobile} mono />
-          <Row label="City" value={challan.clientCity} />
-          <Row label="Location" value={challan.clientLocation} />
-          <Row label="Freight Amount" value={fmtINR(challan.freightAmount || 0)} />
-          <Row label="Transporter" value={challan.transporterName} />
-          <Row label="Vehicle No." value={challan.vehicleNumber} mono />
-          <Row label="Dispatch Date" value={fmtDate(challan.dispatchDate)} />
-          <Row
-            label="WhatsApp"
-            value={
-              challan.whatsappSent
-                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.whatsappSentAt)}</span>
-                : <span className="text-[#E09E3C]">✗ Not sent</span>
-            }
-          />
-          <Row
-            label="Email"
-            value={
-              challan.emailSent
-                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.emailSentAt)}</span>
-                : <span className="text-[#E09E3C]">✗ Not sent</span>
-            }
-          />
-          <Row label="Items" value={`${challan.challanItems.length} line items`} />
-          <Row label="Total Amount" value={fmtINR(challan.amountTotal || 0)} />
-        </div>
-
-        {challan.trackingLink && (
-          <div className="rounded-md border border-white/7 bg-[#0c1928] p-3">
-            <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-1">Tracking Link</div>
-            <a
-              href={challan.trackingLink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[12px] text-[#3CB87A] hover:underline break-all"
-            >
-              {challan.trackingLink}
-            </a>
+        {/* 1. Dispatch Summary */}
+        <Card className="p-4">
+          <SectionTitle icon="📦" title="Dispatch Summary" sub="Core dispatch info handed off by Coordinator" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+            <Row label="Challan #" value={challan.challanNumber} mono />
+            <Row label="Quotation #" value={challan.quotationNumber} mono />
+            <Row label="Status" value={<Badge label={challan.status} color={STATUS_COLORS[challan.status]} />} />
+            <Row label="Dispatch Date" value={fmtDate(challan.dispatchDate)} />
+            <Row label="Client" value={challan.clientName} />
+            <Row label="Mobile" value={challan.clientMobile} mono />
+            <Row label="Transporter" value={challan.transporterName} />
+            <Row label="Vehicle No." value={challan.vehicleNumber} mono />
+            <Row label="Freight Amount" value={fmtINR(challan.freightAmount || 0)} />
+            <Row label="Total Amount" value={<span className="text-[#E4AF4A] font-semibold">{fmtINR(challan.amountTotal || 0)}</span>} />
+            <Row label="Items" value={`${items.length} line items`} />
+            <Row label="Expected Delivery" value={fmtDate(challan.expectedDeliveryDate)} />
           </div>
-        )}
+        </Card>
 
-        {/* Dispatch images */}
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-2">Dispatch Photos ({images.length})</div>
+        {/* 2. Client & Delivery Details */}
+        <Card className="p-4">
+          <SectionTitle icon="👤" title="Client & Delivery Details" sub="Billing / shipping / GST / contact" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+            <Row label="Billing Name" value={challan.billingName} />
+            <Row label="GST Number" value={challan.gstNumber} mono />
+            <Row label="City" value={challan.clientCity} />
+            <Row label="Mobile" value={challan.clientMobile} mono />
+            <div className="md:col-span-2 grid grid-cols-3 gap-2">
+              <div className="text-[#4E6180] text-[11px] pt-0.5">Billing Address</div>
+              <div className="col-span-2 text-[#EDE4D0] text-[12px] whitespace-pre-line leading-relaxed">
+                {challan.billingAddress || '—'}
+              </div>
+            </div>
+            <div className="md:col-span-2 grid grid-cols-3 gap-2">
+              <div className="text-[#4E6180] text-[11px] pt-0.5">Shipping Address</div>
+              <div className="col-span-2 text-[#EDE4D0] text-[12px] whitespace-pre-line leading-relaxed">
+                {challan.shippingAddress || '—'}
+              </div>
+            </div>
+            <Row label="Expected Delivery" value={fmtDate(challan.expectedDeliveryDate)} />
+            <Row label="Location" value={challan.clientLocation} />
+          </div>
+        </Card>
+
+        {/* 3. Items List */}
+        <Card className="p-4">
+          <SectionTitle
+            icon="📋"
+            title={`Items List (${items.length})`}
+            sub="Per-line item details with warehouse status"
+          />
+          {items.length === 0 ? (
+            <div className="text-[11px] text-[#4E6180] italic">No items recorded for this challan.</div>
+          ) : (
+            <div className="overflow-x-auto -mx-2 px-2">
+              <table className="w-full text-[11.5px]">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                    <th className="py-2 pr-3">Item</th>
+                    <th className="py-2 pr-3">Model</th>
+                    <th className="py-2 pr-3">Colour</th>
+                    <th className="py-2 pr-3 text-right">Qty</th>
+                    <th className="py-2 pr-3 text-right">Unit Price</th>
+                    <th className="py-2 pr-3 text-right">Total</th>
+                    <th className="py-2 pr-3">Warehouse</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => (
+                    <tr key={it.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-3 text-[#EDE4D0]">{it.itemName}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF] font-mono">{it.model || '—'}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF]">{it.colour || '—'}</td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0] font-mono">{it.quantity}</td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0] font-mono">{fmtINR(it.unitPrice)}</td>
+                      <td className="py-2 pr-3 text-right text-[#E4AF4A] font-mono">{fmtINR(it.totalPrice)}</td>
+                      <td className="py-2 pr-3"><WarehouseStatusBadge status={it.warehouseStatus} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-white/10">
+                    <td colSpan={5} className="py-2 pr-3 text-right text-[10px] uppercase tracking-wider text-[#4E6180]">
+                      Items Total
+                    </td>
+                    <td className="py-2 pr-3 text-right text-[#E4AF4A] font-mono font-semibold">{fmtINR(itemsTotal)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* 4. Warehouse Tracking */}
+        <Card className="p-4">
+          <SectionTitle
+            icon="🏭"
+            title="Warehouse Tracking"
+            sub="Per-item progress through QC → Packing → Loading (Done)"
+          />
+          {total === 0 ? (
+            <div className="text-[11px] text-[#4E6180] italic">No items to track.</div>
+          ) : allDone ? (
+            <div className="rounded-md border border-[#3CB87A]/30 bg-[#3CB87A]/8 p-3 text-[12px] text-[#3CB87A] font-medium">
+              ✓ Warehouse Complete — all {total} items passed QC, packed &amp; loaded
+              {challan.warehouseCompletedAt && (
+                <span className="text-[10px] text-[#96A8BF] block mt-0.5">Completed on {fmtDate(challan.warehouseCompletedAt)}</span>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <WarehouseStep label="Quality Check" done={qcDone} total={total} accent="#E09E3C" />
+                <WarehouseStep label="Packing" done={packDone} total={total} accent="#E4AF4A" />
+                <WarehouseStep label="Loading / Done" done={loadDone} total={total} accent="#3CB87A" />
+              </div>
+              <div className="text-[11px] text-[#96A8BF] leading-relaxed">
+                <span className="text-[#3CB87A] font-medium">{loadDone}</span> loaded
+                {' · '}
+                <span className="text-[#E4AF4A] font-medium">{inPackCount}</span> packing
+                {' · '}
+                <span className="text-[#E09E3C] font-medium">{inQcCount}</span> in QC
+                {' · '}
+                <span className="text-[#96A8BF] font-medium">{pendingCount}</span> pending
+                {' · '}
+                out of <span className="text-[#EDE4D0] font-medium">{total}</span> items
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* 5. Account Verification */}
+        <Card className="p-4">
+          <SectionTitle icon="💰" title="Account Verification" sub="Payment status verified by Account team" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+            <Row
+              label="Account Verified"
+              value={accountOk
+                ? <span className="text-[#3CB87A]">✓ Verified · {fmtDate(challan.accountVerifiedAt)}</span>
+                : <span className="text-[#E09E3C]">✗ Not verified</span>}
+            />
+            <Row
+              label="Payment Status"
+              value={<Badge label={challan.paymentStatus} color={STATUS_COLORS[challan.paymentStatus]} />}
+            />
+            <Row label="Payment Mode" value={challan.paymentMode} />
+            <Row label="Payment Type" value={challan.paymentType} />
+            <Row label="Amount Total" value={fmtINR(challan.amountTotal || 0)} />
+            <Row label="Amount Received" value={<span className="text-[#3CB87A]">{fmtINR(challan.amountReceived || 0)}</span>} />
+            <Row label="Amount Advance" value={<span className="text-[#E4AF4A]">{fmtINR(challan.amountAdvance || 0)}</span>} />
+            <Row label="Amount w/o GST" value={fmtINR(challan.amountWithoutGst || 0)} />
+            <Row label={`GST (${challan.gstPercentage || 0}%)`} value={fmtINR(gstAmt)} />
+            <Row label="Packing Charge" value={fmtINR(challan.packingCharge || 0)} />
+            <Row label="Shipping Charge" value={fmtINR(challan.shippingCharge || 0)} />
+            <Row label="Freight Amount" value={fmtINR(challan.freightAmount || 0)} />
+          </div>
+          {challan.accountRejected && challan.accountRejectReason && (
+            <div className="mt-3 rounded-md border border-[#E05050]/30 bg-[#E05050]/8 p-2.5 text-[11px] text-[#E05050]">
+              <strong>Rejected:</strong> {challan.accountRejectReason}
+            </div>
+          )}
+        </Card>
+
+        {/* 6. E-Way Bill & Invoice */}
+        <Card className="p-4">
+          <SectionTitle
+            icon="🧾"
+            title="E-Way Bill & Invoice"
+            sub="Bills uploaded by Account team (view files here)"
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <BillBlock
+              title="E-Way Bill"
+              number={challan.ewayBillNo}
+              file={challan.ewayBillFile}
+              uploadedAt={challan.billsUploadedAt}
+            />
+            <BillBlock
+              title="Invoice / Item Bill"
+              number={challan.invoiceNo}
+              file={challan.invoiceFile}
+              uploadedAt={challan.billsUploadedAt}
+            />
+          </div>
+        </Card>
+
+        {/* 7. Tracking & Communication */}
+        <Card className="p-4">
+          <SectionTitle icon="📡" title="Tracking & Communication" sub="Tracking link + WhatsApp / Email / Review status" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+            <div className="md:col-span-2 grid grid-cols-3 gap-2">
+              <div className="text-[#4E6180] text-[11px] pt-0.5">Tracking Link</div>
+              <div className="col-span-2 text-[12px]">
+                {challan.trackingLink
+                  ? (
+                    <a
+                      href={challan.trackingLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#3CB87A] hover:underline break-all"
+                    >
+                      {challan.trackingLink}
+                    </a>
+                  )
+                  : <span className="text-[#E09E3C]">Not sent yet — add from &quot;Send Tracking&quot; tab</span>}
+              </div>
+            </div>
+            <Row
+              label="WhatsApp"
+              value={challan.whatsappSent
+                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.whatsappSentAt)}</span>
+                : <span className="text-[#E09E3C]">✗ Not sent</span>}
+            />
+            <Row
+              label="Email"
+              value={challan.emailSent
+                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.emailSentAt)}</span>
+                : <span className="text-[#E09E3C]">✗ Not sent</span>}
+            />
+            <Row
+              label="Review Requested"
+              value={challan.reviewRequested
+                ? <span className="text-[#3CB87A]">✓ {fmtDate(challan.reviewRequestedAt)}</span>
+                : <span className="text-[#4E6180]">—</span>}
+            />
+            <Row
+              label="Review Received"
+              value={challan.reviewReceived
+                ? <Stars rating={challan.reviewRating} />
+                : <span className="text-[#4E6180]">—</span>}
+            />
+          </div>
+        </Card>
+
+        {/* 8. Dispatch Photos */}
+        <Card className="p-4">
+          <SectionTitle
+            icon="📸"
+            title={`Dispatch Photos (${images.length})`}
+            sub="Photos taken by Coordinator at dispatch time"
+          />
           {images.length === 0 ? (
             <div className="text-[11px] text-[#4E6180] italic">No dispatch photos uploaded.</div>
           ) : (
@@ -374,7 +722,7 @@ function DispatchDetailModal({ challan, onClose }: { challan: Challan; onClose: 
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         <div className="flex justify-end pt-1">
           <Btn variant="ghost" onClick={onClose}>Close</Btn>

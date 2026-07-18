@@ -970,3 +970,140 @@ Stage Summary:
 - Account team: Already has both E-Way AND Item Bill upload options (verified).
 - Demo: API-level end-to-end demo completed successfully with the CASACONNECT challan — all data extracted correctly in ~14 seconds.
 - Architecture: Mini-service pattern keeps the heavy VLM SDK out of the Next.js process, preventing OOM during route compilation. The Next.js `/api/challans/extract` route is a thin proxy to `http://127.0.0.1:3031/`.
+
+---
+Task ID: 4
+Agent: Subagent C (full-stack-developer)
+Task: Sales Client Status tracking tab (full pipeline timeline)
+
+Work Log:
+- Read worklog.md to understand prior work (v4 audit, Task 6 series, existing Sales tabs).
+- Reviewed `/api/challans/route.ts` GET handler: returns challans with `uploadedBy`, `challanItems.matchedItem`, `accountVerifiedBy`, `_count`. All scalar Challan fields (coordinatorApproved, warehouseCompleted, vehicleArranged, vehicleNumber, transporterName, freightAmount, dispatchDate, whatsappSent, emailSent, reviewReceived, reviewRating, etc.) are returned by Prisma findMany — relations for coordinatorApprovedBy/vehicleArrangedBy/billsUploadedBy are NOT included, so timeline shows "Account Team" / dates only where the User relation isn't fetched (accountVerifiedBy IS fetched, so its name is shown).
+- Reviewed coordinator.tsx warehouse tab + support.tsx dispatch/tracking patterns to match field semantics (warehouseStatus: PENDING → QUALITY_CHECK → PACKAGING → DONE; auditStatus: PENDING/APPROVED/REJECTED/ON_HOLD).
+- Updated `/home/z/my-project/src/app/page.tsx` SALES nav: inserted `{ id:'client-status', label:'Client Status', icon:'📍' }` between 'list' (My Challans) and 'hold' (Stock Hold).
+- Extended `ChallanItem` type in sales.tsx: added `auditStatus`, `auditedAt`, `warehouseStatus`, `warehouseDoneAt`.
+- Extended `Challan` type in sales.tsx: added `freightAmount`, `accountVerifiedAt`, `accountVerifiedBy` (made nullable), `coordinatorApproved`, `coordinatorApprovedAt`, `warehouseCompleted`, `warehouseCompletedAt`, `vehicleArranged`, `vehicleArrangedAt`, `vehicleNumber`, `transporterName`, `ewayBillNo`, `invoiceNo`, `billsUploadedAt`, `dispatchDate`, `trackingLink`, `whatsappSent`, `whatsappSentAt`, `emailSent`, `emailSentAt`, `reviewReceived`, `reviewRating`, `reviewReceivedAt`.
+- Added `{activeTab === 'client-status' && <ClientStatusTab user={user} />}` branch in SalesDashboard (kept all existing tabs untouched).
+- Implemented `ClientStatusTab`: 4 summary StatCards (Total / Pending Account / In Warehouse / Dispatched) + 2-column responsive grid (`lg:grid-cols-[340px_1fr]`): left = searchable scrollable challan list (`max-h-[70vh] overflow-y-auto`, thin scrollbar) with per-row current-stage badge; right = pipeline timeline card.
+- Implemented `PipelineTimeline` (extracted sub-component for memoized stage rebuild via `useMemo` on challan) rendering 8 stages:
+  1. Challan Uploaded (always DONE — shows sales person name + date)
+  2. Account Payment Verification (DONE/REJECTED/ACTIVE — verifier name, ₹ received/total, or reject reason)
+  3. Coordinator Audit (DONE/ACTIVE/PENDING-BLOCKED — N of M items approved)
+  4. Warehouse QC→Packing→Loading (DONE/IN PROGRESS/PENDING-BLOCKED — QC/Packing/Loading x/total counts + collapsible per-item warehouse status list when in progress)
+  5. Vehicle Arrangement (DONE/ACTIVE/PENDING-BLOCKED — vehicle no, transporter, freight ₹)
+  6. Dispatch (DONE/ACTIVE/PENDING-BLOCKED — dispatch date)
+  7. Tracking Sent (DONE if both WhatsApp+Email, ACTIVE PARTIAL if only one, PENDING-BLOCKED otherwise)
+  8. Client Review (DONE with star rating + review text, ACTIVE/PENDING-BLOCKED otherwise)
+- Implemented `StageRow`: icon circle with colored ring + glow, animated `animate-pulse` for active stage, gradient vertical connector line to next stage, stage name + status Badge + detail text + timestamp.
+- Color palette strictly gold/green/amber/gray/red — NO indigo, NO blue, NO purple. Stage colors: done=#3CB87A green, active=#E09E3C orange (pulsing), pending=#96A8BF gray, rejected=#E05050 red. Blocked downstream stages use #4E6180 dark gray with 🔒 icon.
+- Helper `computeCurrentStage(c)` derives a single glanceable badge (UPLOADED/VERIFIED/REJECTED/AUDITED/WAREHOUSE/PACKED/VEHICLE/DISPATCHED/REVIEWED) for the left list rows.
+- Fixed ESLint `react-hooks/set-state-in-effect` error: replaced `useEffect`-based auto-select with render-time derived `selected = explicitMatch || challans[0] || null` (no cascading re-renders).
+- Ran `bun run lint` — clean exit 0 (no errors, no warnings).
+- Verified dev server: GET / 200 responses, no compile errors.
+
+Stage Summary:
+- New "Client Status" tab fully wired into Sales sidebar (between My Challans and Stock Hold).
+- Sales users can now pick any of their challans from a searchable left list and instantly see the full end-to-end pipeline (upload → account verify → coordinator audit → warehouse QC/packing/loading → vehicle → dispatch → tracking → client review) as a vertical timeline with per-stage status, timestamps, amounts, and per-item warehouse breakdown.
+- No API routes modified; only `src/app/page.tsx` and `src/components/laxree/dashboards/sales.tsx` touched. All other Sales tabs (Dashboard, Check Stock, Upload, My Challans, Stock Hold) preserved unchanged. Existing `Challan`/`ChallanItem` types extended (additive only — no field removed/renamed), so existing usages still compile.
+- Lint clean; dev server healthy.
+
+---
+Task ID: 2
+Agent: Subagent A (full-stack-developer)
+Task: Enhance Support DispatchDetailModal with full challan details
+
+Work Log:
+- Read worklog.md (prior workflow-redesign-support / workflow-redesign-verify / challan-autofill-demo tasks)
+- Read support.tsx (815 lines) — found DispatchDetailModal at line 303 only showing 14 basic fields (challan #, status, client, mobile, city, freight, transporter, vehicle, dispatch date, WhatsApp/Email status, items count, total amount, tracking link, dispatch photos). The Challan type at lines 10-37 was the narrow version with only ~27 scalar fields and `challanItems: { id, itemName, quantity }[]`.
+- Read /api/challans/route.ts — confirmed it does `findMany({ include: { challanItems: { include: { matchedItem: true } }, accountVerifiedBy, uploadedBy, _count } })` so ALL Challan + ChallanItem scalar fields are returned by the API
+- Read prisma/schema.prisma — confirmed all field names: ewayBillNo, ewayBillFile, invoiceNo, invoiceFile, billingName, billingAddress, shippingAddress, gstNumber, amountWithoutGst, amountWithGst, gstPercentage, amountTotal, amountAdvance, amountReceived, packingCharge, shippingCharge, paymentType, paymentStatus, paymentMode, accountVerified, accountVerifiedAt, accountRejected, accountRejectReason, coordinatorApproved, warehouseCompleted, warehouseCompletedAt, vehicleArranged, quotationNumber, billsUploadedAt. Also confirmed ChallanItem fields: itemNumber, model, colour, unitPrice, totalPrice, auditStatus, warehouseStatus (PENDING|QUALITY_CHECK|PACKAGING|DONE)
+- Read ui.tsx (Card, SectionTitle, Badge, Modal wide, Btn, etc.) and types.ts (fmtINR, fmtDate, STATUS_COLORS)
+- EXPANDED the Challan type (lines 10-100) to include all 40+ scalar fields (billing, financials, account verification, coordinator, bills, dispatch, communication, reviews) AND added a separate `ChallanItem` type with full item details (id, itemName, itemNumber, model, colour, quantity, unitPrice, totalPrice, auditStatus, warehouseStatus, optional matchedItem). All fields the API returns are now typed.
+- REPLACED the DispatchDetailModal (was ~82 lines, now ~295 lines) with a sectioned layout using Card + SectionTitle blocks:
+  * (Kept) Handoff banner — "Handoff from Coordinator. Send the WhatsApp tracking link..."
+  * 1. Dispatch Summary — challan #, quotation #, status, dispatch date, client, mobile, transporter, vehicle, freight, total, items count, expected delivery
+  * 2. Client & Delivery Details — billing name, GST #, city, mobile, billing address (multi-line), shipping address (multi-line), expected delivery, location
+  * 3. Items List (N) — table with columns: Item, Model, Colour, Qty, Unit Price, Total, Warehouse status badge. Includes Items Total footer row.
+  * 4. Warehouse Tracking — 3 progress cards (Quality Check / Packing / Loading-Done) each with `done/total` counter and a gold/amber/green progress bar; plus a textual breakdown of how many items are loaded/packing/in-QC/pending. Shows "✓ Warehouse Complete" banner when all items DONE.
+  * 5. Account Verification — Account Verified ✓/✗ + date, Payment Status badge, Payment Mode/Type, Amount Total / Received / Advance / w/o GST / GST(%) / Packing / Shipping / Freight. Shows rejection reason banner if rejected.
+  * 6. E-Way Bill & Invoice — two BillBlock cards showing bill number, file link (`/uploads/bills/{file}` target=_blank "📄 View {title}"), upload date, "Pending" badge if no number/file
+  * 7. Tracking & Communication — tracking link (clickable, full-width), WhatsApp ✓/✗, Email ✓/✗, Review Requested ✓/—, Review Received (Stars rating)
+  * 8. Dispatch Photos (kept from original)
+- ADDED 3 helper components used inside the modal:
+  * `WarehouseStatusBadge({status})` — maps PENDING/QUALITY_CHECK/PACKAGING/DONE → colored Badge (grey/amber/gold/green)
+  * `WarehouseStep({label, done, total, accent})` — mini progress card with `done/total` counter, ✓ when complete, and a colored progress bar (width = done/total%)
+  * `BillBlock({title, number, file, uploadedAt})` — bill display card with number, file download/view link, upload date, "Pending" badge when no data
+- Did NOT touch DispatchTab, DispatchList, TrackingTab, ReviewTab, DashboardTab, API routes, sidebar nav — strictly limited to DispatchDetailModal + Challan type + 3 new in-file helpers
+- Theme compliance: Navy (#0c1928, #111f32) backgrounds, Gold (#E4AF4A) accents, Support orange (#E09E3C) for handoff/pending, success green (#3CB87A) for verified/sent/DONE badges, danger red (#E05050) for rejection — NO indigo/blue
+- Used `wide` Modal prop (max-w-3xl) so the rich content has room; the Modal component already has `max-h-[90vh] overflow-y-auto` so it scrolls naturally when content is long
+- All money via `fmtINR`, all dates via `fmtDate`, all status badges via `STATUS_COLORS`
+- File link rendering exactly per spec: `<a href={`/uploads/bills/${file}`} target="_blank">📄 View {title}</a>`
+- File link "Pending" state per spec: shows "Pending" amber badge + "No file" italic text when neither number nor file exists
+- Verification:
+  * `npx eslint src/components/laxree/dashboards/support.tsx` → ZERO output (clean)
+  * `npx tsc --noEmit 2>&1 | grep dashboards/support` → ZERO matches (no TS errors in support.tsx)
+  * `bun run lint` → 0 errors across the whole project (pre-existing sales.tsx set-state-in-effect error from a concurrent agent was resolved independently)
+- Note: A concurrent agent's Write tool briefly overwrote the file with the original narrow Challan type while keeping my new modal code (causing transient TS errors). I re-applied the type expansion; final file is 1163 lines, +396/-48 from git HEAD.
+
+Stage Summary:
+- DispatchDetailModal in support.tsx now shows the FULL challan context that Support team needs after a Coordinator dispatch (resolves the "jab dispatch hua toh aage support team k pas detailed nahi gayi" complaint):
+  * Full items list with per-item warehouse status (QC / Packing / Done)
+  * E-Way Bill + Invoice section with clickable file links (or "Pending")
+  * Warehouse tracking with 3 progress bars (QC / Packing / Loading) and overall completion status
+  * Account verification section (verified ✓/✗, payment status, all amounts)
+  * Full client contact (billing name, billing/shipping addresses, GST #, expected delivery)
+  * Dispatch summary, tracking & communication status, dispatch photos
+- Challan TS type expanded to fully match the API response (all 40+ scalar fields + full ChallanItem with model/colour/unitPrice/totalPrice/warehouseStatus/auditStatus)
+- 3 new in-file helper components (WarehouseStatusBadge, WarehouseStep, BillBlock) keep the modal code clean
+- LaxRee dark theme preserved (navy + gold + Support orange + success green); no indigo/blue
+- ESLint clean, TypeScript clean for support.tsx
+- Strict scope: ONLY DispatchDetailModal + Challan type touched; no changes to DispatchTab, DispatchList, other tabs, API routes, or sidebar nav
+
+---
+Task ID: 3
+Agent: Subagent B (full-stack-developer)
+Task: Account real PDF file upload + make PDFs viewable by coordinator/sales
+
+Work Log:
+- Read previous worklog (Task v4-audit, plus Subagent A untracked work on sales.tsx adding ClientStatusTab)
+- Inspected existing /api/challans/[id]/bills POST route (saves bill NUMBERS + notifies COORDINATOR & SALES) — kept untouched
+- Inspected BillsCard in account.tsx — confirmed it had text-input filename fields for "E-Way Bill File" and "Invoice File"
+- Inspected coordinator BillsTab + vehicle arrangement bill preview — confirmed both used text-only filenames (no download links)
+- Inspected sales MyChallansTab — confirmed it had no bill display section at all (only pdfFileName for sales' own upload)
+- Created new API endpoint: src/app/api/challans/[id]/bills/upload/route.ts
+  * Accepts multipart/form-data with `type` ("eway" | "invoice") + `file` (PDF)
+  * Auth: only ACCOUNT and ADMIN roles (403 otherwise)
+  * Validates PDF by mimetype OR extension; enforces 10 MB size cap
+  * Writes to public/uploads/bills/{challanId}_{type}_{timestamp}.pdf (mkdir recursive)
+  * Updates challan record: ewayBillFile or invoiceFile, billsUploadedAt, billsUploadedById
+  * Mirrors workflow stage marking logic (EWAY_BILL / ITEM_BILL)
+  * Sends BILLS_UPLOADED notifications to COORDINATOR + SALES
+  * Returns { ok, filename, type }
+- Rewrote BillsCard component in account.tsx:
+  * Removed 2 filename text-inputs
+  * Added 2-column responsive grid: 🚚 E-Way Bill (left) | 🧾 Item Bill / Invoice (right)
+  * Each column keeps the existing bill NUMBER input (saved via existing /bills POST)
+  * Added new PdfUploadButton sub-component (styled <label> wrapping a sr-only <input type=file accept=".pdf,application/pdf"> — resets via key so same file can be re-selected)
+  * On file select: immediately POSTs FormData to /api/challans/{id}/bills/upload (separate from the number-save flow)
+  * Per-column upload status: spinner "Uploading…", green "📄 View PDF + ✓ Uploaded" link, red "✗ {error}" message, idle hint
+  * "Replace PDF" label swaps in once a file exists; disabled while uploading
+  * Renamed bottom button to "💾 Save Bill Numbers" with helper text "PDFs upload instantly · Numbers save on click"
+- Updated coordinator.tsx (two places):
+  * Vehicle Arrangement bill preview: replaced text "📎 filename" with clickable <a href="/uploads/bills/...">📄 View PDF</a> (opens in new tab), and broadened the conditional to render even when only a file (no number) exists
+  * BillsTab read-only cards: same transformation — added View PDF links, broadened "✓ Uploaded" badge condition to include file-only case
+- Updated sales.tsx:
+  * Extended local Challan type with ewayBillFile, invoiceFile, billsUploadedBy (previously only had ewayBillNo/invoiceNo/billsUploadedAt)
+  * Inserted a new "🧾 Bills Uploaded by Account" panel inside the expandable MyChallansTab challan card, AFTER the items table, with 2-column E-Way | Invoice layout, badges, bill numbers, and "📄 View PDF" download links; plus "Uploaded by {name} • {date}" footer
+- Ensured public/uploads/bills/ directory exists (mkdir -p)
+- Ran `bun run lint` — passes cleanly (the brief 211:43 ClientStatusTab error was a transient/cached state from a stash+pop interleave; re-running lint shows zero errors)
+- Verified both /bills and /bills/upload endpoints return proper JSON `{"error":"Unauthorized"}` when called without a session (auth gating confirmed, dev server still serving 200s on `/`)
+
+Stage Summary:
+- Account team now uploads REAL PDF files (no more typing filenames) via a 2-column E-Way | Invoice UI
+- Each PDF uploads instantly to /api/challans/[id]/bills/upload with in-place progress/success/error feedback and "View PDF / Replace PDF" controls
+- Bill numbers still saved separately via the existing /bills POST (button renamed to "Save Bill Numbers" for clarity)
+- Coordinator sees "📄 View PDF" download links in both the Vehicle Arrangement preview and the Latest Bills tab
+- Sales sees a new "Bills Uploaded by Account" panel inside each expanded My Challans card with 2-column E-Way | Invoice download links + uploader/timestamp
+- All PDFs are served from /uploads/bills/{filename} (public dir) and open in a new tab
+- Existing /bills POST route, notifications, and workflow stage marking are preserved; the upload route adds the same notifications so both flows stay in sync
+- Dark theme preserved (bg #0c1928, text #EDE4D0, gold #E4AF4A, green success #3CB87A, red error #E05050); no indigo/blue introduced; existing shadcn-style UI primitives reused (Card, Btn, Input, Badge, SectionTitle)

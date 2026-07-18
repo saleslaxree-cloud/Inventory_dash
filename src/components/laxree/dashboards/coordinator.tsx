@@ -809,12 +809,12 @@ function VehicleTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: 
                       <div>
                         <div className="text-[#4E6180]">E-Way Bill</div>
                         <div className="text-[#EDE4D0]">{c.ewayBillNo || '—'}</div>
-                        {c.ewayBillFile && <div className="text-[10px] text-[#9B6ED4]">📎 {c.ewayBillFile}</div>}
+                        {c.ewayBillFile && <a href={`/uploads/bills/${c.ewayBillFile}`} target="_blank" rel="noreferrer" className="text-[10px] text-[#3CB87A] hover:underline">📄 View E-Way PDF</a>}
                       </div>
                       <div>
                         <div className="text-[#4E6180]">Invoice</div>
                         <div className="text-[#EDE4D0]">{c.invoiceNo || '—'}</div>
-                        {c.invoiceFile && <div className="text-[10px] text-[#9B6ED4]">📎 {c.invoiceFile}</div>}
+                        {c.invoiceFile && <a href={`/uploads/bills/${c.invoiceFile}`} target="_blank" rel="noreferrer" className="text-[10px] text-[#3CB87A] hover:underline">📄 View Invoice PDF</a>}
                       </div>
                     </div>
                   )}
@@ -1101,7 +1101,7 @@ function BillsTab({ refreshKey }: { refreshKey: number }) {
                     <div className="text-[#EDE4D0] mt-1">No: <span className="font-mono">{c.ewayBillNo}</span></div>
                   )}
                   {c.ewayBillFile && (
-                    <div className="text-[10px] text-[#9B6ED4] mt-0.5">📎 {c.ewayBillFile}</div>
+                    <a href={`/uploads/bills/${c.ewayBillFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-[#3CB87A] hover:underline mt-0.5">📄 View E-Way PDF</a>
                   )}
                 </div>
 
@@ -1115,7 +1115,7 @@ function BillsTab({ refreshKey }: { refreshKey: number }) {
                     <div className="text-[#EDE4D0] mt-1">No: <span className="font-mono">{c.invoiceNo}</span></div>
                   )}
                   {c.invoiceFile && (
-                    <div className="text-[10px] text-[#9B6ED4] mt-0.5">📎 {c.invoiceFile}</div>
+                    <a href={`/uploads/bills/${c.invoiceFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-[#3CB87A] hover:underline mt-0.5">📄 View Invoice PDF</a>
                   )}
                 </div>
               </div>

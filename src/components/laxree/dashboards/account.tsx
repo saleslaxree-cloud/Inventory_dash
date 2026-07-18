@@ -610,20 +610,48 @@ function BillsTab({ user }: { user: SessionUser }) {
 
 function BillsCard({ challan: c, user, onSaved }: { challan: Challan; user: SessionUser; onSaved: () => void }) {
   const [ewayNo, setEwayNo]       = useState(c.ewayBillNo || '')
-  const [ewayFile, setEwayFile]   = useState(c.ewayBillFile || '')
   const [invNo, setInvNo]         = useState(c.invoiceNo || '')
-  const [invFile, setInvFile]     = useState(c.invoiceFile || '')
   const [saving, setSaving]       = useState(false)
   const [err, setErr]             = useState('')
   const [ok, setOk]               = useState('')
+  // PDF upload state (per type)
+  const [ewayFile, setEwayFile]   = useState(c.ewayBillFile || '')
+  const [invFile, setInvFile]     = useState(c.invoiceFile || '')
+  const [ewayUploading, setEwayUploading] = useState(false)
+  const [invUploading, setInvUploading]   = useState(false)
+  const [ewayErr, setEwayErr]     = useState('')
+  const [invErr, setInvErr]       = useState('')
 
-  const hasEway    = !!c.ewayBillNo || !!c.ewayBillFile
-  const hasInvoice = !!c.invoiceNo || !!c.invoiceFile
+  const hasEway    = !!ewayNo || !!ewayFile
+  const hasInvoice = !!invNo || !!invFile
+
+  // Upload PDF file to the server
+  const uploadPdf = async (type: 'eway' | 'invoice', file: File) => {
+    if (type === 'eway') { setEwayErr(''); setEwayUploading(true) }
+    else { setInvErr(''); setInvUploading(true) }
+    try {
+      const fd = new FormData()
+      fd.append('type', type)
+      fd.append('file', file)
+      const res = await fetch(`/api/challans/${c.id}/bills/upload`, { method: 'POST', body: fd })
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : null
+      if (!res.ok) throw new Error(data?.error || 'Upload failed')
+      if (type === 'eway') { setEwayFile(data.filename); setOk('E-Way bill PDF uploaded') }
+      else { setInvFile(data.filename); setOk('Invoice PDF uploaded') }
+      onSaved()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Upload failed'
+      if (type === 'eway') setEwayErr(msg); else setInvErr(msg)
+    } finally {
+      if (type === 'eway') setEwayUploading(false); else setInvUploading(false)
+    }
+  }
 
   const save = async () => {
     setErr(''); setOk('')
-    if (!ewayNo && !ewayFile && !invNo && !invFile) {
-      setErr('Enter at least one bill number or filename')
+    if (!ewayNo && !invNo && !ewayFile && !invFile) {
+      setErr('Enter at least one bill number or upload a PDF')
       return
     }
     setSaving(true)
@@ -634,10 +662,10 @@ function BillsCard({ challan: c, user, onSaved }: { challan: Challan; user: Sess
         invoiceNo: invNo || undefined,
         invoiceFile: invFile || undefined,
       })
-      setOk('Bills uploaded successfully')
+      setOk('Bill numbers saved successfully')
       onSaved()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to upload')
+      setErr(e instanceof Error ? e.message : 'Failed to save')
     } finally { setSaving(false) }
   }
 
@@ -658,21 +686,58 @@ function BillsCard({ challan: c, user, onSaved }: { challan: Challan; user: Sess
         </div>
       </div>
 
-      {/* E-Way section */}
-      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3 mb-2">
-        <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🚚 E-Way Bill</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      {/* Two-column bill upload: E-Way | Invoice */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        {/* E-Way Bill column */}
+        <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🚚 E-Way Bill</div>
           <Input label="E-Way Bill Number" value={ewayNo} onChange={setEwayNo} placeholder="EWB-000000000" />
-          <Input label="E-Way Bill File (filename)" value={ewayFile} onChange={setEwayFile} placeholder="eway-bill.pdf" />
+          <div className="mt-2">
+            <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-1">PDF File</div>
+            {ewayUploading ? (
+              <div className="flex items-center gap-2 text-[11px] text-[#E09E3C] py-2"><span className="animate-spin">⏳</span> Uploading…</div>
+            ) : ewayFile ? (
+              <div className="space-y-1.5">
+                <a href={`/uploads/bills/${ewayFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#3CB87A] hover:underline">📄 View PDF</a>
+                <label className="block cursor-pointer rounded-md border border-white/10 bg-white/[0.03] px-3 py-1.5 text-center text-[10px] text-[#96A8BF] hover:border-[#3CB87A]/30 hover:text-[#3CB87A] transition-all">
+                  Replace PDF
+                  <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPdf('eway', f); e.target.value = '' }} />
+                </label>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-white/15 bg-white/[0.02] px-3 py-3 text-[11px] text-[#96A8BF] hover:border-[#3CB87A]/30 hover:text-[#3CB87A] transition-all">
+                <span>📤</span> Upload E-Way PDF
+                <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPdf('eway', f); e.target.value = '' }} />
+              </label>
+            )}
+            {ewayErr && <div className="text-[10px] text-[#E05050] mt-1">✗ {ewayErr}</div>}
+          </div>
         </div>
-      </div>
 
-      {/* Invoice section */}
-      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3 mb-3">
-        <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🧾 Item Bill / Invoice</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {/* Invoice column */}
+        <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🧾 Item Bill / Invoice</div>
           <Input label="Invoice Number" value={invNo} onChange={setInvNo} placeholder="INV-2026-0001" />
-          <Input label="Invoice File (filename)" value={invFile} onChange={setInvFile} placeholder="invoice.pdf" />
+          <div className="mt-2">
+            <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-1">PDF File</div>
+            {invUploading ? (
+              <div className="flex items-center gap-2 text-[11px] text-[#E09E3C] py-2"><span className="animate-spin">⏳</span> Uploading…</div>
+            ) : invFile ? (
+              <div className="space-y-1.5">
+                <a href={`/uploads/bills/${invFile}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#3CB87A] hover:underline">📄 View PDF</a>
+                <label className="block cursor-pointer rounded-md border border-white/10 bg-white/[0.03] px-3 py-1.5 text-center text-[10px] text-[#96A8BF] hover:border-[#3CB87A]/30 hover:text-[#3CB87A] transition-all">
+                  Replace PDF
+                  <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPdf('invoice', f); e.target.value = '' }} />
+                </label>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-white/15 bg-white/[0.02] px-3 py-3 text-[11px] text-[#96A8BF] hover:border-[#3CB87A]/30 hover:text-[#3CB87A] transition-all">
+                <span>📤</span> Upload Invoice PDF
+                <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPdf('invoice', f); e.target.value = '' }} />
+              </label>
+            )}
+            {invErr && <div className="text-[10px] text-[#E05050] mt-1">✗ {invErr}</div>}
+          </div>
         </div>
       </div>
 
@@ -687,10 +752,10 @@ function BillsCard({ challan: c, user, onSaved }: { challan: Challan; user: Sess
       {ok && <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A] mb-2">✓ {ok}</div>}
 
       <Btn variant="success" size="sm" className="w-full" onClick={save} disabled={saving}>
-        {saving ? 'Uploading…' : '📤 Upload Bills'}
+        {saving ? 'Saving…' : '💾 Save Bill Numbers'}
       </Btn>
       <div className="text-[10px] text-[#4E6180] mt-2 text-center">
-        Will be recorded as uploaded by <span className="text-[#96A8BF]">{user.name}</span>
+        PDFs upload instantly. Bill numbers saved by <span className="text-[#96A8BF]">{user.name}</span>
       </div>
     </div>
   )
