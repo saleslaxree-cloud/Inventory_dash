@@ -86,12 +86,12 @@ export default function Home() {
       { id:'activity', label:'Activity Log', icon:'📜' },
     ],
     SALES: [
-      { id:'dashboard', label:'Dashboard', icon:'📊' },
       { id:'stock-check', label:'Check Stock', icon:'📦' },
-      { id:'list', label:'My Challans', icon:'🧾' },
-      { id:'client-status', label:'Client Status', icon:'📍' },
-      { id:'hold', label:'Stock Hold', icon:'🔒' },
       { id:'upload', label:'Upload Challan', icon:'📤' },
+      { id:'client-status', label:'Client Status', icon:'📍' },
+      { id:'bills', label:'E-Way & Item Bill', icon:'🧾' },
+      { id:'list', label:'My Challans', icon:'📋' },
+      { id:'dashboard', label:'Dashboard', icon:'📊' },
     ],
     ACCOUNT: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },

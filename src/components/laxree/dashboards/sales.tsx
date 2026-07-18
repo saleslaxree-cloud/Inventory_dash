@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFetch, apiPost, apiPatch } from '../use-fetch'
+import { useFetch, apiPost } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
 import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
 
@@ -47,6 +47,9 @@ type ChallanItem = {
   expectedAvailabilityDays: number | null
   availableQty: number | null
   matchedItem: Item | null
+  matchedItemId: string | null
+  auditStatus: string | null      // PENDING | APPROVED | REJECTED
+  warehouseStatus: string | null  // PENDING | QUALITY_CHECK | PACKAGING | DONE
 }
 
 type Challan = {
@@ -74,6 +77,25 @@ type Challan = {
   accountVerified: boolean
   accountRejected: boolean
   accountRejectReason: string | null
+  accountVerifiedBy: { id: string; name: string; role: string } | null
+  accountVerifiedAt: string | null
+  coordinatorApproved: boolean
+  coordinatorApprovedAt: string | null
+  warehouseCompleted: boolean
+  warehouseCompletedAt: string | null
+  vehicleArranged: boolean
+  vehicleArrangedAt: string | null
+  vehicleNumber: string | null
+  transporterName: string | null
+  freightAmount: number | null
+  dispatchDate: string | null
+  whatsappSent: boolean
+  whatsappSentAt: string | null
+  emailSent: boolean
+  emailSentAt: string | null
+  reviewReceived: string | null
+  reviewReceivedAt: string | null
+  reviewRating: number | null
   status: string
   pdfFileName: string | null
   createdAt: string
@@ -111,47 +133,6 @@ type UploadResponse = {
   message: string
 }
 
-type StockRow = {
-  id: string
-  category: string
-  itemName: string
-  model: string
-  colour: string | null
-  unit: string
-  inward: number
-  dispatched: number
-  balance: number
-  onHold: number
-  available: number
-  minStock: number
-  fastMoving: boolean
-  status: 'OK' | 'LOW' | 'OUT_OF_STOCK'
-}
-
-type StockHold = {
-  id: string
-  date: string
-  category: string
-  itemName: string
-  model: string
-  colour: string | null
-  holdQty: number
-  clientName: string
-  advanceAmount: number
-  remarks: string | null
-  status: 'ACTIVE' | 'RELEASED' | 'CONVERTED'
-  item: { id: string; currentStock: number; category: string; itemName: string; model: string; colour: string | null }
-  heldBy?: { name: string; role: string }
-}
-
-const CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Banquet Furniture','Linen','Bath Linen','Bath Tubs','Spare Parts']
-
-const HOLD_STATUS_COLOR: Record<string, string> = {
-  ACTIVE: '#E09E3C',
-  RELEASED: '#4E6180',
-  CONVERTED: '#3CB87A',
-}
-
 const STOCK_STATUS_COLOR: Record<string, string> = {
   AVAILABLE: '#3CB87A',
   ON_HOLD: '#E09E3C',
@@ -172,12 +153,12 @@ export function SalesDashboard({ user, activeTab, onTabChange }: {
 }) {
   return (
     <div className="space-y-4">
-      {activeTab === 'dashboard'      && <DashboardTab user={user} />}
       {activeTab === 'stock-check'    && <StockCheckTab />}
       {activeTab === 'upload'         && <UploadTab user={user} onDone={() => onTabChange('list')} />}
-      {activeTab === 'list'           && <MyChallansTab user={user} />}
       {activeTab === 'client-status'  && <ClientStatusTab user={user} />}
-      {activeTab === 'hold'           && <StockHoldTab />}
+      {activeTab === 'bills'          && <BillsTab user={user} />}
+      {activeTab === 'list'           && <MyChallansTab user={user} />}
+      {activeTab === 'dashboard'      && <DashboardTab user={user} />}
     </div>
   )
 }
@@ -1263,202 +1244,188 @@ function DetailPair({ label, value, accent }: { label: string; value: React.Reac
 }
 
 /* ============================================================ */
-/* Tab 5: Stock Hold — existing functionality                   */
+/* Tab: E-Way & Item Bills — view PDFs uploaded by Account team  */
 /* ============================================================ */
 
-function StockHoldTab() {
-  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
-  const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
-  const { data: holdsData, loading: holdsLoading, refresh: refreshHolds } = useFetch<{ holds: StockHold[] }>('/api/stock-hold?status=ACTIVE')
+function BillsTab({ user }: { user: SessionUser }) {
+  const url = `/api/challans?role=SALES&userId=${user.id}`
+  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>(url)
 
-  const [date, setDate] = useState('')
-  const [category, setCategory] = useState('')
-  const [itemId, setItemId] = useState('')
-  const [holdQty, setHoldQty] = useState('')
-  const [clientName, setClientName] = useState('')
-  const [advanceAmount, setAdvanceAmount] = useState('')
-  const [remarks, setRemarks] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [releasing, setReleasing] = useState<string | null>(null)
-  const [err, setErr] = useState('')
-  const [ok, setOk] = useState('')
-
-  const items = itemsData?.items || []
-  const filteredItems = useMemo(
-    () => items.filter((i) => !category || i.category === category),
-    [items, category],
+  const challans = data?.challans || []
+  const withBills = challans.filter((c) => c.ewayBillNo || c.ewayBillFile || c.invoiceNo || c.invoiceFile)
+  const waiting = challans.filter((c) =>
+    c.accountVerified && !c.accountRejected &&
+    !(c.ewayBillNo || c.ewayBillFile || c.invoiceNo || c.invoiceFile),
   )
-  const selectedItem = useMemo(() => items.find((i) => i.id === itemId) || null, [items, itemId])
-  const regRow = useMemo(() => regData?.rows.find((r) => r.id === itemId) || null, [regData, itemId])
-  const availableAfterHold = regRow?.available ?? null
+  const needApproval = challans.filter((c) => !c.accountVerified && !c.accountRejected)
 
-  const holds = holdsData?.holds || []
   const summary = useMemo(() => ({
-    total: holds.length,
-    totalQty: holds.reduce((s, h) => s + h.holdQty, 0),
-    totalAdvance: holds.reduce((s, h) => s + h.advanceAmount, 0),
-  }), [holds])
+    total: challans.length,
+    ready: withBills.length,
+    waiting: waiting.length,
+    needApproval: needApproval.length,
+  }), [challans, withBills, waiting, needApproval])
 
-  const qtyNum = Number(holdQty) || 0
-  const qtyValid = qtyNum > 0 && (availableAfterHold === null || qtyNum <= availableAfterHold)
-
-  const reset = () => {
-    setDate(''); setCategory(''); setItemId(''); setHoldQty(''); setClientName('')
-    setAdvanceAmount(''); setRemarks('')
-  }
-
-  const submit = async () => {
-    setErr(''); setOk('')
-    if (!itemId) { setErr('Select an item'); return }
-    if (!clientName.trim()) { setErr('Client name is required'); return }
-    if (qtyNum <= 0) { setErr('Hold quantity must be greater than 0'); return }
-    if (availableAfterHold !== null && qtyNum > availableAfterHold) {
-      setErr(`Cannot hold ${qtyNum}. Only ${availableAfterHold} available (after existing holds).`); return
-    }
-    setSaving(true)
-    try {
-      const res = await apiPost('/api/stock-hold', {
-        itemId,
-        holdQty: qtyNum,
-        clientName: clientName.trim(),
-        advanceAmount: Number(advanceAmount) || 0,
-        remarks: remarks || undefined,
-      })
-      setOk(res.message || `Held ${qtyNum} unit(s) for ${clientName}`)
-      reset()
-      refreshReg(); refreshHolds()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to place hold')
-    } finally { setSaving(false) }
-  }
-
-  const release = async (id: string) => {
-    setErr(''); setOk('')
-    setReleasing(id)
-    try {
-      const res = await apiPatch('/api/stock-hold', { id, status: 'RELEASED' })
-      setOk(res.message || 'Hold released — stock returned to available pool')
-      refreshReg(); refreshHolds()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to release hold')
-    } finally { setReleasing(null) }
-  }
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading bills…</div>
+  if (error) return (
+    <Card className="p-4">
+      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+    </Card>
+  )
 
   return (
     <div className="space-y-4">
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard label="Active Holds" value={summary.total} accent="#E4AF4A" icon="🔒" />
-        <StatCard label="Total Held Qty" value={summary.totalQty} accent="#E09E3C" icon="📦" />
-        <StatCard label="Total Advance" value={fmtINR(summary.totalAdvance)} accent="#3CB87A" icon="💰" />
+      {/* Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Total Challans"   value={summary.total}        accent="#E4AF4A" icon="🧾" />
+        <StatCard label="Bills Ready"      value={summary.ready}        accent="#3CB87A" icon="✅" />
+        <StatCard label="Awaiting Bills"   value={summary.waiting}      accent="#E09E3C" icon="⏳" />
+        <StatCard label="Needs Approval"   value={summary.needApproval} accent="#E05050" icon="🔒" />
       </div>
 
       <Card className="p-4">
-        <SectionTitle icon="🔒" title="Place Stock Hold" sub="Reserve stock against advance payment — held units excluded from outward availability" />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <Input label="Date" type="date" value={date} onChange={setDate} />
-          <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
-            options={[{ value: '', label: '— All Categories —' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]} />
-          <Select label="Item" value={itemId} onChange={setItemId} required
-            options={[{ value: '', label: '— Select Item —' }, ...filteredItems.map((it) => ({
-              value: it.id,
-              label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
-            }))]} />
-          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
-          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
-          <div>
-            <Input label="Hold Quantity" type="number" value={holdQty} onChange={setHoldQty} placeholder="0" required step="1" />
-            {itemId && (
-              <div className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${
-                availableAfterHold === null ? 'text-[#96A8BF]' :
-                availableAfterHold <= 0 ? 'text-[#E05050]' :
-                availableAfterHold <= (regRow?.minStock || 0) ? 'text-[#E09E3C]' :
-                'text-[#3CB87A]'
-              }`}>
-                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
-                Available (after holds): <span className="font-semibold">{availableAfterHold ?? '…'}</span>
-                {regRow && <>
-                  <span className="text-[#4E6180]">· balance: {regRow.balance}</span>
-                  {regRow.onHold > 0 && <span className="text-[#E09E3C]">· already held: {regRow.onHold}</span>}
-                </>}
-                {holdQty && !qtyValid && availableAfterHold !== null && (
-                  <span className="ml-1 text-[#E05050]">· exceeds available</span>
-                )}
+        <SectionTitle
+          icon="🧾"
+          title="E-Way Bill & Item Bill"
+          sub="PDFs uploaded by the Account team — view / download here"
+          right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+        />
+
+        {challans.length === 0 ? (
+          <EmptyState icon="🧾" title="No challans yet" sub="Upload a challan to begin" />
+        ) : (
+          <div className="space-y-3">
+            {/* Ready bills first */}
+            {withBills.length > 0 && (
+              <div className="space-y-3">
+                {withBills.map((c) => <BillCard key={c.id} challan={c} />)}
+              </div>
+            )}
+
+            {/* Waiting for account team to upload */}
+            {waiting.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[10px] uppercase tracking-wider text-[#E09E3C] font-semibold mb-2 px-1">
+                  ⏳ Awaiting Account team to upload bills ({waiting.length})
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {waiting.map((c) => (
+                    <div key={c.id} className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono text-[12px] text-[#E4AF4A] font-semibold truncate">{c.challanNumber}</div>
+                          <div className="text-[12px] text-[#EDE4D0] truncate">{c.clientName}</div>
+                        </div>
+                        <Badge label="AWAITING BILLS" color="#E09E3C" />
+                      </div>
+                      <div className="text-[10px] text-[#4E6180] mt-1">
+                        Payment verified · Account team will upload E-Way &amp; Invoice soon
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Not yet verified */}
+            {needApproval.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[10px] uppercase tracking-wider text-[#E05050] font-semibold mb-2 px-1">
+                  🔒 Payment not yet verified ({needApproval.length})
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {needApproval.map((c) => (
+                    <div key={c.id} className="rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono text-[12px] text-[#E4AF4A] font-semibold truncate">{c.challanNumber}</div>
+                          <div className="text-[12px] text-[#EDE4D0] truncate">{c.clientName}</div>
+                        </div>
+                        <Badge label="PENDING VERIFY" color="#E05050" />
+                      </div>
+                      <div className="text-[10px] text-[#4E6180] mt-1">
+                        Bills unlock once Account team verifies payment
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
-          <Input label="Advance Amount (₹)" type="number" value={advanceAmount} onChange={setAdvanceAmount} placeholder="0" step="0.01" />
-          <div className="md:col-span-2 lg:col-span-3">
-            <Textarea label="Remarks" value={remarks} onChange={setRemarks} placeholder="Optional — lead time, expected conversion date, etc." rows={2} />
-          </div>
-        </div>
-
-        {err && <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
-        {ok && <div className="mt-3 rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">✓ {ok}</div>}
-
-        <div className="flex justify-end gap-2 mt-4">
-          <Btn onClick={reset} disabled={saving}>Clear</Btn>
-          <Btn variant="gold" onClick={submit} disabled={saving || !itemId || !qtyValid}>
-            {saving ? 'Placing Hold…' : '🔒 Place Hold'}
-          </Btn>
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle icon="📋" title="Active Stock Holds" sub={`${holds.length} active reservation(s)`} right={
-          <Btn size="sm" onClick={refreshHolds}>↻ Refresh</Btn>
-        } />
-        {holdsLoading ? <div className="text-center py-6 text-[#96A8BF] text-sm">Loading…</div> :
-         holds.length === 0 ? <EmptyState icon="🔒" title="No active holds" sub="Place a hold above to reserve stock" /> : (
-          <div className="overflow-x-auto -mx-4 px-4">
-            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-white/7">
-              <table className="w-full text-[12px]">
-                <thead className="sticky top-0 bg-[#111f32] z-10">
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-                    <th className="py-2 px-3">Date</th>
-                    <th className="py-2 px-3">Item</th>
-                    <th className="py-2 px-3">Model</th>
-                    <th className="py-2 px-3">Colour</th>
-                    <th className="py-2 px-3 text-right">Hold Qty</th>
-                    <th className="py-2 px-3">Client</th>
-                    <th className="py-2 px-3 text-right">Advance ₹</th>
-                    <th className="py-2 px-3 text-right">Available</th>
-                    <th className="py-2 px-3">Status</th>
-                    <th className="py-2 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {holds.map((h) => {
-                    const itemBalance = h.item?.currentStock ?? 0
-                    const availableNow = itemBalance - h.holdQty
-                    return (
-                      <tr key={h.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                        <td className="py-2 px-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(h.date)}</td>
-                        <td className="py-2 px-3 text-[#EDE4D0]">{h.itemName}</td>
-                        <td className="py-2 px-3 text-[#96A8BF] font-mono">{h.model || '—'}</td>
-                        <td className="py-2 px-3 text-[#96A8BF]">{h.colour || '—'}</td>
-                        <td className="py-2 px-3 text-right text-[#E09E3C] font-semibold">{h.holdQty}</td>
-                        <td className="py-2 px-3 text-[#EDE4D0]">{h.clientName}</td>
-                        <td className="py-2 px-3 text-right text-[#3CB87A]">{fmtINR(h.advanceAmount)}</td>
-                        <td className="py-2 px-3 text-right text-[#96A8BF]">{availableNow}</td>
-                        <td className="py-2 px-3"><Badge label={h.status} color={HOLD_STATUS_COLOR[h.status]} /></td>
-                        <td className="py-2 px-3 text-right">
-                          {h.status === 'ACTIVE' ? (
-                            <Btn size="sm" variant="danger" disabled={releasing === h.id} onClick={() => release(h.id)}>
-                              {releasing === h.id ? 'Releasing…' : 'Release'}
-                            </Btn>
-                          ) : <span className="text-[#4E6180] text-[11px]">—</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
         )}
       </Card>
+    </div>
+  )
+}
+
+function BillCard({ challan: c }: { challan: Challan }) {
+  const hasEway    = !!c.ewayBillNo || !!c.ewayBillFile
+  const hasInvoice = !!c.invoiceNo || !!c.invoiceFile
+  return (
+    <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/[0.03] p-3.5">
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <div className="font-mono text-[13px] font-semibold text-[#E4AF4A]">{c.challanNumber}</div>
+          <div className="text-[13px] text-[#EDE4D0] truncate">{c.clientName} · {c.clientCity}</div>
+          <div className="text-[10px] text-[#96A8BF] mt-0.5">
+            Total {fmtINR(c.amountTotal)} · Paid {fmtINR(c.amountReceived)} · {c.paymentStatus}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <Badge label={hasEway ? 'E-Way ✓' : 'E-Way ✗'}    color={hasEway ? '#3CB87A' : '#4E6180'} />
+          <Badge label={hasInvoice ? 'Invoice ✓' : 'Invoice ✗'} color={hasInvoice ? '#3CB87A' : '#4E6180'} />
+        </div>
+      </div>
+
+      {/* Two-column bill view: E-Way | Invoice */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* E-Way Bill column */}
+        <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🚚 E-Way Bill</div>
+          <div className="text-[11px] text-[#96A8BF] mb-1">Bill No.</div>
+          <div className="font-mono text-[13px] text-[#EDE4D0] mb-2.5">{c.ewayBillNo || '—'}</div>
+          {c.ewayBillFile ? (
+            <a
+              href={`/uploads/bills/${c.ewayBillFile}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-1.5 text-[11px] text-[#3CB87A] hover:bg-[#3CB87A]/20 transition-all"
+            >
+              📄 View E-Way PDF
+            </a>
+          ) : (
+            <div className="text-[10px] text-[#4E6180]">No PDF uploaded</div>
+          )}
+        </div>
+
+        {/* Invoice column */}
+        <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🧾 Item Bill / Invoice</div>
+          <div className="text-[11px] text-[#96A8BF] mb-1">Invoice No.</div>
+          <div className="font-mono text-[13px] text-[#EDE4D0] mb-2.5">{c.invoiceNo || '—'}</div>
+          {c.invoiceFile ? (
+            <a
+              href={`/uploads/bills/${c.invoiceFile}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-1.5 text-[11px] text-[#3CB87A] hover:bg-[#3CB87A]/20 transition-all"
+            >
+              📄 View Invoice PDF
+            </a>
+          ) : (
+            <div className="text-[10px] text-[#4E6180]">No PDF uploaded</div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      {c.billsUploadedBy && (
+        <div className="text-[10px] text-[#4E6180] mt-2.5">
+          Uploaded by <span className="text-[#96A8BF]">{c.billsUploadedBy.name}</span>
+          {c.billsUploadedAt && <> on <span className="text-[#96A8BF]">{fmtDate(c.billsUploadedAt)} {new Date(c.billsUploadedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></>}
+        </div>
+      )}
     </div>
   )
 }

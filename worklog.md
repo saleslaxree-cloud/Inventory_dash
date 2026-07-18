@@ -1107,3 +1107,45 @@ Stage Summary:
 - All PDFs are served from /uploads/bills/{filename} (public dir) and open in a new tab
 - Existing /bills POST route, notifications, and workflow stage marking are preserved; the upload route adds the same notifications so both flows stay in sync
 - Dark theme preserved (bg #0c1928, text #EDE4D0, gold #E4AF4A, green success #3CB87A, red error #E05050); no indigo/blue introduced; existing shadcn-style UI primitives reused (Card, Btn, Input, Badge, SectionTitle)
+
+---
+Task ID: sales-reorder-popup
+Agent: main (Z.ai Code)
+Task: Reorder Sales sidebar sections (Check Stock → Upload → Client Status → E-Way/Item Bill → My Challans → Dashboard), remove Stock Hold tab (auto-hold on challan creation already works; Check Stock shows balance = current - held), add view-only E-Way & Item Bill tab, and redesign notification toast into a big beautiful catchy popup.
+
+Work Log:
+- Read worklog, page.tsx (roleNav), sales.tsx (1956 lines), notification-provider.tsx, account.tsx BillsTab, and challan upload route to confirm auto-hold logic (lines 170-218: challan upload creates StockHold records, checks existing active holds, computes available = currentStock - alreadyHeld).
+- page.tsx: Reordered SALES nav to [stock-check, upload, client-status, bills, list, dashboard]; removed `hold`; added `bills` (label "E-Way & Item Bill", icon 🧾).
+- sales.tsx:
+  - Fixed Challan type: added 18 missing fields used by Client Status timeline (accountVerifiedBy/At, coordinatorApproved/At, warehouseCompleted/At, vehicleArranged/At, vehicleNumber, transporterName, freightAmount, dispatchDate, whatsappSent/At, emailSent/At, reviewReceived/At, reviewRating) + 3 ChallanItem fields (matchedItemId, auditStatus, warehouseStatus).
+  - Removed dead types/constants: StockRow, StockHold, CATEGORIES, HOLD_STATUS_COLOR.
+  - Removed unused `apiPatch` import.
+  - Removed entire StockHoldTab function (~195 lines).
+  - Added new BillsTab (view-only): fetches salesperson's challans, shows 4 summary cards (Total / Bills Ready / Awaiting Bills / Needs Approval), renders BillCard for each challan with bills — two-column layout (E-Way Bill | Item Bill/Invoice) showing bill numbers + "View PDF" links + uploader info. Separates challans into: with-bills (full cards), awaiting-bills (verified but no PDFs yet), needs-approval (not yet verified).
+  - Updated SalesDashboard render order to match new sidebar.
+- notification-provider.tsx: Redesigned Toast into big beautiful popup:
+  - Width 320px → 400px.
+  - Gradient header strip (border→accent linear-gradient, h-1.5).
+  - Large 56px icon box with colored border, inner glow, and pulsing blur halo behind it.
+  - Bold 15px accent-colored title, 13px body text.
+  - Role tag pill (e.g. "ACCOUNT") with pulsing dot + relative timestamp.
+  - Auto-dismiss progress bar at bottom (h-1, shrinks 100%→0% over 9s, gradient fill).
+  - Entrance animation: slide-in from right + scale (cubic-bezier overshoot).
+  - Outer colored glow boxShadow.
+  - Aligned auto-dismiss timeout 8s→9s to match progress bar.
+  - Updated NOTIF_COLORS: added `glow` field per type, brightened accents, removed unused `bg`.
+- Agent Browser verification (Sales session):
+  - Confirmed sidebar order: 📦 Check Stock → 📤 Upload Challan → 📍 Client Status → 🧾 E-Way & Item Bill → 📋 My Challans → 📊 Dashboard. Stock Hold gone. Default landing = Check Stock.
+  - E-Way & Item Bill tab: renders BillCard with two-column "View E-Way PDF" / "View Invoice PDF" links.
+  - Client Status tab: renders 4 summary cards + searchable challan list + pipeline timeline (VEHICLE stage for dispatched challan).
+  - My Challans tab: renders 2 challans with expandable details.
+  - Triggered PAYMENT_VERIFIED notification (Account verified LC-JPRL/26-27/0008) — confirmed received via /api/notifications (unread:1, type:BILLS_UPLOADED after trigger script).
+  - VLM analysis of live popup screenshot confirms: gradient header strip at top, glowing icon, bold title, body, ACCOUNT tag with pulsing dot, "just now" timestamp, partially-filled progress bar at bottom, soft outer glow. Assessed as eye-catching and beautiful.
+- Lint clean. Dev server compiled without errors.
+
+Stage Summary:
+- Sales sidebar reordered exactly as requested; Stock Hold removed (auto-hold on challan creation + Check Stock balance display covers the need).
+- New view-only "E-Way & Item Bill" tab lets Sales see PDFs uploaded by Account team (two-column E-Way | Invoice, with View PDF links + status sections for awaiting/needs-approval).
+- Notification toast redesigned from 320px plain toast to 400px popup with gradient header, glowing icon, progress bar, slide+scale animation — verified live via VLM.
+- Challan type made complete (18+3 fields added) so Client Status timeline type-checks.
+- Ready to push to origin/main for Vercel production deploy.
