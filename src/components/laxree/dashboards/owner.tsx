@@ -10,6 +10,46 @@ type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:s
 type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number; paymentStatus:string; status:string; createdAt:string; challanItems:ChallanItem[] }
 type PR = { id:string; prNumber:string; raisedByName:string; status:string; notes:string|null; createdAt:string; items:{id:string;itemName:string;model:string|null;quantity:number;item:Item|null}[] }
 
+type StockRow = {
+  id:string; category:string; itemName:string; model:string; colour:string|null;
+  unit:string; inward:number; dispatched:number; balance:number; onHold:number;
+  available:number; minStock:number; fastMoving:boolean;
+  status:'OK'|'LOW'|'OUT_OF_STOCK'
+}
+type StockSummary = {
+  totalSKUs:number; totalInward:number; totalDispatched:number; totalBalance:number;
+  totalOnHold:number; totalAvailable:number; outOfStock:number; lowStock:number
+}
+type ForecastRow = {
+  id:string; category:string; itemName:string; model:string; colour:string|null;
+  balance:number; held:number; available:number; minStock:number;
+  totalDispatched:number; avgPerDay:number; daysLeft:number|null;
+  last30Dispatch:number; suggestedReorder:number;
+  status:'critical'|'warn'|'ok'|'nodata'
+}
+type ForecastSummary = {
+  totalSKUs:number; critical:number; warn:number; ok:number; nodata:number;
+  topMoving:ForecastRow[]; criticalItems:ForecastRow[]
+}
+type ActivityLog = {
+  id:string; type:'IN'|'OUT'; date:string; category:string; itemName:string;
+  model:string; colour:string|null; quantity:number; unit:string;
+  party:string; challanNumber:string|null; billNumber:string|null;
+  remarks:string|null; enteredBy?: { name:string; role:string }
+}
+
+// Stock categories with actual inventory (6 — Linen & Bath Linen have no stock)
+const STOCK_CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Bath Tubs','Banquet Furniture','Spare Parts']
+
+const STATUS_COLOR_MAP: Record<string, string> = {
+  OK: '#3CB87A', LOW: '#E09E3C', OUT_OF_STOCK: '#E05050',
+  critical: '#E05050', warn: '#E09E3C', ok: '#3CB87A', nodata: '#96A8BF',
+}
+const STATUS_LABEL_MAP: Record<string, string> = {
+  OK: 'OK', LOW: 'LOW', OUT_OF_STOCK: 'OUT',
+  critical: 'CRITICAL', warn: 'WATCH', ok: 'OK', nodata: 'NO DATA',
+}
+
 export function OwnerDashboard({ user }: { user: SessionUser }) {
   const [tab, setTab] = useState('overview')
 
@@ -19,6 +59,9 @@ export function OwnerDashboard({ user }: { user: SessionUser }) {
     { id:'fast', label:'Fast Moving', icon:'⚡' },
     { id:'challans', label:'Challans', icon:'🧾' },
     { id:'pr', label:'Purchase Requests', icon:'📋' },
+    { id:'register', label:'Stock Register', icon:'📋' },
+    { id:'forecast', label:'Forecast', icon:'📈' },
+    { id:'activity', label:'Activity Log', icon:'📜' },
   ]
 
   return (
@@ -39,6 +82,9 @@ export function OwnerDashboard({ user }: { user: SessionUser }) {
       {tab === 'fast' && <FastTab />}
       {tab === 'challans' && <ChallansTab />}
       {tab === 'pr' && <PRTab user={user} />}
+      {tab === 'register' && <StockRegisterTab />}
+      {tab === 'forecast' && <ForecastTab />}
+      {tab === 'activity' && <ActivityLogTab />}
     </div>
   )
 }
@@ -473,5 +519,374 @@ function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
         <Btn variant="gold" onClick={() => window.print()}>🖨 Print Now</Btn>
       </div>
     </Modal>
+  )
+}
+
+// ═══════════════════════════════════════════
+// STOCK REGISTER — Full stock table with holds
+// ═══════════════════════════════════════════
+function StockRegisterTab() {
+  const [cat, setCat] = useState('ALL')
+  const [lowOnly, setLowOnly] = useState(false)
+  const url = `/api/stock-register?category=${cat}${lowOnly ? '&lowStock=true' : ''}`
+  const { data, loading } = useFetch<{ rows: StockRow[]; summary: StockSummary }>(url)
+
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading stock register…</div>
+  if (!data) return null
+
+  const s = data.summary
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        <StatCard label="Total SKUs" value={s.totalSKUs} accent="#E4AF4A" icon="📦" />
+        <StatCard label="Inward" value={s.totalInward} accent="#3CB87A" icon="📥" />
+        <StatCard label="Dispatched" value={s.totalDispatched} accent="#E05050" icon="📤" />
+        <StatCard label="Balance" value={s.totalBalance} accent="#E4AF4A" icon="⚖️" />
+        <StatCard label="On Hold" value={s.totalOnHold} accent="#9B6ED4" icon="🔒" />
+        <StatCard label="Available" value={s.totalAvailable} accent="#3CB87A" icon="✅" />
+        <StatCard label="Out of Stock" value={s.outOfStock} accent="#E05050" icon="🚫" />
+        <StatCard label="Low Stock" value={s.lowStock} accent="#E09E3C" icon="⚠️" />
+      </div>
+
+      <Card className="p-4">
+        <SectionTitle icon="📋" title="Stock Register" sub={`${data.rows.length} SKUs`} right={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={cat} onChange={setCat} options={[
+              { value: 'ALL', label: 'All Categories' },
+              ...STOCK_CATEGORIES.map((c) => ({ value: c, label: c })),
+            ]} />
+            <button onClick={() => setLowOnly(!lowOnly)}
+              className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all whitespace-nowrap ${
+                lowOnly ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              }`}>
+              {lowOnly ? '✓ ' : ''}Low Stock Only
+            </button>
+          </div>
+        } />
+        {data.rows.length === 0 ? (
+          <EmptyState icon="📦" title="No items match filters" sub="Try changing category or disabling the low-stock filter" />
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <div className="max-h-[60vh] overflow-y-auto">
+              <table className="w-full text-[12px]">
+                <thead className="sticky top-0 bg-[#111f32] z-10">
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                    <th className="py-2 pr-3 text-right">Sr</th>
+                    <th className="py-2 pr-3">Category</th>
+                    <th className="py-2 pr-3">Item</th>
+                    <th className="py-2 pr-3">Model</th>
+                    <th className="py-2 pr-3">Colour</th>
+                    <th className="py-2 pr-3 text-right">Inward</th>
+                    <th className="py-2 pr-3 text-right">Dispatched</th>
+                    <th className="py-2 pr-3 text-right">Balance</th>
+                    <th className="py-2 pr-3 text-right">On Hold</th>
+                    <th className="py-2 pr-3 text-right">Available</th>
+                    <th className="py-2 pr-3 text-right">Min</th>
+                    <th className="py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r, idx) => {
+                    const color = STATUS_COLOR_MAP[r.status] || '#96A8BF'
+                    return (
+                      <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <td className="py-2 pr-3 text-right text-[#4E6180]">{idx + 1}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF]">{r.category}</td>
+                        <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{r.itemName}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF] font-mono">{r.model}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF]">{r.colour || '—'}</td>
+                        <td className="py-2 pr-3 text-right text-[#3CB87A]">{r.inward}</td>
+                        <td className="py-2 pr-3 text-right text-[#E05050]">{r.dispatched}</td>
+                        <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{r.balance}</td>
+                        <td className="py-2 pr-3 text-right text-[#9B6ED4]">{r.onHold || '—'}</td>
+                        <td className="py-2 pr-3 text-right text-[#E4AF4A] font-semibold">{r.available}</td>
+                        <td className="py-2 pr-3 text-right text-[#4E6180]">{r.minStock}</td>
+                        <td className="py-2"><Badge label={STATUS_LABEL_MAP[r.status]} color={color} /></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════
+// FORECAST — Depletion forecast dashboard
+// ═══════════════════════════════════════════
+function ForecastTab() {
+  const [statusFilter, setStatusFilter] = useState<'ALL'|'critical'|'warn'|'ok'|'nodata'>('ALL')
+  const { data, loading } = useFetch<{ forecasts: ForecastRow[]; summary: ForecastSummary }>('/api/forecast')
+
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading forecast…</div>
+  if (!data) return null
+
+  const s = data.summary
+  const fullList = [...data.forecasts]
+    .filter((f) => statusFilter === 'ALL' || f.status === statusFilter)
+    .sort((a, b) => {
+      const order: Record<string, number> = { critical: 0, warn: 1, ok: 2, nodata: 3 }
+      if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
+      return (a.daysLeft ?? 9999) - (b.daysLeft ?? 9999)
+    })
+
+  const filterPills: Array<{ id:'ALL'|'critical'|'warn'|'ok'|'nodata'; label:string; color:string }> = [
+    { id: 'ALL', label: 'All', color: '#E4AF4A' },
+    { id: 'critical', label: 'Critical', color: '#E05050' },
+    { id: 'warn', label: 'Watch', color: '#E09E3C' },
+    { id: 'ok', label: 'OK', color: '#3CB87A' },
+    { id: 'nodata', label: 'No Data', color: '#96A8BF' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Critical" value={s.critical} sub="< 30 days left" accent="#E05050" icon="🚨" />
+        <StatCard label="Watch" value={s.warn} sub="30–90 days left" accent="#E09E3C" icon="⚠️" />
+        <StatCard label="OK" value={s.ok} sub="> 90 days left" accent="#3CB87A" icon="✅" />
+        <StatCard label="No Data" value={s.nodata} sub="No outward history" accent="#96A8BF" icon="❓" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="p-4">
+          <SectionTitle icon="🚨" title="Critical Items — Depleting Soon" sub={`Top ${s.criticalItems.length} urgent reorders`} />
+          {s.criticalItems.length === 0 ? (
+            <EmptyState icon="✅" title="No critical items" sub="All stock levels are healthy" />
+          ) : (
+            <div className="overflow-x-auto -mx-4 px-4">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                    <th className="py-2 pr-3">Item</th>
+                    <th className="py-2 pr-3">Model</th>
+                    <th className="py-2 pr-3 text-right">Balance</th>
+                    <th className="py-2 pr-3 text-right">Avg/Day</th>
+                    <th className="py-2 pr-3 text-right">Days Left</th>
+                    <th className="py-2 text-right">Reorder</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.criticalItems.map((f) => (
+                    <tr key={f.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{f.itemName}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF] font-mono text-[11px]">{f.model}</td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{f.balance}</td>
+                      <td className="py-2 pr-3 text-right text-[#96A8BF]">{f.avgPerDay.toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-right text-[#E05050] font-bold">
+                        {f.daysLeft !== null ? `${f.daysLeft}d` : '—'}
+                      </td>
+                      <td className="py-2 text-right text-[#E4AF4A] font-semibold">{f.suggestedReorder}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-4">
+          <SectionTitle icon="📈" title="Top Moving Items" sub="Last 30 days dispatch — top 8" />
+          {s.topMoving.length === 0 ? (
+            <EmptyState icon="📊" title="No movement data" sub="No outward entries in the last 30 days" />
+          ) : (
+            <div className="overflow-x-auto -mx-4 px-4">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                    <th className="py-2 pr-3 text-right">#</th>
+                    <th className="py-2 pr-3">Item</th>
+                    <th className="py-2 pr-3">Model</th>
+                    <th className="py-2 pr-3 text-right">30d Out</th>
+                    <th className="py-2 pr-3 text-right">Balance</th>
+                    <th className="py-2 text-right">Avg/Day</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.topMoving.map((f, idx) => (
+                    <tr key={f.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-3 text-right text-[#E4AF4A] font-bold">{idx + 1}</td>
+                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{f.itemName}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF] font-mono text-[11px]">{f.model}</td>
+                      <td className="py-2 pr-3 text-right text-[#E4AF4A] font-bold">{f.last30Dispatch}</td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0]">{f.balance}</td>
+                      <td className="py-2 text-right text-[#96A8BF]">{f.avgPerDay.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card className="p-4">
+        <SectionTitle icon="📋" title="Full Forecast Table" sub={`${fullList.length} SKUs analyzed`} right={
+          <div className="flex gap-1.5 flex-wrap">
+            {filterPills.map((p) => (
+              <button key={p.id} onClick={() => setStatusFilter(p.id)}
+                className={`px-2.5 py-1.5 rounded-lg text-[10.5px] font-medium border transition-all ${
+                  statusFilter === p.id
+                    ? 'text-white border-white/20'
+                    : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+                }`}
+                style={statusFilter === p.id ? { background: `${p.color}22`, color: p.color, borderColor: `${p.color}55` } : {}}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        } />
+        <div className="overflow-x-auto -mx-4 px-4">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-[12px]">
+              <thead className="sticky top-0 bg-[#111f32] z-10">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                  <th className="py-2 pr-3 text-right">Sr</th>
+                  <th className="py-2 pr-3">Category</th>
+                  <th className="py-2 pr-3">Item</th>
+                  <th className="py-2 pr-3">Model</th>
+                  <th className="py-2 pr-3">Colour</th>
+                  <th className="py-2 pr-3 text-right">Balance</th>
+                  <th className="py-2 pr-3 text-right">Held</th>
+                  <th className="py-2 pr-3 text-right">Available</th>
+                  <th className="py-2 pr-3 text-right">Avg/Day</th>
+                  <th className="py-2 pr-3 text-right">Days Left</th>
+                  <th className="py-2 pr-3 text-right">30d Out</th>
+                  <th className="py-2 pr-3 text-right">Reorder</th>
+                  <th className="py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fullList.map((f, idx) => {
+                  const color = STATUS_COLOR_MAP[f.status] || '#96A8BF'
+                  const daysColor = f.daysLeft !== null && f.daysLeft < 30 ? '#E05050' : color
+                  return (
+                    <tr key={f.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-3 text-right text-[#4E6180]">{idx + 1}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF]">{f.category}</td>
+                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{f.itemName}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF] font-mono">{f.model}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF]">{f.colour || '—'}</td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{f.balance}</td>
+                      <td className="py-2 pr-3 text-right text-[#9B6ED4]">{f.held || '—'}</td>
+                      <td className="py-2 pr-3 text-right text-[#E4AF4A]">{f.available}</td>
+                      <td className="py-2 pr-3 text-right text-[#96A8BF]">{f.avgPerDay.toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-right font-bold" style={{ color: daysColor }}>
+                        {f.daysLeft !== null ? `${f.daysLeft}d` : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right text-[#EDE4D0]">{f.last30Dispatch}</td>
+                      <td className="py-2 pr-3 text-right text-[#E4AF4A]">{f.suggestedReorder}</td>
+                      <td className="py-2"><Badge label={STATUS_LABEL_MAP[f.status]} color={color} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════
+// ACTIVITY LOG — Combined IN+OUT transactions
+// ═══════════════════════════════════════════
+function ActivityLogTab() {
+  const [type, setType] = useState<'ALL' | 'IN' | 'OUT'>('ALL')
+  const url = `/api/activity-log?limit=200${type !== 'ALL' ? `&type=${type}` : ''}`
+  const { data, loading } = useFetch<{ logs: ActivityLog[] }>(url)
+
+  const inCount = data?.logs.filter((l) => l.type === 'IN').length || 0
+  const outCount = data?.logs.filter((l) => l.type === 'OUT').length || 0
+  const qtyIn = data?.logs.filter((l) => l.type === 'IN').reduce((s, l) => s + l.quantity, 0) || 0
+  const qtyOut = data?.logs.filter((l) => l.type === 'OUT').reduce((s, l) => s + l.quantity, 0) || 0
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <StatCard label="Total Entries" value={data?.logs.length || 0} sub="IN + OUT" accent="#E4AF4A" icon="📜" />
+        <StatCard label="Inward" value={inCount} sub="Stock received" accent="#3CB87A" icon="📥" />
+        <StatCard label="Outward" value={outCount} sub="Stock dispatched" accent="#E05050" icon="📤" />
+        <StatCard label="Qty In" value={qtyIn} sub="Units received" accent="#3CB87A" icon="➕" />
+        <StatCard label="Qty Out" value={qtyOut} sub="Units dispatched" accent="#E05050" icon="➖" />
+      </div>
+
+      <Card className="p-4">
+        <SectionTitle icon="📜" title="Activity Log" sub={`${data?.logs.length || 0} transactions`} right={
+          <div className="flex gap-1.5">
+            {(['ALL', 'IN', 'OUT'] as const).map((t) => (
+              <button key={t} onClick={() => setType(t)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+                  type === t
+                    ? t === 'IN' ? 'bg-[#3CB87A]/15 text-[#3CB87A] border-[#3CB87A]/25'
+                      : t === 'OUT' ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25'
+                      : 'bg-[#E4AF4A]/15 text-[#E4AF4A] border-[#E4AF4A]/25'
+                    : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+                }`}>
+                {t === 'ALL' ? 'All' : t === 'IN' ? '📥 Inward' : '📤 Outward'}
+              </button>
+            ))}
+          </div>
+        } />
+        {loading ? (
+          <div className="text-center py-8 text-[#96A8BF] text-sm">Loading activity log…</div>
+        ) : !data || data.logs.length === 0 ? (
+          <EmptyState icon="📜" title="No activity yet" sub="Inward and outward transactions will appear here" />
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <div className="max-h-[60vh] overflow-y-auto">
+              <table className="w-full text-[12px]">
+                <thead className="sticky top-0 bg-[#111f32] z-10">
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                    <th className="py-2 pr-3">Date</th>
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Category</th>
+                    <th className="py-2 pr-3">Item</th>
+                    <th className="py-2 pr-3">Model</th>
+                    <th className="py-2 pr-3">Colour</th>
+                    <th className="py-2 pr-3 text-right">Qty</th>
+                    <th className="py-2 pr-3">Party</th>
+                    <th className="py-2 pr-3">Challan</th>
+                    <th className="py-2 pr-3">Bill No</th>
+                    <th className="py-2 pr-3">Entered By</th>
+                    <th className="py-2">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.logs.map((l) => {
+                    const isIn = l.type === 'IN'
+                    const color = isIn ? '#3CB87A' : '#E05050'
+                    return (
+                      <tr key={`${l.type}-${l.id}`} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <td className="py-2 pr-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(l.date)}</td>
+                        <td className="py-2 pr-3"><Badge label={isIn ? 'IN' : 'OUT'} color={color} /></td>
+                        <td className="py-2 pr-3 text-[#96A8BF]">{l.category}</td>
+                        <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{l.itemName}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF] font-mono">{l.model}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF]">{l.colour || '—'}</td>
+                        <td className={`py-2 pr-3 text-right font-semibold ${isIn ? 'text-[#3CB87A]' : 'text-[#E05050]'}`}>
+                          {isIn ? '+' : '−'}{l.quantity}
+                        </td>
+                        <td className="py-2 pr-3 text-[#EDE4D0] max-w-[160px] truncate" title={l.party}>{l.party || '—'}</td>
+                        <td className="py-2 pr-3 text-[#E4AF4A] font-mono text-[11px]">{l.challanNumber || '—'}</td>
+                        <td className="py-2 pr-3 text-[#96A8BF]">{l.billNumber || '—'}</td>
+                        <td className="py-2 pr-3 text-[#4E6180] text-[10px] whitespace-nowrap">{l.enteredBy?.name || '—'}</td>
+                        <td className="py-2 text-[#4E6180] text-[10px] max-w-[140px] truncate" title={l.remarks || ''}>{l.remarks || '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
   )
 }

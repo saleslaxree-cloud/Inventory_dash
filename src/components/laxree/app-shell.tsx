@@ -71,7 +71,7 @@ export function AppShell({
         </nav>
 
         {/* User */}
-        <div className="border-t border-white/7 p-3">
+        <div className="border-t border-white/7 p-3 space-y-2">
           <div className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] p-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-full text-lg flex-shrink-0"
               style={{ background: `${meta.color}22`, border: `1px solid ${meta.color}44` }}>
@@ -81,10 +81,14 @@ export function AppShell({
               <div className="text-[12px] font-semibold text-[#EDE4D0] truncate">{user.name}</div>
               <div className="text-[9.5px] truncate" style={{ color: meta.color }}>{meta.label}</div>
             </div>
-            <div className="flex flex-col gap-1">
-              <button onClick={() => setPwModal(true)} title="Change Password" className="text-[#96A8BF] hover:text-[#E4AF4A] text-sm p-0.5">🔑</button>
-              <button onClick={onLogout} title="Logout" className="text-[#96A8BF] hover:text-[#E05050] text-sm p-0.5">⏻</button>
-            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setPwModal(true)} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2 text-[11px] font-medium text-[#96A8BF] hover:border-[#C8922A]/30 hover:text-[#E4AF4A] transition-all">
+              <span className="text-sm">🔑</span> Change Password
+            </button>
+            <button onClick={onLogout} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 px-2 py-2 text-[11px] font-medium text-[#E05050] hover:bg-[#E05050]/15 transition-all">
+              <span className="text-sm">⏻</span> Logout
+            </button>
           </div>
         </div>
       </aside>

@@ -30,6 +30,9 @@ model User {
   messagesSent      Message[]         @relation("MessageSender")
   workflowActions   WorkflowStage[]
   supportChecklists SupportChecklist[]
+  inwardEntries     InwardLog[]
+  outwardEntries    OutwardLog[]
+  stockHolds        StockHold[]
 }
 
 // ═══════════════════════════════════════════
@@ -53,6 +56,9 @@ model Item {
 
   challanItems ChallanItem[]
   prItems      PurchaseRequestItem[]
+  inwardLogs   InwardLog[]
+  outwardLogs  OutwardLog[]
+  stockHolds   StockHold[]
 }
 
 // ═══════════════════════════════════════════
@@ -221,4 +227,73 @@ model SupportChecklist {
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// INVENTORY TRANSACTIONS (Inward / Outward / Hold)
+// Ported from original HTML inventory system
+// ═══════════════════════════════════════════
+
+// Inward = stock received from vendor
+model InwardLog {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  itemId      String
+  item        Item     @relation(fields: [itemId], references: [id])
+  category    String
+  itemName    String
+  model       String
+  colour      String?
+  quantity    Int
+  unit        String   @default("PCS")
+  vendor      String?
+  billNo      String?
+  remarks     String?
+  enteredById String
+  enteredBy   User     @relation(fields: [enteredById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+// Outward = stock dispatched to client (linked to challan)
+model OutwardLog {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id])
+  category      String
+  itemName      String
+  model         String
+  colour        String?
+  quantity      Int
+  unit          String   @default("PCS")
+  clientName    String
+  challanNumber String?
+  billNumber    String?
+  remarks       String?
+  enteredById   String
+  enteredBy     User     @relation(fields: [enteredById], references: [id])
+  challanId     String?
+  createdAt     DateTime @default(now())
+}
+
+// StockHold = reserve stock for a client (against advance payment)
+model StockHold {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id])
+  category      String
+  itemName      String
+  model         String
+  colour        String?
+  holdQty       Int
+  clientName    String
+  advanceAmount Float    @default(0)
+  remarks       String?
+  status        String   @default("ACTIVE") // ACTIVE | RELEASED | CONVERTED
+  heldById      String
+  heldBy        User     @relation(fields: [heldById], references: [id])
+  challanId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
