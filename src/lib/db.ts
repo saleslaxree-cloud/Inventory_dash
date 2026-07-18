@@ -15,6 +15,12 @@ export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: ['error', 'warn'],
+    // Serverless-friendly defaults (Vercel, etc.)
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL,
+      },
+    },
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
@@ -24,6 +30,9 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
  * connection errors on serverless platforms like Vercel) is caught and
  * returned as a proper JSON response instead of an empty body — which
  * previously caused "Unexpected end of JSON input" on the client.
+ *
+ * We keep the REAL error message (just truncated) so the user can diagnose
+ * the actual problem (e.g. missing env var, network timeout, wrong URL).
  */
 export function withDb<TArgs extends unknown[]>(
   handler: (...args: TArgs) => Promise<Response>
@@ -33,29 +42,30 @@ export function withDb<TArgs extends unknown[]>(
       return await handler(...args)
     } catch (e: unknown) {
       const rawMessage = e instanceof Error ? e.message : 'Internal server error'
-      // Common Prisma connection errors on serverless
-      const isDbError =
-        rawMessage.includes('Prisma') ||
-        rawMessage.includes('database') ||
-        rawMessage.includes('connection') ||
-        rawMessage.includes('connect') ||
-        rawMessage.includes('TIMEDOUT') ||
-        rawMessage.includes('Can\'t reach database') ||
-        rawMessage.includes('URL must start with') ||
-        rawMessage.includes('datasource')
 
-      // Clean up verbose Prisma dev-mode error messages
-      let message = rawMessage
-      if (rawMessage.includes('URL must start with the protocol')) {
-        message = 'Database URL is not configured. Please set DATABASE_URL to a valid PostgreSQL connection string (e.g. postgresql://user:pass@host/db).'
-      } else if (rawMessage.includes('Can\'t reach database')) {
-        message = 'Cannot connect to the database. Please check that your PostgreSQL database is running and accessible.'
-      } else if (isDbError && rawMessage.length > 200) {
-        message = rawMessage.slice(0, 200) + '…'
+      // Detect common configuration mistakes and add helpful guidance
+      let hint = ''
+      if (!process.env.DATABASE_URL) {
+        hint = ' [Hint: DATABASE_URL environment variable is not set. Add it in Vercel → Settings → Environment Variables.]'
+      } else if (rawMessage.includes('URL must start with the protocol')) {
+        hint = ' [Hint: DATABASE_URL is not a valid postgresql:// connection string.]'
+      } else if (rawMessage.includes("Can't reach database") || rawMessage.includes('TIMEDOUT') || rawMessage.includes('timed out')) {
+        hint = ' [Hint: Cannot reach the database. If on Vercel: 1) Ensure DATABASE_URL uses the -pooler hostname with pgbouncer=true. 2) Remove channel_binding=require. 3) Check Neon dashboard that the DB is active.]'
+      } else if (rawMessage.includes('password authentication failed') || rawMessage.includes('authentication')) {
+        hint = ' [Hint: Database password is incorrect. Check the credentials in DATABASE_URL.]'
+      } else if (rawMessage.includes('does not exist') && rawMessage.includes('database')) {
+        hint = ' [Hint: Database tables do not exist. Run: bun run db:push && bun run db:seed]'
       }
+
+      // Truncate very long Prisma error messages but keep the useful part
+      let message = rawMessage
+      if (rawMessage.length > 300) {
+        message = rawMessage.slice(0, 300) + '…'
+      }
+
       return Response.json(
         {
-          error: message,
+          error: message + hint,
         },
         { status: 500 }
       )
