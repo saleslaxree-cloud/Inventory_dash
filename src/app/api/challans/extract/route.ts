@@ -443,6 +443,7 @@ export async function POST(req: NextRequest) {
 
     // ── METHOD 1: Text + Regex extraction (default — no API key needed) ──
     // This works on Vercel out of the box. Only fails on scanned PDFs (no text layer).
+    let textExtractionError: string | null = null
     try {
       const result = await extractChallanFromText(buffer, file.name)
       // If we got a challan number OR at least one item, consider it a success
@@ -450,21 +451,40 @@ export async function POST(req: NextRequest) {
         console.log(`[challans/extract] Text extraction success: challan=${result.challanNumber}, items=${result.items.length}`)
         return NextResponse.json({ ok: true, data: result, provider: 'text-regex' })
       }
+      textExtractionError = 'Text extraction returned no challan number or items'
       console.warn('[challans/extract] Text extraction returned no challan number/items — falling back to VLM')
     } catch (textErr: unknown) {
       const textMsg = textErr instanceof Error ? textErr.message : String(textErr)
+      textExtractionError = textMsg
       console.warn(`[challans/extract] Text extraction failed: ${textMsg} — falling back to VLM`)
     }
 
     // ── METHOD 2: VLM fallback (for scanned PDFs without text layer) ──
+    // If ?debug=1 is in the URL, return the text extraction error directly
+    // instead of falling through to the VLM (useful for debugging).
+    const debugMode = req.nextUrl.searchParams.get('debug') === '1'
+    if (debugMode) {
+      return NextResponse.json(
+        {
+          ok: false,
+          method: 'text-regex',
+          error: textExtractionError || 'No error captured',
+          fileSize: buffer.length,
+          fileName: file.name,
+        },
+        { status: 500 }
+      )
+    }
+
     const provider = await loadProvider()
     if (!provider) {
       // No VLM configured AND text extraction failed — tell user to fill manually
       return NextResponse.json(
         {
           error:
-            'Could not extract text from this PDF (it may be a scanned image with no text layer). ' +
-            'Either fill the form manually below, or set GEMINI_API_KEY env var to enable VLM-based extraction for scanned PDFs.',
+            'Could not extract text from this PDF. ' +
+            (textExtractionError ? `Text extraction error: ${textExtractionError}. ` : '') +
+            'Either fill the form manually below, or set GEMINI_API_KEY env var to enable VLM-based extraction.',
         },
         { status: 503 }
       )
