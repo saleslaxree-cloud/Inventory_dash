@@ -201,15 +201,26 @@ async function callZai(cfg: Extract<VlmProvider, { kind: 'zai' }>, base64: strin
 /** Google Gemini — recommended for Vercel / public clouds (supports PDF natively) */
 async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64: string, _fileName: string): Promise<string> {
   // Try the configured model first; fall back to other PDF-capable models on:
-  //   - 404 / "not a valid model"        → model deprecated/renamed by Google
-  //   - 429 / "quota exceeded" / "rate"   → per-model free-tier quota exhausted
-  // Different Gemini models have SEPARATE free-tier quotas, so if gemini-2.0-flash
-  // is quota-blocked, gemini-2.5-flash or gemini-1.5-flash often still work.
-  // Order: prefer the newest (2.5-flash) first, then 2.0-flash, then 1.5-flash
-  // (1.5-flash has the most generous free tier as a last-resort fallback).
+  //   - 404 / "not a valid model" / "no longer available"  → model deprecated/renamed
+  //   - 429 / "quota exceeded" / "rate limit"                → per-model free-tier quota exhausted
+  // Different Gemini models have SEPARATE free-tier quotas, so if one is
+  // quota-blocked or deprecated, others often still work.
+  // Chain order (newest first, but include lite/8b variants as they have
+  // separate quotas and are very generous on the free tier):
+  //   1. gemini-2.5-flash      (newest; may be deprecated for new keys)
+  //   2. gemini-2.0-flash      (stable; quota may be exhausted)
+  //   3. gemini-2.0-flash-lite (lighter; separate quota, very generous free tier)
+  //   4. gemini-1.5-flash      (older; most generous free tier — 1500 req/day)
+  //   5. gemini-1.5-flash-8b   (smallest; separate quota, last-resort fallback)
   const requestedModel = cfg.model || 'gemini-2.5-flash'
-  const fallbackChain = [requestedModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
-    .filter((m, i, arr) => arr.indexOf(m) === i) // dedupe
+  const fallbackChain = [
+    requestedModel,
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+  ].filter((m, i, arr) => arr.indexOf(m) === i) // dedupe
 
   let lastError: Error | null = null
   for (const model of fallbackChain) {
@@ -218,10 +229,10 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       lastError = err instanceof Error ? err : new Error(msg)
-      // Retry-worthy: model not found / not supported, OR quota/rate-limit errors.
+      // Retry-worthy: model not found / not supported / deprecated, OR quota/rate-limit errors.
       // Each model has its own quota, so a 429 on one model does NOT mean the
       // others will fail.
-      const isModelNotFound = /404|not found|not supported for generateContent|is not a valid model/i.test(msg)
+      const isModelNotFound = /404|not found|not supported for generateContent|is not a valid model|no longer available|deprecated|is not available|model.*not.*exist/i.test(msg)
       const isQuotaOrRate = /quota|rate.?limit|429|resource.?exhausted|RESOURCE_EXHAUSTED/i.test(msg)
       if (isModelNotFound || isQuotaOrRate) {
         console.warn(`[challans/extract] Gemini model "${model}" unavailable (${isQuotaOrRate ? 'quota' : 'not found'}), trying next...`)
