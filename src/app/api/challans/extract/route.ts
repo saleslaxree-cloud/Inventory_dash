@@ -460,22 +460,6 @@ export async function POST(req: NextRequest) {
     }
 
     // ── METHOD 2: VLM fallback (for scanned PDFs without text layer) ──
-    // If ?debug=1 is in the URL, return the text extraction error directly
-    // instead of falling through to the VLM (useful for debugging).
-    const debugMode = req.nextUrl.searchParams.get('debug') === '1'
-    if (debugMode) {
-      return NextResponse.json(
-        {
-          ok: false,
-          method: 'text-regex',
-          error: textExtractionError || 'No error captured',
-          fileSize: buffer.length,
-          fileName: file.name,
-        },
-        { status: 500 }
-      )
-    }
-
     const provider = await loadProvider()
     if (!provider) {
       // No VLM configured AND text extraction failed — tell user to fill manually
