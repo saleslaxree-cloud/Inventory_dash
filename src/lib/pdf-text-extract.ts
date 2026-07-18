@@ -60,12 +60,81 @@ export type ExtractedChallan = {
 /**
  * Extract text from a PDF Buffer using pdfjs-dist.
  * Works in the Node.js runtime (Vercel serverless functions).
+ *
+ * NOTE: pdfjs-dist v6 uses browser APIs like DOMMatrix that don't exist in
+ * Node.js. We polyfill them before importing pdfjs.
  */
 export async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
+  // ── Polyfills for Node.js / Vercel serverless environment ──
+  // pdfjs-dist v6 expects a browser environment with DOMMatrix, DOMPoint,
+  // and other DOM types. We provide minimal polyfills so it can load.
+  if (typeof globalThis.DOMMatrix === 'undefined') {
+    // Minimal DOMMatrix polyfill — only what pdfjs needs (multiply, transform)
+    class DOMMatrix {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0
+      constructor(init?: number[] | string) {
+        if (Array.isArray(init)) {
+          if (init.length >= 6) {
+            this.a = init[0]; this.b = init[1]; this.c = init[2]
+            this.d = init[3]; this.e = init[4]; this.f = init[5]
+          }
+        }
+      }
+      multiply(other: DOMMatrix) {
+        const r = new DOMMatrix()
+        r.a = this.a * other.a + this.c * other.b
+        r.b = this.b * other.a + this.d * other.b
+        r.c = this.a * other.c + this.c * other.d
+        r.d = this.b * other.c + this.d * other.d
+        r.e = this.a * other.e + this.c * other.f + this.e
+        r.f = this.b * other.e + this.d * other.f + this.f
+        return r
+      }
+      transformPoint(pt: { x: number; y: number }) {
+        return { x: this.a * pt.x + this.c * pt.y + this.e, y: this.b * pt.x + this.d * pt.y + this.f }
+      }
+    }
+    ;(globalThis as Record<string, unknown>).DOMMatrix = DOMMatrix
+  }
+  if (typeof globalThis.DOMPoint === 'undefined') {
+    class DOMPoint {
+      x: number; y: number; z: number; w: number
+      constructor(x = 0, y = 0, z = 0, w = 1) { this.x = x; this.y = y; this.z = z; this.w = w }
+    }
+    ;(globalThis as Record<string, unknown>).DOMPoint = DOMPoint
+  }
+
   // Use the legacy build for Node.js compatibility
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+
+  // Configure pdfjs to run WITHOUT a web worker (workers don't work in
+  // Vercel serverless functions). Setting GlobalWorkerOptions.workerSrc to
+  // an empty string and passing disableWorker makes pdfjs run inline.
+  // Also set up a fake worker source that points to the legacy worker entry.
+  try {
+    // Try to load the worker entry — this makes pdfjs use a real worker in
+    // environments that support it (Node with worker_threads).
+    const workerModule = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+    if (workerModule?.GlobalWorkerOptions) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      // @ts-expect-error - workerPort is a valid option but not in the types
+      pdfjsLib.GlobalWorkerOptions.workerPort = null
+    }
+  } catch {
+    // Fallback: set workerSrc to empty (runs inline)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+  }
+
   const data = new Uint8Array(pdfBuffer)
-  const doc = await pdfjsLib.getDocument({ data, useSystemFonts: true }).promise
+  // useSystemFonts: avoids trying to load system fonts (not available on Vercel)
+  // disableFontFace: avoids needing canvas font APIs
+  // isEvalSupported: false avoids using eval (blocked by some CSPs)
+  const doc = await pdfjsLib.getDocument({
+    data,
+    useSystemFonts: true,
+    disableFontFace: true,
+    isEvalSupported: false,
+  }).promise
 
   let fullText = ''
   for (let i = 1; i <= doc.numPages; i++) {
