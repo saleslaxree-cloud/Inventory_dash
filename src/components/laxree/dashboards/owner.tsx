@@ -4,6 +4,7 @@ import { useFetch, apiPost, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard } from '../ui'
 import { fmtDate, fmtINR, STATUS_COLORS, STAGE_LABELS } from '../types'
 import { SessionUser } from '../types'
+import { StockLookupCard } from '../stock-lookup'
 
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number; minStock:number; fastMoving:boolean }
 type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:string|null; quantity:number; status:string; matchedItem: Item|null }
@@ -95,57 +96,50 @@ function OverviewTab() {
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading analytics…</div>
   if (!data) return null
 
-  const categories = Object.entries(data.byCategory).sort((a,b) => b[1]-a[1])
-  const maxCat = Math.max(...categories.map(([,v]) => v), 1)
-
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Total Items" value={data.totalItems} sub="Active SKUs" accent="#E4AF4A" icon="📦" />
-        <StatCard label="Total Stock" value={data.totalStock} sub="Units in warehouse" accent="#4A9EE0" icon="📈" />
-        <StatCard label="Low Stock" value={data.lowStockCount} sub="Need reorder" accent="#E05050" icon="⚠️" />
-        <StatCard label="Fast Moving" value={data.fastMovingCount} sub="High turnover" accent="#3CB87A" icon="⚡" />
+      {/* Inventory KPIs — pure overview, no duplication with dedicated tabs */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-base">📦</span>
+          <h3 className="font-serif text-sm font-bold text-[#E4AF4A]">Inventory Overview</h3>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label="Total Items" value={data.totalItems} sub="Active SKUs" accent="#E4AF4A" icon="📦" />
+          <StatCard label="Total Stock" value={data.totalStock} sub="Units in warehouse" accent="#4A9EE0" icon="📈" />
+          <StatCard label="Low Stock" value={data.lowStockCount} sub="Need reorder" accent="#E05050" icon="⚠️" />
+          <StatCard label="Total Challans" value={data.totalChallans} sub="All-time" accent="#9B6ED4" icon="🧾" />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <StatCard label="Total Revenue" value={fmtINR(data.totalRevenue)} sub={`${data.totalChallans} challans`} accent="#E4AF4A" icon="💰" />
-        <StatCard label="Received" value={fmtINR(data.totalReceived)} sub="Payments collected" accent="#3CB87A" icon="✅" />
-        <StatCard label="Pending" value={fmtINR(data.totalPending)} sub="Yet to collect" accent="#E09E3C" icon="⏳" />
+      {/* Revenue KPIs */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-base">💰</span>
+          <h3 className="font-serif text-sm font-bold text-[#E4AF4A]">Revenue Overview</h3>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <StatCard label="Total Revenue" value={fmtINR(data.totalRevenue)} sub={`${data.totalChallans} challans`} accent="#E4AF4A" icon="💰" />
+          <StatCard label="Received" value={fmtINR(data.totalReceived)} sub="Payments collected" accent="#3CB87A" icon="✅" />
+          <StatCard label="Pending" value={fmtINR(data.totalPending)} sub="Yet to collect" accent="#E09E3C" icon="⏳" />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="p-4">
-          <SectionTitle icon="📊" title="Stock by Category" />
-          <div className="space-y-2.5">
-            {categories.map(([cat, val]) => (
-              <div key={cat}>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="text-[#96A8BF]">{cat}</span>
-                  <span className="text-[#EDE4D0] font-semibold">{val}</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-[#C8922A] to-[#E4AF4A]" style={{ width: `${(val/maxCat)*100}%` }} />
-                </div>
+      {/* Quick reference — counts only, not detailed lists (details live in dedicated tabs) */}
+      <Card className="p-4">
+        <SectionTitle icon="🧾" title="Challans by Status" sub="Quick counts — see Challans tab for details" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {Object.entries(data.challansByStatus).map(([st, cnt]) => (
+            <div key={st} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+              <div className="flex items-center justify-between">
+                <Badge label={st.replace(/_/g,' ')} color={STATUS_COLORS[st]} />
+                <span className="font-serif text-lg font-bold text-[#EDE4D0]">{cnt}</span>
               </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <SectionTitle icon="🧾" title="Challans by Status" />
-          <div className="grid grid-cols-2 gap-2">
-            {Object.entries(data.challansByStatus).map(([st, cnt]) => (
-              <div key={st} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-                <div className="flex items-center justify-between">
-                  <Badge label={st.replace(/_/g,' ')} color={STATUS_COLORS[st]} />
-                  <span className="font-serif text-lg font-bold text-[#EDE4D0]">{cnt}</span>
-                </div>
-              </div>
-            ))}
-            {Object.keys(data.challansByStatus).length === 0 && <EmptyState title="No challans yet" />}
-          </div>
-        </Card>
-      </div>
+            </div>
+          ))}
+          {Object.keys(data.challansByStatus).length === 0 && <EmptyState title="No challans yet" />}
+        </div>
+      </Card>
     </div>
   )
 }
@@ -160,44 +154,51 @@ function StockTab() {
   const filtered = cat === 'ALL' ? data.items : data.items.filter((i) => i.category === cat)
 
   return (
-    <Card className="p-4">
-      <SectionTitle icon="📦" title="Current Stock" sub={`${filtered.length} items`} right={
-        <Select value={cat} onChange={setCat} options={cats.map((c) => ({ value:c, label:c === 'ALL' ? 'All Categories' : c }))} />
-      } />
-      <div className="overflow-x-auto -mx-4 px-4">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-              <th className="py-2 pr-3">Category</th>
-              <th className="py-2 pr-3">Item</th>
-              <th className="py-2 pr-3">Model</th>
-              <th className="py-2 pr-3">Colour</th>
-              <th className="py-2 pr-3 text-right">Stock</th>
-              <th className="py-2 pr-3 text-right">Min</th>
-              <th className="py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((it) => {
-              const low = it.currentStock <= it.minStock
-              return (
-                <tr key={it.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                  <td className="py-2 pr-3 text-[#96A8BF]">{it.category}</td>
-                  <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{it.itemName}</td>
-                  <td className="py-2 pr-3 text-[#96A8BF] font-mono text-[11px]">{it.model}</td>
-                  <td className="py-2 pr-3 text-[#96A8BF]">{it.colour || '—'}</td>
-                  <td className="py-2 pr-3 text-right font-semibold" style={{ color: low ? '#E05050' : '#EDE4D0' }}>{it.currentStock}</td>
-                  <td className="py-2 pr-3 text-right text-[#4E6180]">{it.minStock}</td>
-                  <td className="py-2">
-                    {low ? <Badge label="Low" color="#E05050" /> : it.fastMoving ? <Badge label="Fast" color="#3CB87A" /> : <Badge label="OK" color="#96A8BF" />}
-                  </td>
+    <div className="space-y-4">
+      {/* Cascading lookup: Category → Item → Model → live stock */}
+      <StockLookupCard />
+
+      <Card className="p-4">
+        <SectionTitle icon="📦" title="Current Stock" sub={`${filtered.length} items`} right={
+          <Select value={cat} onChange={setCat} options={cats.map((c) => ({ value:c, label:c === 'ALL' ? 'All Categories' : c }))} />
+        } />
+        <div className="overflow-x-auto -mx-4 px-4">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-[12px]">
+              <thead className="sticky top-0 bg-[#111f32] z-10">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                  <th className="py-2 pr-3">Category</th>
+                  <th className="py-2 pr-3">Item</th>
+                  <th className="py-2 pr-3">Model</th>
+                  <th className="py-2 pr-3">Colour</th>
+                  <th className="py-2 pr-3 text-right">Stock</th>
+                  <th className="py-2 pr-3 text-right">Min</th>
+                  <th className="py-2">Status</th>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+              </thead>
+              <tbody>
+                {filtered.map((it) => {
+                  const low = it.currentStock <= it.minStock
+                  return (
+                    <tr key={it.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-3 text-[#96A8BF]">{it.category}</td>
+                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{it.itemName}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF] font-mono text-[11px]">{it.model}</td>
+                      <td className="py-2 pr-3 text-[#96A8BF]">{it.colour || '—'}</td>
+                      <td className="py-2 pr-3 text-right font-semibold" style={{ color: low ? '#E05050' : '#EDE4D0' }}>{it.currentStock}</td>
+                      <td className="py-2 pr-3 text-right text-[#4E6180]">{it.minStock}</td>
+                      <td className="py-2">
+                        {low ? <Badge label="Low" color="#E05050" /> : it.fastMoving ? <Badge label="Fast" color="#3CB87A" /> : <Badge label="OK" color="#96A8BF" />}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Card>
+    </div>
   )
 }
 
@@ -470,52 +471,119 @@ function PRForm({ open, onClose, userId, onCreated }: { open:boolean; onClose:()
 
 function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
   if (!pr) return null
+  const totalQty = pr.items.reduce((s, it) => s + it.quantity, 0)
   return (
     <Modal open={!!pr} onClose={onClose} title={`Print ${pr.prNumber}`} wide>
-      <div id="pr-print-area" className="bg-white text-black rounded-lg p-6 font-sans">
-        <div className="flex justify-between items-start border-b-2 border-[#C8922A] pb-3 mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-[#07101f]">LaxRee Hotel</h1>
-            <p className="text-[11px] text-gray-600">Inventory Management System</p>
+      <div id="pr-print-area" className="bg-white text-black rounded-lg p-8 font-sans" style={{ minHeight: '297mm' }}>
+        {/* Letterhead */}
+        <div className="flex justify-between items-start border-b-[3px] border-[#C8922A] pb-4 mb-5">
+          <div className="flex items-center gap-4">
+            <img src="/laxree-logo.png" alt="LaxRee" className="h-16 w-16 object-cover rounded-full border-2 border-[#C8922A]" />
+            <div>
+              <h1 className="text-2xl font-bold text-[#07101f] leading-tight">LaxRee Hotel</h1>
+              <p className="text-[11px] text-gray-600 leading-snug">Hospitality Supplies &amp; Inventory</p>
+              <p className="text-[10px] text-gray-500 leading-snug mt-0.5">
+                LaxRee House, Hotel Supplies Marg &nbsp;·&nbsp; Jaipur, Rajasthan 302001<br/>
+                Tel: +91-141-XXX-XXXX &nbsp;·&nbsp; Email: purchase@laxreehotel.com &nbsp;·&nbsp; GSTIN: 08XXXXX1234X1ZX
+              </p>
+            </div>
           </div>
           <div className="text-right">
-            <div className="text-lg font-bold text-[#C8922A]">PURCHASE REQUEST</div>
-            <div className="text-[12px] font-mono">{pr.prNumber}</div>
-            <div className="text-[11px] text-gray-600">{fmtDate(pr.createdAt)}</div>
+            <div className="inline-block px-3 py-1 rounded border-2 border-[#C8922A] text-[#C8922A] text-[11px] font-bold tracking-widest">PURCHASE REQUEST</div>
+            <div className="mt-2 text-[13px] font-mono font-bold text-[#07101f]">{pr.prNumber}</div>
+            <div className="text-[11px] text-gray-600">Date: {fmtDate(pr.createdAt)}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">Status: <span className="font-semibold uppercase">{pr.status}</span></div>
           </div>
         </div>
-        <div className="mb-4 text-[12px]">
-          <strong>Raised By:</strong> {pr.raisedByName}<br/>
-          <strong>Status:</strong> {pr.status}
-          {pr.notes && <><br/><strong>Notes:</strong> {pr.notes}</>}
+
+        {/* Meta block */}
+        <div className="grid grid-cols-2 gap-4 mb-5 text-[11.5px]">
+          <div className="border border-gray-300 rounded p-3">
+            <div className="text-[9px] uppercase tracking-wider text-gray-500 font-bold mb-1">Raised By</div>
+            <div className="font-semibold text-[#07101f]">{pr.raisedByName}</div>
+            <div className="text-gray-600 text-[10.5px]">LaxRee Hotel — Inventory Department</div>
+          </div>
+          <div className="border border-gray-300 rounded p-3">
+            <div className="text-[9px] uppercase tracking-wider text-gray-500 font-bold mb-1">Supplier / Vendor</div>
+            <div className="text-gray-700 text-[10.5px] leading-snug">
+              ____________________________________<br/>
+              ____________________________________
+            </div>
+          </div>
         </div>
-        <table className="w-full text-[12px] border border-gray-300">
+
+        {/* Subject */}
+        <div className="mb-4 text-[12px]">
+          <span className="font-bold text-[#07101f]">Subject:</span>{' '}
+          <span className="text-gray-700">Purchase Request for the following inventory items — kindly arrange supply at the earliest.</span>
+        </div>
+
+        {/* Items table */}
+        <table className="w-full text-[11.5px] border border-gray-400 border-collapse">
           <thead>
-            <tr className="bg-[#07101f] text-white">
-              <th className="py-2 px-3 text-left">#</th>
-              <th className="py-2 px-3 text-left">Item Name</th>
-              <th className="py-2 px-3 text-left">Model</th>
-              <th className="py-2 px-3 text-right">Quantity</th>
+            <tr className="bg-[#07101f] text-white text-[10px] uppercase tracking-wider">
+              <th className="py-2 px-2 text-center border-r border-white/20 w-8">#</th>
+              <th className="py-2 px-3 text-left border-r border-white/20">Item Name</th>
+              <th className="py-2 px-3 text-left border-r border-white/20">Model / SKU</th>
+              <th className="py-2 px-2 text-right border-r border-white/20 w-20">Quantity</th>
+              <th className="py-2 px-3 text-left w-32">Remarks</th>
             </tr>
           </thead>
           <tbody>
             {pr.items.map((it, i) => (
-              <tr key={it.id} className="border-b border-gray-200">
-                <td className="py-2 px-3">{i+1}</td>
-                <td className="py-2 px-3 font-medium">{it.itemName}</td>
-                <td className="py-2 px-3 font-mono">{it.model || '—'}</td>
-                <td className="py-2 px-3 text-right font-semibold">{it.quantity}</td>
+              <tr key={it.id} className={i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                <td className="py-2 px-2 text-center border-r border-gray-300 text-gray-600">{i+1}</td>
+                <td className="py-2 px-3 border-r border-gray-300 font-semibold text-[#07101f]">{it.itemName}</td>
+                <td className="py-2 px-3 border-r border-gray-300 font-mono text-gray-700">{it.model || '—'}</td>
+                <td className="py-2 px-2 text-right border-r border-gray-300 font-bold text-[#C8922A]">{it.quantity}</td>
+                <td className="py-2 px-3 text-gray-500 text-[10.5px]">—</td>
               </tr>
             ))}
+            {/* Total row */}
+            <tr className="bg-[#FDF6E3] border-t-2 border-[#C8922A]">
+              <td colSpan={3} className="py-2 px-3 text-right font-bold text-[#07101f] text-[11px] uppercase tracking-wider">Total Quantity</td>
+              <td className="py-2 px-2 text-right font-bold text-[#C8922A] text-[13px]">{totalQty}</td>
+              <td className="py-2 px-3"></td>
+            </tr>
           </tbody>
         </table>
-        <div className="mt-8 flex justify-between text-[11px]">
-          <div><div className="border-t border-gray-400 pt-1 mt-12 w-32">Raised By</div></div>
-          <div><div className="border-t border-gray-400 pt-1 mt-12 w-32">Approved By</div></div>
-          <div><div className="border-t border-gray-400 pt-1 mt-12 w-32">Received By</div></div>
+
+        {/* Notes */}
+        {pr.notes && (
+          <div className="mt-4 rounded border border-gray-300 bg-gray-50 p-3 text-[11px]">
+            <span className="font-bold text-[#07101f]">Notes: </span>
+            <span className="text-gray-700">{pr.notes}</span>
+          </div>
+        )}
+
+        {/* Terms */}
+        <div className="mt-4 text-[10px] text-gray-500 leading-relaxed">
+          <strong className="text-gray-600">Terms &amp; Conditions:</strong> Goods shall be supplied as per LaxRee quality standards. Payment terms: 30 days from invoice &amp; goods receipt. Please quote this PR number on all correspondence &amp; invoices.
+        </div>
+
+        {/* Signatures */}
+        <div className="mt-12 grid grid-cols-3 gap-6 text-[10.5px] text-center">
+          <div>
+            <div className="border-t border-gray-500 pt-1 mt-10 mx-auto w-40 text-gray-700">Raised By</div>
+            <div className="text-[9px] text-gray-500 mt-0.5">{pr.raisedByName}</div>
+          </div>
+          <div>
+            <div className="border-t border-gray-500 pt-1 mt-10 mx-auto w-40 text-gray-700">Approved By</div>
+            <div className="text-[9px] text-gray-500 mt-0.5">Authorized Signatory</div>
+          </div>
+          <div>
+            <div className="border-t border-gray-500 pt-1 mt-10 mx-auto w-40 text-gray-700">Received By</div>
+            <div className="text-[9px] text-gray-500 mt-0.5">Store / Inventory</div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 pt-2 border-t border-gray-300 text-center text-[9px] text-gray-400">
+          This is a system-generated Purchase Request from LaxRee Hotel Inventory Management System &nbsp;·&nbsp; {pr.prNumber} &nbsp;·&nbsp; Generated on {fmtDate(pr.createdAt)}
         </div>
       </div>
-      <div className="flex justify-end mt-4">
+      <div className="flex justify-end gap-2 mt-4">
+        <Btn onClick={onClose}>Close</Btn>
         <Btn variant="gold" onClick={() => window.print()}>🖨 Print Now</Btn>
       </div>
     </Modal>

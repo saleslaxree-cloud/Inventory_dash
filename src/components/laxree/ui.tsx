@@ -55,8 +55,8 @@ export function StatCard({ label, value, sub, accent = '#E4AF4A', icon }: { labe
   )
 }
 
-export function Btn({ children, onClick, variant = 'default', size = 'md', type = 'button', disabled }: {
-  children: ReactNode; onClick?: () => void; variant?: 'default'|'gold'|'success'|'danger'|'ghost'; size?: 'sm'|'md'; type?: 'button'|'submit'; disabled?: boolean
+export function Btn({ children, onClick, variant = 'default', size = 'md', type = 'button', disabled, className }: {
+  children: ReactNode; onClick?: () => void; variant?: 'default'|'gold'|'success'|'danger'|'ghost'; size?: 'sm'|'md'; type?: 'button'|'submit'; disabled?: boolean; className?: string
 }) {
   const variants = {
     default: 'border border-white/10 bg-white/5 text-[#EDE4D0] hover:bg-white/10',
@@ -71,7 +71,7 @@ export function Btn({ children, onClick, variant = 'default', size = 'md', type 
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all ${variants[variant]} ${sizes[size]} disabled:opacity-40 disabled:cursor-not-allowed`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all ${variants[variant]} ${sizes[size]} disabled:opacity-40 disabled:cursor-not-allowed ${className || ''}`}
     >
       {children}
     </button>

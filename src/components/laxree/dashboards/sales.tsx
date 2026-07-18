@@ -610,6 +610,7 @@ function UploadForm({ user, onDone }: { user: SessionUser; onDone: () => void })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const [result, setResult] = useState<Challan | null>(null)
+  const [autoHoldCount, setAutoHoldCount] = useState(0)
 
   const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
 
@@ -630,6 +631,7 @@ function UploadForm({ user, onDone }: { user: SessionUser; onDone: () => void })
         items: validItems,
       })
       setResult(res.challan)
+      setAutoHoldCount(typeof res.autoHoldCount === 'number' ? res.autoHoldCount : 0)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Upload failed')
     } finally { setSaving(false) }
@@ -643,10 +645,15 @@ function UploadForm({ user, onDone }: { user: SessionUser; onDone: () => void })
           <h3 className="font-serif text-lg font-bold text-[#3CB87A]">Challan Uploaded &amp; Analyzed!</h3>
           <p className="text-[12px] text-[#96A8BF] mt-1">System auto-analyzed {result.challanItems.length} items</p>
         </div>
+        {autoHoldCount > 0 && (
+          <div className="mb-4 rounded-lg border border-[#9B6ED4]/30 bg-[#9B6ED4]/10 px-3 py-2.5 text-[12px] text-[#9B6ED4]">
+            🔒 <strong>Stock Auto-Held:</strong> {autoHoldCount} matched item(s) have been put on hold for <strong>{result.clientName}</strong> to protect stock health. Holds are linked to challan <span className="font-mono">{result.challanNumber}</span> — see the Stock Hold tab.
+          </div>
+        )}
         <ChallanAnalysis c={result} />
         <div className="flex justify-end gap-2 mt-4">
-          <Btn onClick={() => { setResult(null); onDone() }}>Done</Btn>
-          <Btn variant="gold" onClick={() => { setResult(null); setChallanNumber(''); setClientName(''); setClientCity(''); setClientMobile(''); setExpectedDate(''); setAmountTotal(''); setAmountAdvance(''); setItems([{ itemName:'', itemNumber:'', model:'', quantity:1 }]) }}>Upload Another</Btn>
+          <Btn onClick={() => { setResult(null); setAutoHoldCount(0); onDone() }}>Done</Btn>
+          <Btn variant="gold" onClick={() => { setResult(null); setAutoHoldCount(0); setChallanNumber(''); setClientName(''); setClientCity(''); setClientMobile(''); setExpectedDate(''); setAmountTotal(''); setAmountAdvance(''); setItems([{ itemName:'', itemNumber:'', model:'', quantity:1 }]) }}>Upload Another</Btn>
         </div>
       </Card>
     )

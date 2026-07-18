@@ -103,6 +103,62 @@ export async function POST(req: NextRequest) {
     ],
   })
 
+  // ── AUTO STOCK HOLD: reserve stock for each MATCHED item ──
+  // When sales creates a challan, stock is put on hold so it cannot be double-sold.
+  // Hold is linked to the challan (challanId) so it can be converted to outward on dispatch,
+  // or released automatically if the challan is cancelled.
+  const matchedItems = analyzedItems.filter(
+    (i) => i.status === 'MATCHED' && i.matchedItemId && i.quantity > 0
+  )
+  if (matchedItems.length > 0) {
+    // Aggregate quantities per item (a challan may list the same item twice)
+    const perItem = new Map<string, number>()
+    for (const mi of matchedItems) {
+      const id = mi.matchedItemId!
+      perItem.set(id, (perItem.get(id) || 0) + mi.quantity)
+    }
+
+    const holdData: Array<{
+      itemId: string; category: string; itemName: string; model: string
+      colour: string | null; holdQty: number; clientName: string
+      advanceAmount: number; remarks: string; status: string
+      heldById: string; challanId: string
+    }> = []
+
+    for (const [itemId, qty] of perItem.entries()) {
+      const item = allItems.find((m) => m.id === itemId)
+      if (!item) continue
+      // Check available (current stock − existing active holds)
+      const activeHolds = await db.stockHold.aggregate({
+        where: { itemId, status: 'ACTIVE' },
+        _sum: { holdQty: true },
+      })
+      const alreadyHeld = activeHolds._sum.holdQty || 0
+      const available = item.currentStock - alreadyHeld
+      // Only hold up to available; if insufficient, hold what's available (partial hold)
+      const holdQty = Math.max(0, Math.min(qty, available))
+      if (holdQty <= 0) continue
+      holdData.push({
+        itemId,
+        category: item.category,
+        itemName: item.itemName,
+        model: item.model,
+        colour: item.colour,
+        holdQty,
+        clientName,
+        advanceAmount: amtAdvance > 0 ? amtAdvance / matchedItems.length : 0,
+        remarks: `Auto-held on challan ${challanNumber} (qty requested: ${qty}${holdQty < qty ? `, only ${holdQty} available` : ''})`,
+        status: 'ACTIVE',
+        heldById: user.id,
+        challanId: challan.id,
+      })
+    }
+
+    if (holdData.length > 0) {
+      await db.stockHold.createMany({ data: holdData })
+    }
+  }
+
   // ── Send message to Account team about advance ──
   if (amtAdvance > 0) {
     await db.message.create({
@@ -117,5 +173,16 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ challan }, { status: 201 })
+  // Count auto-holds for the response message
+  const autoHoldCount = matchedItems.length > 0
+    ? await db.stockHold.count({ where: { challanId: challan.id, status: 'ACTIVE' } })
+    : 0
+
+  return NextResponse.json({
+    challan,
+    autoHoldCount,
+    message: autoHoldCount > 0
+      ? `Challan uploaded & analyzed. ${autoHoldCount} item(s) auto-held for ${clientName}.`
+      : 'Challan uploaded & analyzed.',
+  }, { status: 201 })
 }

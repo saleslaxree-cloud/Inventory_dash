@@ -506,3 +506,49 @@ Stage Summary:
 - All data real & working — no empty states, no loading spinners that never resolve
 - LaxRee theme maintained: Deep Navy + Gold, no indigo/blue
 - Original HTML file preserved at /home/z/my-project/upload/
+
+---
+Task ID: v7-pr-overview-stockhold
+Agent: main (Z.ai Code)
+Task: Professional PR with company logo, fix Overview duplication, cascading stock lookup dropdown in all dashboards, auto stock hold when sales creates challan
+
+Work Log:
+- Extracted LaxRee company logo (base64 PNG) from original HTML file → saved to /home/z/my-project/public/laxree-logo.png (10.9KB)
+- Updated app-shell.tsx sidebar logo: replaced 🏨 emoji with real laxree-logo.png (h-16 w-16, gold border, white bg)
+- Updated login-screen.tsx: replaced 🏨 emoji with real laxree-logo.png (h-20 w-20)
+- Added `className` prop support to Btn component (was being passed in login but silently ignored)
+- Owner Overview tab simplified: removed "Fast Moving" stat card (duplicated with Fast Moving tab), removed "Stock by Category" detailed bar chart (duplicated with Current Stock tab). Now shows only pure KPIs: Inventory Overview (4 cards: Total Items/Stock/Low Stock/Challans), Revenue Overview (3 cards: Revenue/Received/Pending), Challans by Status (quick counts only). Reorganized into clearly-labeled sections.
+- Created shared StockLookupCard component (src/components/laxree/stock-lookup.tsx): cascading 3-step dropdown — Category → Item Name → Model → displays live Current Stock / On Hold / Available / Min Stock / Inward / Dispatched + status badge. Auto-fetches /api/items and /api/stock-register.
+- Added StockLookupCard to Owner "Current Stock" tab (top, above existing list). Also made existing list scrollable with sticky header (max-h-[60vh]).
+- Added StockLookupCard to IT Manager "Item Master" tab + "Stock Register" tab (top). Made Item Master list scrollable with sticky header.
+- Added StockLookupCard to Admin "All Items" tab (top). Made list scrollable with sticky header.
+- Upgraded Owner PrintModal (Purchase Request) to professional letterhead:
+  * Real LaxRee logo (laxree-logo.png, gold border) in header
+  * Company address block (LaxRee House, Jaipur, GSTIN, contact)
+  * "PURCHASE REQUEST" boxed badge + PR number + date + status
+  * Two-column meta block: Raised By (department) + Supplier/Vendor (blank lines)
+  * Subject line
+  * Professional items table with #/Item/Model/Qty/Remarks columns, zebra striping, dark header, gold total row
+  * Total Quantity row
+  * Notes block (if any)
+  * Terms & Conditions text
+  * Three signature blocks (Raised By / Approved By / Received By) with role labels
+  * System-generated footer with PR number + date
+- Backend: Modified /api/challans/upload to auto-create StockHold entries for each MATCHED challan item:
+  * Aggregates quantities per item (handles duplicate items in one challan)
+  * Validates available stock (currentStock − existing active holds)
+  * Partial hold if insufficient (holds what's available, notes the shortfall in remarks)
+  * Links hold to challan via challanId field
+  * Splits advance amount across held items
+  * Returns autoHoldCount in response
+- Updated Sales UploadForm to show purple banner after upload: "🔒 Stock Auto-Held: N item(s) put on hold for [Client] to protect stock health"
+- Verified lint clean (0 errors, 0 warnings after removing 3 unused eslint-disable comments)
+- Verified dev server compiles successfully
+
+Stage Summary:
+- Company logo (real LaxRee brand mark) now used in sidebar + login + PR print letterhead
+- Overview tab de-duplicated: only pure KPIs + quick counts, no detailed lists (those live in dedicated tabs)
+- Cascading Stock Lookup (Category → Item → Model → live stock) available in Owner/IT Manager/Admin dashboards
+- Purchase Request print is now a professional business document with logo, letterhead, address, terms, signatures
+- Stock health protected: when Sales creates a challan, matched items are auto-held so they cannot be double-sold to another client
+- All holds linked to challan (challanId) for future convert-to-outward on dispatch

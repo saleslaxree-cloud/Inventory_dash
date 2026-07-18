@@ -32,15 +32,15 @@ export function AppShell({
       `}>
         {/* Logo */}
         <div className="px-4 py-5 border-b border-white/7 flex flex-col items-center gap-1.5">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#C8922A] text-2xl"
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#C8922A] overflow-hidden bg-white"
             style={{ boxShadow: '0 0 20px rgba(200,146,42,0.35)' }}>
-            🏨
+            <img src="/laxree-logo.png" alt="LaxRee Hotel" className="h-full w-full object-cover" />
           </div>
           <div className="font-serif text-sm font-bold text-center leading-tight"
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             LaxRee Hotel
           </div>
-          <div className="text-[8px] uppercase tracking-[1.5px] text-[#4E6180]">IMS v4</div>
+          <div className="text-[8px] uppercase tracking-[1.5px] text-[#4E6180]">Inventory MS</div>
         </div>
 
         {/* Nav */}

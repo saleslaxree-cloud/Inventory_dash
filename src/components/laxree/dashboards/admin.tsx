@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useFetch, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, StatCard } from '../ui'
 import { fmtDate, fmtINR, ROLE_META, STATUS_COLORS, SessionUser } from '../types'
+import { StockLookupCard } from '../stock-lookup'
 
 type UserRow = { id:string; name:string; email:string; role:string; phone:string|null; active:boolean; forcePasswordChange:boolean; createdAt:string }
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number; minStock:number; fastMoving:boolean; active:boolean }
@@ -242,35 +243,42 @@ function ItemsTab() {
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
   if (!data) return null
   return (
-    <Card className="p-4">
-      <SectionTitle icon="📦" title="All Items (Read-only)" sub={`${data.items.length} items • Edit via IT Manager`} />
-      <div className="overflow-x-auto -mx-4 px-4 max-h-[60vh]">
-        <table className="w-full text-[12px]">
-          <thead className="sticky top-0 bg-[#111f32]">
-            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-              <th className="py-2 pr-3">Category</th>
-              <th className="py-2 pr-3">Item</th>
-              <th className="py-2 pr-3">Model</th>
-              <th className="py-2 pr-3 text-right">Stock</th>
-              <th className="py-2 pr-3 text-right">Min</th>
-              <th className="py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((it) => (
-              <tr key={it.id} className="border-b border-white/5">
-                <td className="py-2 pr-3 text-[#96A8BF]">{it.category}</td>
-                <td className="py-2 pr-3 text-[#EDE4D0]">{it.itemName}</td>
-                <td className="py-2 pr-3 text-[#96A8BF] font-mono">{it.model}</td>
-                <td className="py-2 pr-3 text-right" style={{ color: it.currentStock <= it.minStock ? '#E05050' : '#EDE4D0' }}>{it.currentStock}</td>
-                <td className="py-2 pr-3 text-right text-[#4E6180]">{it.minStock}</td>
-                <td className="py-2">{it.currentStock <= it.minStock ? <Badge label="Low" color="#E05050" /> : it.fastMoving ? <Badge label="Fast" color="#3CB87A" /> : <Badge label="OK" color="#96A8BF" />}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+    <div className="space-y-4">
+      {/* Cascading lookup: Category → Item → Model → live stock */}
+      <StockLookupCard />
+
+      <Card className="p-4">
+        <SectionTitle icon="📦" title="All Items (Read-only)" sub={`${data.items.length} items • Edit via IT Manager`} />
+        <div className="overflow-x-auto -mx-4 px-4">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-[12px]">
+              <thead className="sticky top-0 bg-[#111f32]">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                  <th className="py-2 pr-3">Category</th>
+                  <th className="py-2 pr-3">Item</th>
+                  <th className="py-2 pr-3">Model</th>
+                  <th className="py-2 pr-3 text-right">Stock</th>
+                  <th className="py-2 pr-3 text-right">Min</th>
+                  <th className="py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((it) => (
+                  <tr key={it.id} className="border-b border-white/5">
+                    <td className="py-2 pr-3 text-[#96A8BF]">{it.category}</td>
+                    <td className="py-2 pr-3 text-[#EDE4D0]">{it.itemName}</td>
+                    <td className="py-2 pr-3 text-[#96A8BF] font-mono">{it.model}</td>
+                    <td className="py-2 pr-3 text-right" style={{ color: it.currentStock <= it.minStock ? '#E05050' : '#EDE4D0' }}>{it.currentStock}</td>
+                    <td className="py-2 pr-3 text-right text-[#4E6180]">{it.minStock}</td>
+                    <td className="py-2">{it.currentStock <= it.minStock ? <Badge label="Low" color="#E05050" /> : it.fastMoving ? <Badge label="Fast" color="#3CB87A" /> : <Badge label="OK" color="#96A8BF" />}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Card>
+    </div>
   )
 }
 

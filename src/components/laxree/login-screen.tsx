@@ -52,9 +52,9 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
           background: 'radial-gradient(circle at 30% 20%, rgba(200,146,42,0.15), transparent 50%), radial-gradient(circle at 70% 80%, rgba(200,146,42,0.08), transparent 50%)'
         }} />
         <div className="relative z-10 text-center max-w-md">
-          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#C8922A] text-3xl"
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#C8922A] overflow-hidden bg-white"
             style={{ boxShadow: '0 0 30px rgba(200,146,42,0.4), 0 0 60px rgba(200,146,42,0.15)' }}>
-            🏨
+            <img src="/laxree-logo.png" alt="LaxRee Hotel" className="h-full w-full object-cover" />
           </div>
           <h1 className="font-serif text-3xl lg:text-4xl font-bold mb-2"
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
