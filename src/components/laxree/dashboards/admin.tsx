@@ -29,7 +29,7 @@ export function AdminDashboard({ user, activeTab, onTabChange }: { user: Session
           </button>
         ))}
       </div>
-      {activeTab === 'overview' && <OverviewTab />}
+      {activeTab === 'overview' && <OverviewTab onTabChange={onTabChange} />}
       {activeTab === 'users' && <UsersTab />}
       {activeTab === 'challans' && <ChallansTab />}
       {activeTab === 'items' && <ItemsTab />}
@@ -38,55 +38,109 @@ export function AdminDashboard({ user, activeTab, onTabChange }: { user: Session
   )
 }
 
-function OverviewTab() {
-  const { data: analytics, loading: la } = useFetch<{ totalItems:number; totalStock:number; lowStockCount:number; fastMovingCount:number; totalChallans:number; totalRevenue:number; totalReceived:number; totalPending:number; challansByStatus:Record<string,number> }>('/api/analytics')
+function OverviewTab({ onTabChange }: { onTabChange: (id: string) => void }) {
+  const { data, loading } = useFetch<{
+    health: { overall:number; stock:number; payment:number; workflow:number }
+    alerts: { severity:'critical'|'warning'|'info'; message:string; tab:string }[]
+    activity: { challansLast30:number; challansLast7:number; dispatchesLast30:number; activeUsers:number; activeHolds:number }
+    snapshot: { totalSKUs:number; totalChallans:number; lowStockCount:number; outOfStockCount:number; collectionRate:number; pendingAmount:number; totalRevenue:number; totalReceived:number }
+    byCategory: Record<string,number>
+  }>('/api/overview')
   const { data: usersData, loading: lu } = useFetch<{ users: UserRow[] }>('/api/users')
-  if (la || lu) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
-  if (!analytics || !usersData) return null
 
-  const activeUsers = usersData.users.filter((u) => u.active).length
+  if (loading || lu) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading overview…</div>
+  if (!data || !usersData) return null
+
+  const inactiveUsers = usersData.users.filter((u) => !u.active).length
+  const forcedPwChange = usersData.users.filter((u) => u.forcePasswordChange).length
+
+  const healthColor = (score: number) => score >= 80 ? '#3CB87A' : score >= 50 ? '#E09E3C' : '#E05050'
+
+  // Admin-specific alerts (on top of the system alerts)
+  const adminAlerts: { severity:'critical'|'warning'|'info'; message:string; tab:string }[] = []
+  if (inactiveUsers > 0) adminAlerts.push({ severity:'warning', message:`${inactiveUsers} user account(s) disabled`, tab:'users' })
+  if (forcedPwChange > 0) adminAlerts.push({ severity:'info', message:`${forcedPwChange} user(s) must change password on next login`, tab:'users' })
+
+  const allAlerts = [...adminAlerts, ...data.alerts]
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Total Users" value={usersData.users.length} sub={`${activeUsers} active`} accent="#E05050" icon="👥" />
-        <StatCard label="Active Items" value={analytics.totalItems} sub={`${analytics.totalStock} units`} accent="#E4AF4A" icon="📦" />
-        <StatCard label="Total Challans" value={analytics.totalChallans} sub="All time" accent="#4A9EE0" icon="🧾" />
-        <StatCard label="Low Stock" value={analytics.lowStockCount} sub="Needs reorder" accent="#E09E3C" icon="⚠️" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <StatCard label="Total Revenue" value={fmtINR(analytics.totalRevenue)} accent="#E4AF4A" icon="💰" />
-        <StatCard label="Received" value={fmtINR(analytics.totalReceived)} accent="#3CB87A" icon="✅" />
-        <StatCard label="Pending" value={fmtINR(analytics.totalPending)} accent="#E09E3C" icon="⏳" />
-      </div>
-
+      {/* ── System Health Score ── */}
       <Card className="p-4">
-        <SectionTitle icon="👥" title="Users by Role" />
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
-          {Object.entries(ROLE_META).map(([role, meta]) => {
-            const count = usersData.users.filter((u) => u.role === role).length
+        <SectionTitle icon="🩺" title="System Health" sub="Composite score across stock, payments & workflow" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Overall</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.overall) }}>{data.health.overall}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">System score</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Stock Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.stock) }}>{data.health.stock}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">{data.snapshot.outOfStockCount} out of stock</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Payment Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.payment) }}>{data.health.payment}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">{data.snapshot.collectionRate}% collected</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Workflow Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.workflow) }}>{data.health.workflow}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">Challans progressing</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Alerts (admin + system) ── */}
+      <Card className="p-4">
+        <SectionTitle icon="🔔" title="Action Needed" sub="Items requiring admin attention" />
+        <div className="space-y-2 mt-2">
+          {allAlerts.length === 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-[#3CB87A]/20 bg-[#3CB87A]/5 p-3">
+              <span className="text-lg">✅</span>
+              <span className="text-sm text-[#3CB87A]">All clear — system running smoothly.</span>
+            </div>
+          )}
+          {allAlerts.map((a, i) => {
+            const color = a.severity === 'critical' ? '#E05050' : a.severity === 'warning' ? '#E09E3C' : '#4A9EE0'
+            const icon = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟠' : '🔵'
             return (
-              <div key={role} className="rounded-lg border border-white/7 bg-white/[0.02] p-3 text-center">
-                <div className="text-xl mb-1">{meta.icon}</div>
-                <div className="text-[10px] font-semibold" style={{ color: meta.color }}>{meta.label}</div>
-                <div className="font-serif text-lg font-bold text-[#EDE4D0]">{count}</div>
-              </div>
+              <button key={i} onClick={() => onTabChange(a.tab)}
+                className="flex items-center gap-3 w-full text-left rounded-lg border bg-white/[0.02] p-3 transition-all hover:bg-white/5"
+                style={{ borderColor: `${color}30` }}>
+                <span className="text-lg">{icon}</span>
+                <span className="text-sm text-[#EDE4D0] flex-1">{a.message}</span>
+                <span className="text-[10px] uppercase tracking-wide text-[#4E6180]">View →</span>
+              </button>
             )
           })}
         </div>
       </Card>
 
+      {/* ── Last 30 Days Activity ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="New Challans (30d)" value={data.activity.challansLast30} sub={`${data.activity.challansLast7} in last 7 days`} accent="#9B6ED4" icon="🧾" />
+        <StatCard label="Dispatches (30d)" value={data.activity.dispatchesLast30} sub="Completed deliveries" accent="#3CB87A" icon="🚚" />
+        <StatCard label="Active Users" value={data.activity.activeUsers} sub={`${usersData.users.length} total accounts`} accent="#E05050" icon="👥" />
+        <StatCard label="Stock Holds" value={data.activity.activeHolds} sub="Client reservations" accent="#E09E3C" icon="🔒" />
+      </div>
+
+      {/* ── Quick Navigation ── */}
       <Card className="p-4">
-        <SectionTitle icon="🧾" title="Challans by Status" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {Object.entries(analytics.challansByStatus).map(([st, cnt]) => (
-            <div key={st} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-              <div className="flex items-center justify-between">
-                <Badge label={st.replace(/_/g,' ')} color={STATUS_COLORS[st]} />
-                <span className="font-serif text-lg font-bold text-[#EDE4D0]">{cnt}</span>
-              </div>
-            </div>
+        <SectionTitle icon="🧭" title="Quick Access" sub="Jump to a dedicated section" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+          {[
+            { id: 'users', label: 'User Management', icon: '👥' },
+            { id: 'challans', label: 'All Challans', icon: '🧾' },
+            { id: 'items', label: 'All Items', icon: '📦' },
+            { id: 'messages', label: 'All Messages', icon: '✉️' },
+          ].map((q) => (
+            <button key={q.id} onClick={() => onTabChange(q.id)}
+              className="flex items-center gap-2 rounded-lg border border-white/7 bg-white/[0.02] p-3 text-left transition-all hover:border-[#E05050]/30 hover:bg-white/5">
+              <span className="text-lg">{q.icon}</span>
+              <span className="text-[11px] font-medium text-[#96A8BF]">{q.label}</span>
+            </button>
           ))}
         </div>
       </Card>

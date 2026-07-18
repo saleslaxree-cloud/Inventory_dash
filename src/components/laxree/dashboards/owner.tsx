@@ -77,7 +77,7 @@ export function OwnerDashboard({ user, activeTab, onTabChange }: { user: Session
         ))}
       </div>
 
-      {activeTab === 'overview' && <OverviewTab />}
+      {activeTab === 'overview' && <OverviewTab onTabChange={onTabChange} />}
       {activeTab === 'stock' && <StockTab />}
       {activeTab === 'fast' && <FastTab />}
       {activeTab === 'challans' && <ChallansTab />}
@@ -89,54 +89,126 @@ export function OwnerDashboard({ user, activeTab, onTabChange }: { user: Session
   )
 }
 
-function OverviewTab() {
-  const { data, loading } = useFetch<{ totalItems:number; totalStock:number; lowStockCount:number; fastMovingCount:number; totalChallans:number; totalRevenue:number; totalReceived:number; totalPending:number; byCategory:Record<string,number>; challansByStatus:Record<string,number> }>('/api/analytics')
+function OverviewTab({ onTabChange }: { onTabChange: (id: string) => void }) {
+  const { data, loading } = useFetch<{
+    health: { overall:number; stock:number; payment:number; workflow:number }
+    alerts: { severity:'critical'|'warning'|'info'; message:string; tab:string }[]
+    activity: { challansLast30:number; challansLast7:number; dispatchesLast30:number; activeUsers:number; activeHolds:number }
+    snapshot: { totalSKUs:number; totalChallans:number; lowStockCount:number; outOfStockCount:number; collectionRate:number; pendingAmount:number; totalRevenue:number; totalReceived:number }
+    byCategory: Record<string,number>
+  }>('/api/overview')
 
-  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading analytics…</div>
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading overview…</div>
   if (!data) return null
+
+  const healthColor = (score: number) => score >= 80 ? '#3CB87A' : score >= 50 ? '#E09E3C' : '#E05050'
+  const healthLabel = (score: number) => score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical'
 
   return (
     <div className="space-y-4">
-      {/* Inventory KPIs — pure overview, no duplication with dedicated tabs */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-base">📦</span>
-          <h3 className="font-serif text-sm font-bold text-[#E4AF4A]">Inventory Overview</h3>
-        </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Total Items" value={data.totalItems} sub="Active SKUs" accent="#E4AF4A" icon="📦" />
-          <StatCard label="Total Stock" value={data.totalStock} sub="Units in warehouse" accent="#4A9EE0" icon="📈" />
-          <StatCard label="Low Stock" value={data.lowStockCount} sub="Need reorder" accent="#E05050" icon="⚠️" />
-          <StatCard label="Total Challans" value={data.totalChallans} sub="All-time" accent="#9B6ED4" icon="🧾" />
-        </div>
-      </div>
-
-      {/* Revenue KPIs */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-base">💰</span>
-          <h3 className="font-serif text-sm font-bold text-[#E4AF4A]">Revenue Overview</h3>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <StatCard label="Total Revenue" value={fmtINR(data.totalRevenue)} sub={`${data.totalChallans} challans`} accent="#E4AF4A" icon="💰" />
-          <StatCard label="Received" value={fmtINR(data.totalReceived)} sub="Payments collected" accent="#3CB87A" icon="✅" />
-          <StatCard label="Pending" value={fmtINR(data.totalPending)} sub="Yet to collect" accent="#E09E3C" icon="⏳" />
-        </div>
-      </div>
-
-      {/* Quick reference — counts only, not detailed lists (details live in dedicated tabs) */}
+      {/* ── System Health Score (cross-cutting metric, not duplicated anywhere) ── */}
       <Card className="p-4">
-        <SectionTitle icon="🧾" title="Challans by Status" sub="Quick counts — see Challans tab for details" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-          {Object.entries(data.challansByStatus).map(([st, cnt]) => (
-            <div key={st} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-              <div className="flex items-center justify-between">
-                <Badge label={st.replace(/_/g,' ')} color={STATUS_COLORS[st]} />
-                <span className="font-serif text-lg font-bold text-[#EDE4D0]">{cnt}</span>
-              </div>
+        <SectionTitle icon="🩺" title="System Health" sub="Composite score across stock, payments & workflow" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Overall</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.overall) }}>{data.health.overall}</div>
+            <div className="text-[10px] mt-0.5" style={{ color: healthColor(data.health.overall) }}>{healthLabel(data.health.overall)}</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Stock Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.stock) }}>{data.health.stock}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">{data.snapshot.outOfStockCount} out of stock</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Payment Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.payment) }}>{data.health.payment}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">{data.snapshot.collectionRate}% collected</div>
+          </div>
+          <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-[#4E6180] mb-1">Workflow Health</div>
+            <div className="font-serif text-3xl font-bold" style={{ color: healthColor(data.health.workflow) }}>{data.health.workflow}</div>
+            <div className="text-[10px] text-[#4E6180] mt-0.5">Challans progressing</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Alerts (actionable, not duplicated — points to the right tab) ── */}
+      <Card className="p-4">
+        <SectionTitle icon="🔔" title="Action Needed" sub="Items requiring your attention" />
+        <div className="space-y-2 mt-2">
+          {data.alerts.length === 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-[#3CB87A]/20 bg-[#3CB87A]/5 p-3">
+              <span className="text-lg">✅</span>
+              <span className="text-sm text-[#3CB87A]">All clear — no items need attention right now.</span>
             </div>
+          )}
+          {data.alerts.map((a, i) => {
+            const color = a.severity === 'critical' ? '#E05050' : a.severity === 'warning' ? '#E09E3C' : '#4A9EE0'
+            const icon = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟠' : '🔵'
+            return (
+              <button key={i} onClick={() => onTabChange(a.tab)}
+                className="flex items-center gap-3 w-full text-left rounded-lg border bg-white/[0.02] p-3 transition-all hover:bg-white/5"
+                style={{ borderColor: `${color}30` }}>
+                <span className="text-lg">{icon}</span>
+                <span className="text-sm text-[#EDE4D0] flex-1">{a.message}</span>
+                <span className="text-[10px] uppercase tracking-wide text-[#4E6180]">View →</span>
+              </button>
+            )
+          })}
+        </div>
+      </Card>
+
+      {/* ── Last 30 Days Activity (trend, not detailed list) ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="New Challans (30d)" value={data.activity.challansLast30} sub={`${data.activity.challansLast7} in last 7 days`} accent="#9B6ED4" icon="🧾" />
+        <StatCard label="Dispatches (30d)" value={data.activity.dispatchesLast30} sub="Completed deliveries" accent="#3CB87A" icon="🚚" />
+        <StatCard label="Active Users" value={data.activity.activeUsers} sub="Team members" accent="#4A9EE0" icon="👥" />
+        <StatCard label="Stock Holds" value={data.activity.activeHolds} sub="Client reservations" accent="#E09E3C" icon="🔒" />
+      </div>
+
+      {/* ── Stock Distribution by Category (cross-cutting view) ── */}
+      <Card className="p-4">
+        <SectionTitle icon="📊" title="Stock Distribution" sub="Units across categories" />
+        <div className="space-y-2 mt-2">
+          {Object.entries(data.byCategory)
+            .sort((a, b) => b[1] - a[1])
+            .map(([cat, qty]) => {
+              const max = Math.max(...Object.values(data.byCategory), 1)
+              const pct = Math.round((qty / max) * 100)
+              return (
+                <div key={cat} className="flex items-center gap-3">
+                  <div className="w-36 text-[11px] text-[#96A8BF] truncate">{cat}</div>
+                  <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #C8922A, #E4AF4A)' }} />
+                  </div>
+                  <div className="w-12 text-right text-[11px] font-semibold text-[#EDE4D0]">{qty}</div>
+                </div>
+              )
+            })}
+          {Object.keys(data.byCategory).length === 0 && <EmptyState title="No stock data" />}
+        </div>
+      </Card>
+
+      {/* ── Quick Navigation (links to dedicated tabs, no data duplication) ── */}
+      <Card className="p-4">
+        <SectionTitle icon="🧭" title="Quick Access" sub="Jump to a dedicated section" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+          {[
+            { id: 'stock', label: 'Current Stock', icon: '📦' },
+            { id: 'fast', label: 'Fast Moving', icon: '⚡' },
+            { id: 'challans', label: 'Challans', icon: '🧾' },
+            { id: 'pr', label: 'Purchase Requests', icon: '📋' },
+            { id: 'register', label: 'Stock Register', icon: '📋' },
+            { id: 'forecast', label: 'Forecast', icon: '📈' },
+            { id: 'activity', label: 'Activity Log', icon: '📜' },
+          ].map((q) => (
+            <button key={q.id} onClick={() => onTabChange(q.id)}
+              className="flex items-center gap-2 rounded-lg border border-white/7 bg-white/[0.02] p-3 text-left transition-all hover:border-[#C8922A]/30 hover:bg-white/5">
+              <span className="text-lg">{q.icon}</span>
+              <span className="text-[11px] font-medium text-[#96A8BF]">{q.label}</span>
+            </button>
           ))}
-          {Object.keys(data.challansByStatus).length === 0 && <EmptyState title="No challans yet" />}
         </div>
       </Card>
     </div>
