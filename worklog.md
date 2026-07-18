@@ -552,3 +552,144 @@ Stage Summary:
 - Purchase Request print is now a professional business document with logo, letterhead, address, terms, signatures
 - Stock health protected: when Sales creates a challan, matched items are auto-held so they cannot be double-sold to another client
 - All holds linked to challan (challanId) for future convert-to-outward on dispatch
+
+---
+Task ID: 11
+Agent: general-purpose (it-manager dashboard refactor)
+Task: Refactor it-manager.tsx to use activeTab/onTabChange props instead of internal useState
+
+Work Log:
+- Read prior worklog (v4-audit, password-change, hold-stock tasks) for context
+- Read full it-manager.tsx (~814 lines) and located all references to internal `tab` state (lines 56, 57, 73, 75, 81-89)
+- Used MultiEdit to apply precise changes to the main exported ITManagerDashboard function:
+  1. Changed function signature: `({ user }: { user: SessionUser })` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+  2. Removed internal `const [tab, setTab] = useState('items')` line
+  3. In-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}`
+  4. In-content tab button active styling: `tab===n.id` → `activeTab===n.id`
+  5. All 9 content rendering conditionals (items, add, inward, register, activity, forecast, analytics, users, all-challans) switched from `tab === '...'` to `activeTab === '...'`
+- Kept `useState` import (still used by 10+ other useState hooks in sub-components)
+- Left all sub-components (ItemsTab, AddItemTab, InwardTab, StockRegisterTab, ActivityLogTab, ForecastTab, AnalyticsTab, UsersTab, AllChallansTab), types, API calls, and styling unchanged
+- Verified caller app/page.tsx:120 already passes `activeTab={currentTab} onTabChange={setActiveTab}` — props align, no caller change required
+- Ran `npx tsc --noEmit 2>&1 | grep -E "it-manager"` → NO ERRORS in it-manager
+
+Stage Summary:
+- IT Manager dashboard is now controlled by parent sidebar state (activeTab/onTabChange) instead of an internal disconnected useState
+- Clicking a sidebar nav item will now correctly update the dashboard content (the topbar title was already wired to the same state)
+- tsc verification: clean — no TypeScript errors referencing it-manager
+- No changes required to callers; app/page.tsx already passes the needed props
+
+---
+Task ID: 7
+Agent: general-purpose (sales dashboard refactor)
+Task: Refactor sales.tsx to use activeTab/onTabChange props instead of internal useState
+
+Work Log:
+- Read /home/z/my-project/worklog.md to understand prior audit/v4 work context
+- Read full sales.tsx (~716 lines) to map the SalesDashboard component structure (lines 44–69)
+- Confirmed component had internal `const [tab, setTab] = useState('list')` driving 4 nav buttons (list/upload/outward/hold) and 4 content branches
+- Grep'd for all `tab`, `setTab`, `useState` references to ensure no other usages of the internal tab state existed (only the main SalesDashboard used them; sub-components ChallanList, UploadForm, OutwardTab, StockHoldTab have their own useState hooks which were untouched)
+- Used MultiEdit to make 3 precise changes to the main SalesDashboard function:
+  1. Changed signature: `export function SalesDashboard({ user }: { user: SessionUser })` → `export function SalesDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+  2. Removed the line `const [tab, setTab] = useState('list')` (kept `useState` import since 20+ other useState calls in sub-components still use it)
+  3. Updated in-content nav button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+  4. Updated all 4 content rendering branches: `tab === 'list'` → `activeTab === 'list'`, `tab === 'upload'` → `activeTab === 'upload'`, `tab === 'outward'` → `activeTab === 'outward'`, `tab === 'hold'` → `activeTab === 'hold'` (changed all 4, not just the 2 mentioned in task brief, because leaving 'outward'/'hold' referencing the now-removed `tab` variable would have broken compilation)
+  5. Updated UploadForm `onDone` callback: `onDone={() => setTab('list')}` → `onDone={() => onTabChange('list')}`
+- Verified no remaining `tab`/`setTab` identifiers in the SalesDashboard function (only comment text mentions of "tab" remain, which are harmless)
+- Ran `npx tsc --noEmit 2>&1 | grep -E "sales"` → exit code 1 (grep found NO matching lines, meaning zero errors in sales.tsx)
+- Ran full `npx tsc --noEmit` to confirm only pre-existing unrelated errors remain (in examples/websocket/ and skills/ directories — none in src/components/laxree/dashboards/sales.tsx)
+
+Stage Summary:
+- Successfully refactored SalesDashboard to be a controlled component driven by `activeTab`/`onTabChange` props from its parent, eliminating the disconnected internal state that was causing the sidebar-nav-vs-dashboard-content desync UX bug
+- Changes were surgical: only the main exported SalesDashboard function was modified (lines 44–69); all sub-components (ChallanList, UploadForm, OutwardTab, StockHoldTab), API calls, types, and styling are untouched
+- TypeScript verification: `grep -E "sales"` against tsc output returns nothing — zero errors in the sales dashboard file
+- Note for parent integrator: any parent rendering `<SalesDashboard user={...} />` now must also pass `activeTab` (string) and `onTabChange` ((id: string) => void); the sidebar nav config in the parent must include ids 'list', 'upload', 'outward', and 'hold' for full functionality
+
+---
+Task ID: 6
+Agent: general-purpose (owner dashboard refactor)
+Task: Refactor owner.tsx to use activeTab/onTabChange props instead of internal useState
+
+Work Log:
+- Read worklog.md and owner.tsx (~960 lines) for full context
+- Confirmed page.tsx already passes activeTab + onTabChange props to OwnerDashboard (line 115)
+- Located the only internal `tab` state usage (lines 54-88 of owner.tsx)
+- Made three precise edits via MultiEdit:
+  1. Replaced `export function OwnerDashboard({ user }: { user: SessionUser }) { const [tab, setTab] = useState('overview')` with `export function OwnerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {` (removed internal useState)
+  2. Changed in-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+  3. Changed ALL 8 content-rendering conditions from `tab === 'X'` → `activeTab === 'X'` (overview, stock, fast, challans, pr, register, forecast, activity — all 8 nav IDs, not just the 5 sidebar items listed in the task, to avoid dangling references)
+- Left `import { useState } from 'react'` intact (still used by sub-components: OverviewTab, StockTab, ChallansTab, PRTab, StockRegisterTab, ForecastTab, ActivityLogTab)
+- Did not touch any sub-components, types, API calls, or styling
+- Verified no `tab`/`setTab` code references remain (only a literal string "Challans tab" in a SectionTitle sub prop)
+- Ran `npx tsc --noEmit 2>&1 | grep -E "owner"` → NO_ERRORS_FOR_OWNER (clean)
+
+Stage Summary:
+- OwnerDashboard now receives `activeTab`/`onTabChange` from parent (src/app/page.tsx line 115), making sidebar nav clicks drive dashboard content
+- UX bug fixed: sidebar nav ↔ dashboard content now in sync (previously clicking sidebar items only updated the topbar title, not the dashboard body)
+- In-content tab buttons also call onTabChange so they sync back to the sidebar selection
+- TypeScript compiles cleanly with zero errors related to owner.tsx
+- Refactor pattern matches the other already-refactored dashboards (AdminDashboard, SalesDashboard, AccountDashboard, CoordinatorDashboard, SupportDashboard, ITManagerDashboard all use the same activeTab/onTabChange signature)
+
+---
+Task ID: 5+9
+Agent: general-purpose (admin + coordinator dashboard refactor)
+Task: Refactor admin.tsx and coordinator.tsx to use activeTab/onTabChange props instead of internal useState
+
+Work Log:
+- Read worklog.md to understand prior refactors (it-manager, support, account, sales already done the same way)
+- Read both target files fully: admin.tsx (313 lines, main fn AdminDashboard at L12-39 with internal `useState('overview')` + 5-tab nav + 5 render branches) and coordinator.tsx (275 lines, main fn CoordinatorDashboard at L16-39 with internal `useState('messages')` + 3-tab nav + 3 render branches)
+- Confirmed parent app/page.tsx (lines 114, 118) already passes `activeTab={currentTab} onTabChange={setActiveTab}` to both AdminDashboard and CoordinatorDashboard — the dashboards were ignoring those props and using internal state instead, causing the sidebar-click → content-not-changing UX bug
+
+- Edited admin.tsx via MultiEdit (3 atomic edits):
+  1. Function signature: `({ user }: { user: SessionUser })` + `const [tab, setTab] = useState('overview')` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })` (removed useState line entirely)
+  2. Tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+  3. Render branches: `tab === 'overview'|'users'|'challans'|'items'|'messages'` → `activeTab === ...` (5 substitutions)
+  - Kept `useState` import (still used by UsersTab's resetUser/newPw/saving/msg state)
+  - Left all sub-components (OverviewTab, UsersTab, ChallansTab, ItemsTab, MessagesTab), types, API calls, and styling unchanged
+
+- Edited coordinator.tsx via MultiEdit (3 atomic edits):
+  1. Function signature: `({ user }: { user: SessionUser })` + `const [tab, setTab] = useState('messages')` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+  2. Tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+  3. Render branches: `tab === 'messages'|'checklist'|'photos'` → `activeTab === ...` (3 substitutions)
+  - Kept `useState` import (still used by MessagesTab.sel, ChecklistTab.sel, ChecklistDetail.vehicleInfo, PhotosTab.sel/photos)
+  - Left all sub-components (MessagesTab, ChecklistTab, ChecklistDetail, PhotosTab), types, API calls, and styling unchanged
+
+- Verified by reading the modified function signatures and tab button sections in both files — all changes match the spec exactly
+- Ran verification: `npx tsc --noEmit 2>&1 | grep -E "admin|coordinator|Dashboard"` → NO OUTPUT (clean). The grep also confirmed no error mentions Dashboard. Only unrelated pre-existing errors remain (examples/websocket/* socket.io-client, skills/* image-edit/stock-analysis). A separate pending error exists for OwnerDashboard (app/page.tsx:115) which is OUT of scope for Task 5+9.
+
+Stage Summary:
+- Both AdminDashboard and CoordinatorDashboard are now controlled by parent sidebar state (activeTab/onTabChange) instead of disconnected internal useState — fixing the major UX bug where sidebar clicks updated the topbar title but not the dashboard content
+- Clicking a sidebar nav item will now correctly update the dashboard content for ADMIN and COORDINATOR roles (the topbar title was already wired to the same state)
+- tsc verification: clean — no TypeScript errors referencing admin, coordinator, or Dashboard for these two files
+- No caller changes required; app/page.tsx already passes the needed props to both dashboards
+
+---
+Task ID: 8+10
+Agent: general-purpose (account + support dashboard refactor)
+Task: Refactor account.tsx and support.tsx to use activeTab/onTabChange props instead of internal useState
+
+Work Log:
+- Read worklog.md (prior v4-audit + v5-login-fix context) and confirmed AppShell already manages `activeTab`/`onTabChange` state and passes them to all 7 dashboards in src/app/page.tsx (including AccountDashboard line 117 and SupportDashboard line 119). The bug was that account.tsx and support.tsx still held their own internal `const [tab, setTab] = useState(...)` and ignored the incoming props — so sidebar clicks updated topbar title only, not the dashboard content.
+- Read both files fully (account.tsx = 287 lines, support.tsx = 287 lines).
+- account.tsx edits (3 MultiEdit operations on the main exported function only; sub-components MessagesTab/VerifyTab/ChecklistTab/ChecklistDetail/BillsTab left untouched):
+  * Function signature: `{ user }: { user: SessionUser }` → `{ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }`
+  * Removed `const [tab, setTab] = useState('messages')` line; KEPT `const [refreshKey, setRefreshKey] = useState(0)` as instructed
+  * In-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}`
+  * In-content tab button active class: `tab===n.id` → `activeTab===n.id`
+  * Content rendering: all 4 occurrences `{tab === 'messages'|'verify'|'checklist'|'bills' && ...}` → `{activeTab === ... && ...}`
+  * `useState` import retained (still used by refreshKey)
+- support.tsx edits (same 3 MultiEdit operations; sub-components PendingTab/ChecklistForm/AllTab/Row left untouched):
+  * Function signature: added `activeTab` + `onTabChange` props
+  * Removed `const [tab, setTab] = useState('pending')` line; KEPT `const [refreshKey, setRefreshKey] = useState(0)`
+  * In-content tab button: `setTab(n.id)` → `onTabChange(n.id)`, `tab===n.id` → `activeTab===n.id`
+  * Content rendering: `{tab === 'pending' ...}` and `{tab === 'all' ...}` → `{activeTab === 'pending' ...}` and `{activeTab === 'all' ...}`
+  * `useState` import retained
+- Verified no leftover `tab`/`setTab` references in either file (grep returned matches only in unrelated owner.tsx and sales.tsx comments — out of scope).
+- Ran verification: `cd /home/z/my-project && npx tsc --noEmit 2>&1 | grep -E "account|support"` → zero matches (grep exit 1 = no errors mentioning account/support). Total tsc output = 4 pre-existing errors in unrelated `examples/` and `skills/` folders (socket.io-client, socket.io, image-edit, stock-analysis-skill); zero errors in `src/` — refactor is type-clean.
+
+Stage Summary:
+- Both dashboards are now controlled components: tab state is owned by AppShell (single source of truth via `activeTab`/`onTabChange`) and shared between the sidebar nav and the in-content tab strip.
+- Sidebar nav clicks in AppShell already call `setActiveTab(n.id)` which flows down as `currentTab` → now drives the dashboard content rendering too. Topbar title and dashboard body now stay in sync.
+- In-content tab buttons also call `onTabChange(n.id)`, so clicking them updates the sidebar highlight as well (bidirectional sync).
+- `refreshKey` state preserved in both files — internal data refresh on verify/dispatch actions still works.
+- All sub-components, types, API calls, and styling untouched.
+- tsc clean for both files (no account/support errors).

@@ -21,9 +21,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.colour !== undefined) data.colour = body.colour || null
   if (body.unit !== undefined) data.unit = body.unit
   if (body.currentStock !== undefined) {
-    data.currentStock = Number(body.currentStock) || 0
+    const newStock = Number(body.currentStock) || 0
+    data.currentStock = newStock
     // Track inward if stock increased
-    const diff = data.currentStock - existing.currentStock
+    const diff = newStock - existing.currentStock
     if (diff > 0) data.inwardCount = existing.inwardCount + diff
     else if (diff < 0) data.outwardCount = existing.outwardCount + Math.abs(diff)
   }

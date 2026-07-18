@@ -38,9 +38,10 @@ async function main() {
   }
   console.log(`✅ ${users.length} users seeded`)
 
-  const salesUser = await db.user.findUnique({ where: { email: 'sales@laxree.com' } })!
-  const itUser = await db.user.findUnique({ where: { email: 'it@laxree.com' } })!
-  const ownerUser = await db.user.findUnique({ where: { email: 'owner@laxree.com' } })!
+  const salesUser = await db.user.findUnique({ where: { email: 'sales@laxree.com' } })
+  const itUser = await db.user.findUnique({ where: { email: 'it@laxree.com' } })
+  const ownerUser = await db.user.findUnique({ where: { email: 'owner@laxree.com' } })
+  if (!salesUser || !itUser || !ownerUser) throw new Error('Required users not found. Run user seed first.')
 
   // ── Master Items (293 real SKUs from original HTML) ──
   const items = seedData.items as Array<{

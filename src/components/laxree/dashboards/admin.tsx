@@ -9,8 +9,7 @@ type UserRow = { id:string; name:string; email:string; role:string; phone:string
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number; minStock:number; fastMoving:boolean; active:boolean }
 type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; status:string; paymentStatus:string; amountTotal:number; amountReceived:number; createdAt:string }
 
-export function AdminDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('overview')
+export function AdminDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const nav = [
     { id:'overview', label:'System Overview', icon:'📊' },
     { id:'users', label:'User Management', icon:'👥' },
@@ -22,19 +21,19 @@ export function AdminDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'overview' && <OverviewTab />}
-      {tab === 'users' && <UsersTab />}
-      {tab === 'challans' && <ChallansTab />}
-      {tab === 'items' && <ItemsTab />}
-      {tab === 'messages' && <MessagesTab />}
+      {activeTab === 'overview' && <OverviewTab />}
+      {activeTab === 'users' && <UsersTab />}
+      {activeTab === 'challans' && <ChallansTab />}
+      {activeTab === 'items' && <ItemsTab />}
+      {activeTab === 'messages' && <MessagesTab />}
     </div>
   )
 }

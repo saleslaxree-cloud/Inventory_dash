@@ -13,8 +13,7 @@ type Challan = {
 type Message = { id:string; challanId:string|null; fromRole:string; subject:string; body:string; read:boolean; createdAt:string; challan:{challanNumber:string;clientName:string}|null }
 type Stage = { id:string; stage:string; assignedRole:string; status:string; data:string; notes:string|null; doneBy:{name:string;role:string}|null; doneAt:string|null }
 
-export function CoordinatorDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('messages')
+export function CoordinatorDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const nav = [
     { id:'messages', label:'Messages', icon:'✉️' },
     { id:'checklist', label:'Dispatch Checklist', icon:'📋' },
@@ -24,17 +23,17 @@ export function CoordinatorDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#9B6ED4]/15 text-[#9B6ED4] border-[#9B6ED4]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#9B6ED4]/15 text-[#9B6ED4] border-[#9B6ED4]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'messages' && <MessagesTab />}
-      {tab === 'checklist' && <ChecklistTab />}
-      {tab === 'photos' && <PhotosTab />}
+      {activeTab === 'messages' && <MessagesTab />}
+      {activeTab === 'checklist' && <ChecklistTab />}
+      {activeTab === 'photos' && <PhotosTab />}
     </div>
   )
 }

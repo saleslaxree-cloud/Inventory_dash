@@ -53,8 +53,7 @@ const STATUS_LABEL_MAP: Record<string, string> = {
   critical: 'CRITICAL', warn: 'WATCH', ok: 'OK', nodata: 'NO DATA',
 }
 
-export function ITManagerDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('items')
+export function ITManagerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const nav = [
     { id:'items', label:'Item Master', icon:'📦' },
     { id:'add', label:'Add Item', icon:'➕' },
@@ -70,23 +69,23 @@ export function ITManagerDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'items' && <ItemsTab />}
-      {tab === 'add' && <AddItemTab />}
-      {tab === 'inward' && <InwardTab />}
-      {tab === 'register' && <StockRegisterTab />}
-      {tab === 'activity' && <ActivityLogTab />}
-      {tab === 'forecast' && <ForecastTab />}
-      {tab === 'analytics' && <AnalyticsTab />}
-      {tab === 'users' && <UsersTab />}
-      {tab === 'all-challans' && <AllChallansTab />}
+      {activeTab === 'items' && <ItemsTab />}
+      {activeTab === 'add' && <AddItemTab />}
+      {activeTab === 'inward' && <InwardTab />}
+      {activeTab === 'register' && <StockRegisterTab />}
+      {activeTab === 'activity' && <ActivityLogTab />}
+      {activeTab === 'forecast' && <ForecastTab />}
+      {activeTab === 'analytics' && <AnalyticsTab />}
+      {activeTab === 'users' && <UsersTab />}
+      {activeTab === 'all-challans' && <AllChallansTab />}
     </div>
   )
 }

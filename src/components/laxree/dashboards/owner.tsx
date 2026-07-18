@@ -51,8 +51,7 @@ const STATUS_LABEL_MAP: Record<string, string> = {
   critical: 'CRITICAL', warn: 'WATCH', ok: 'OK', nodata: 'NO DATA',
 }
 
-export function OwnerDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('overview')
+export function OwnerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
 
   const nav = [
     { id:'overview', label:'Overview', icon:'📊' },
@@ -69,23 +68,23 @@ export function OwnerDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab />}
-      {tab === 'stock' && <StockTab />}
-      {tab === 'fast' && <FastTab />}
-      {tab === 'challans' && <ChallansTab />}
-      {tab === 'pr' && <PRTab user={user} />}
-      {tab === 'register' && <StockRegisterTab />}
-      {tab === 'forecast' && <ForecastTab />}
-      {tab === 'activity' && <ActivityLogTab />}
+      {activeTab === 'overview' && <OverviewTab />}
+      {activeTab === 'stock' && <StockTab />}
+      {activeTab === 'fast' && <FastTab />}
+      {activeTab === 'challans' && <ChallansTab />}
+      {activeTab === 'pr' && <PRTab user={user} />}
+      {activeTab === 'register' && <StockRegisterTab />}
+      {activeTab === 'forecast' && <ForecastTab />}
+      {activeTab === 'activity' && <ActivityLogTab />}
     </div>
   )
 }

@@ -70,10 +70,15 @@ export default function Home() {
       { id:'fast', label:'Fast Moving', icon:'⚡' },
       { id:'challans', label:'Challans', icon:'🧾' },
       { id:'pr', label:'Purchase Requests', icon:'📋' },
+      { id:'register', label:'Stock Register', icon:'📋' },
+      { id:'forecast', label:'Forecast', icon:'📈' },
+      { id:'activity', label:'Activity Log', icon:'📜' },
     ],
     SALES: [
       { id:'list', label:'My Challans', icon:'🧾' },
       { id:'upload', label:'Upload Challan', icon:'📤' },
+      { id:'outward', label:'Outward Entry', icon:'📤' },
+      { id:'hold', label:'Stock Hold', icon:'🔒' },
     ],
     ACCOUNT: [
       { id:'messages', label:'Messages', icon:'✉️' },
@@ -93,6 +98,10 @@ export default function Home() {
     IT_MANAGER: [
       { id:'items', label:'Item Master', icon:'📦' },
       { id:'add', label:'Add Item', icon:'➕' },
+      { id:'inward', label:'Inward Entry', icon:'📥' },
+      { id:'register', label:'Stock Register', icon:'📋' },
+      { id:'activity', label:'Activity Log', icon:'📜' },
+      { id:'forecast', label:'Forecast', icon:'📈' },
       { id:'analytics', label:'Analytics', icon:'📊' },
       { id:'users', label:'Users', icon:'👥' },
       { id:'all-challans', label:'All Challans', icon:'🧾' },
@@ -111,13 +120,13 @@ export default function Home() {
       onLogout={logout}
       onPasswordChanged={refreshUser}
     >
-      {user.role === 'ADMIN' && <AdminDashboard user={user} />}
-      {user.role === 'OWNER' && <OwnerDashboard user={user} />}
-      {user.role === 'SALES' && <SalesDashboard user={user} />}
-      {user.role === 'ACCOUNT' && <AccountDashboard user={user} />}
-      {user.role === 'COORDINATOR' && <CoordinatorDashboard user={user} />}
-      {user.role === 'SUPPORT' && <SupportDashboard user={user} />}
-      {user.role === 'IT_MANAGER' && <ITManagerDashboard user={user} />}
+      {user.role === 'ADMIN' && <AdminDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'OWNER' && <OwnerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'SALES' && <SalesDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'ACCOUNT' && <AccountDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'COORDINATOR' && <CoordinatorDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'SUPPORT' && <SupportDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
+      {user.role === 'IT_MANAGER' && <ITManagerDashboard user={user} activeTab={currentTab} onTabChange={setActiveTab} />}
     </AppShell>
   )
 }

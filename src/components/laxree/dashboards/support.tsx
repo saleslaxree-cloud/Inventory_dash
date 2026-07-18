@@ -6,7 +6,8 @@ import { fmtDate, STATUS_COLORS, SessionUser } from '../types'
 
 type Challan = {
   id:string; challanNumber:string; clientName:string; clientCity:string; clientMobile:string|null; clientLocation:string|null;
-  expectedDeliveryDate:string|null; amountTotal:number; status:string;
+  expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number;
+  paymentStatus:string; accountVerified:boolean; status:string;
   challanItems:{id:string;itemName:string;quantity:number}[];
 }
 type Checklist = {
@@ -18,8 +19,7 @@ type Checklist = {
   challan:{challanNumber:string;clientName:string;clientCity:string};
 }
 
-export function SupportDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('pending')
+export function SupportDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const [refreshKey, setRefreshKey] = useState(0)
   const nav = [
     { id:'pending', label:'Pending Dispatch', icon:'🚚' },
@@ -29,16 +29,16 @@ export function SupportDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#E09E3C]/15 text-[#E09E3C] border-[#E09E3C]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#E09E3C]/15 text-[#E09E3C] border-[#E09E3C]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'pending' && <PendingTab onChanged={() => setRefreshKey(k=>k+1)} />}
-      {tab === 'all' && <AllTab refreshKey={refreshKey} />}
+      {activeTab === 'pending' && <PendingTab onChanged={() => setRefreshKey(k=>k+1)} />}
+      {activeTab === 'all' && <AllTab refreshKey={refreshKey} />}
     </div>
   )
 }

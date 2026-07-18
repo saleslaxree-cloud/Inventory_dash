@@ -41,8 +41,7 @@ const HOLD_STATUS_COLOR: Record<string, string> = {
   CONVERTED: '#3CB87A',
 }
 
-export function SalesDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('list')
+export function SalesDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const nav = [
     { id:'list', label:'My Challans', icon:'🧾' },
     { id:'upload', label:'Upload Challan', icon:'📤' },
@@ -53,18 +52,18 @@ export function SalesDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'list' && <ChallanList user={user} />}
-      {tab === 'upload' && <UploadForm user={user} onDone={() => setTab('list')} />}
-      {tab === 'outward' && <OutwardTab user={user} />}
-      {tab === 'hold' && <StockHoldTab user={user} />}
+      {activeTab === 'list' && <ChallanList user={user} />}
+      {activeTab === 'upload' && <UploadForm user={user} onDone={() => onTabChange('list')} />}
+      {activeTab === 'outward' && <OutwardTab user={user} />}
+      {activeTab === 'hold' && <StockHoldTab user={user} />}
     </div>
   )
 }

@@ -13,8 +13,7 @@ type Challan = {
 type Message = { id:string; challanId:string|null; fromRole:string; toRole:string; subject:string; body:string; read:boolean; createdAt:string; challan:{challanNumber:string;clientName:string}|null }
 type Stage = { id:string; stage:string; assignedRole:string; status:string; data:string; notes:string|null; doneBy:{name:string;role:string}|null; doneAt:string|null }
 
-export function AccountDashboard({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState('messages')
+export function AccountDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
   const [refreshKey, setRefreshKey] = useState(0)
   const nav = [
     { id:'messages', label:'Messages', icon:'✉️' },
@@ -26,18 +25,18 @@ export function AccountDashboard({ user }: { user: SessionUser }) {
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => setTab(n.id)}
+          <button key={n.id} onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              tab===n.id ? 'bg-[#3CB87A]/15 text-[#3CB87A] border-[#3CB87A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+              activeTab===n.id ? 'bg-[#3CB87A]/15 text-[#3CB87A] border-[#3CB87A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
             }`}>
             <span className="mr-1">{n.icon}</span>{n.label}
           </button>
         ))}
       </div>
-      {tab === 'messages' && <MessagesTab onAction={() => setRefreshKey(k=>k+1)} />}
-      {tab === 'verify' && <VerifyTab refreshKey={refreshKey} onChanged={() => setRefreshKey(k=>k+1)} />}
-      {tab === 'checklist' && <ChecklistTab />}
-      {tab === 'bills' && <BillsTab />}
+      {activeTab === 'messages' && <MessagesTab onAction={() => setRefreshKey(k=>k+1)} />}
+      {activeTab === 'verify' && <VerifyTab refreshKey={refreshKey} onChanged={() => setRefreshKey(k=>k+1)} />}
+      {activeTab === 'checklist' && <ChecklistTab />}
+      {activeTab === 'bills' && <BillsTab />}
     </div>
   )
 }
