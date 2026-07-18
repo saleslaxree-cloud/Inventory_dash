@@ -1,4 +1,11 @@
 import { PrismaClient } from '@prisma/client'
+import { config as loadEnv } from 'dotenv'
+
+// Ensure environment variables are loaded (needed when running scripts
+// like `bun run db:seed` outside of Next.js, which auto-loads .env).
+// `override: true` ensures the .env file always wins over any stale
+// process.env value (e.g. a leftover SQLite URL from a previous session).
+loadEnv({ override: true })
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
@@ -7,7 +14,7 @@ const globalForPrisma = globalThis as unknown as {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : ['query'],
+    log: ['error', 'warn'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
