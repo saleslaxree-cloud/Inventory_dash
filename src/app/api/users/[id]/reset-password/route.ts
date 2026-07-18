@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
   await db.user.update({
     where: { id },
-    data: { password: newPassword, forcePasswordChange: true },
+    data: { password: newPassword, forcePasswordChange: false },
   })
-  return NextResponse.json({ ok: true, message: `Password reset for ${target.name}` })
+  return NextResponse.json({ ok: true, message: `Password updated for ${target.name}` })
 }

@@ -21,7 +21,6 @@ export function AppShell({
   const [pwModal, setPwModal] = useState(false)
   const meta = ROLE_META[user.role as keyof typeof ROLE_META] || ROLE_META.OWNER
   const active = navItems.find((n) => n.id === activeTab)
-  const forcePw = user.forcePasswordChange
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#07101f] text-[#EDE4D0]">
@@ -106,7 +105,6 @@ export function AppShell({
           </div>
           <div className="flex items-center gap-2">
             <Badge label={meta.label} color={meta.color} />
-            {forcePw && <Badge label="Change Password" color="#E09E3C" />}
             <span className="text-[10px] text-[#4E6180] hidden sm:inline">{new Date().toLocaleDateString('en-IN', { weekday:'short', day:'2-digit', month:'short' })}</span>
           </div>
         </header>
@@ -125,8 +123,8 @@ export function AppShell({
 
       <PasswordChangeModal
         user={user}
-        open={pwModal || forcePw}
-        onClose={() => { if (!forcePw) setPwModal(false) }}
+        open={pwModal}
+        onClose={() => setPwModal(false)}
         onDone={() => { setPwModal(false); onPasswordChanged() }}
       />
     </div>

@@ -113,7 +113,7 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
             <p className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-1.5">Default Credentials</p>
             <p className="text-[11px] text-[#96A8BF]">Admin: <span className="font-mono text-[#E05050]">admin@laxree.com / admin123</span></p>
             <p className="text-[11px] text-[#96A8BF]">Others: <span className="font-mono text-[#E4AF4A]">/ laxree123</span></p>
-            <p className="text-[10px] text-[#E09E3C] mt-1">⚠ First login requires password change</p>
+            <p className="text-[10px] text-[#3CB87A] mt-1">✓ Login directly — Admin can change passwords anytime</p>
           </div>
         </form>
       </div>

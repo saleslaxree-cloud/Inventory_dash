@@ -36,8 +36,8 @@ export function PasswordChangeModal({ user, open, onClose, onDone }: {
   return (
     <Modal open={open} onClose={onClose} title="Change Password" >
       <div className="space-y-4">
-        <div className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 p-3 text-[12px] text-[#E09E3C]">
-          🔒 For security, you must change your password before continuing.
+        <div className="rounded-lg border border-[#C8922A]/30 bg-[#C8922A]/10 p-3 text-[12px] text-[#E4AF4A]">
+          🔑 Change your password to keep your account secure.
         </div>
         <Input label="Current Password" value={current} onChange={setCurrent} type="password" required />
         <Input label="New Password" value={next} onChange={setNext} type="password" placeholder="Min 6 characters" required />

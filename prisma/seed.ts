@@ -3,8 +3,8 @@ import { db } from '../src/lib/db'
 // LaxRee IMS v4 — Seed
 // Roles: ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
 // Owner = "Ashish Agarwal" (real person). All others use DEPARTMENT names (no person names).
-// Default password: laxree123 — forcePasswordChange=true so users must change on first login.
-// Admin password: admin123 (also forced change).
+// Default passwords are set by Admin. Users login directly — no forced password change.
+// Admin can change any user's password from User Management. Users can change their own via the 🔑 button.
 
 const ROLES = {
   ADMIN: 'ADMIN',
@@ -21,19 +21,19 @@ async function main() {
 
   // ── Users (7 roles, department names; Owner = Ashish Agarwal) ──
   const users = [
-    { email: 'admin@laxree.com',    password: 'admin123',  name: 'Admin',              role: ROLES.ADMIN,      phone: '+91 98100 00000', forcePasswordChange: true },
-    { email: 'owner@laxree.com',    password: 'laxree123', name: 'Ashish Agarwal',     role: ROLES.OWNER,      phone: '+91 98100 11111', forcePasswordChange: true },
-    { email: 'sales@laxree.com',    password: 'laxree123', name: 'Sales Department',   role: ROLES.SALES,      phone: '+91 98100 22222', forcePasswordChange: true },
-    { email: 'account@laxree.com',  password: 'laxree123', name: 'Account Department', role: ROLES.ACCOUNT,    phone: '+91 98100 33333', forcePasswordChange: true },
-    { email: 'coord@laxree.com',    password: 'laxree123', name: 'Coordinator Department', role: ROLES.COORDINATOR, phone: '+91 98100 44444', forcePasswordChange: true },
-    { email: 'support@laxree.com',  password: 'laxree123', name: 'Support Department', role: ROLES.SUPPORT,    phone: '+91 98100 55555', forcePasswordChange: true },
-    { email: 'it@laxree.com',       password: 'laxree123', name: 'IT Department',      role: ROLES.IT_MANAGER, phone: '+91 98100 66666', forcePasswordChange: true },
+    { email: 'admin@laxree.com',    password: 'admin123',  name: 'Admin',                  role: ROLES.ADMIN,      phone: '+91 98100 00000', forcePasswordChange: false },
+    { email: 'owner@laxree.com',    password: 'laxree123', name: 'Ashish Agarwal',         role: ROLES.OWNER,      phone: '+91 98100 11111', forcePasswordChange: false },
+    { email: 'sales@laxree.com',    password: 'laxree123', name: 'Sales Department',       role: ROLES.SALES,      phone: '+91 98100 22222', forcePasswordChange: false },
+    { email: 'account@laxree.com',  password: 'laxree123', name: 'Account Department',     role: ROLES.ACCOUNT,    phone: '+91 98100 33333', forcePasswordChange: false },
+    { email: 'coord@laxree.com',    password: 'laxree123', name: 'Coordinator Department', role: ROLES.COORDINATOR, phone: '+91 98100 44444', forcePasswordChange: false },
+    { email: 'support@laxree.com',  password: 'laxree123', name: 'Support Department',     role: ROLES.SUPPORT,    phone: '+91 98100 55555', forcePasswordChange: false },
+    { email: 'it@laxree.com',       password: 'laxree123', name: 'IT Department',          role: ROLES.IT_MANAGER, phone: '+91 98100 66666', forcePasswordChange: false },
   ]
 
   for (const u of users) {
     await db.user.upsert({
       where: { email: u.email },
-      update: {},
+      update: { password: u.password, forcePasswordChange: false, active: true, name: u.name, role: u.role, phone: u.phone },
       create: u,
     })
   }

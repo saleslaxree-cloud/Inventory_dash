@@ -45,15 +45,14 @@ function OverviewTab() {
   if (!analytics || !usersData) return null
 
   const activeUsers = usersData.users.filter((u) => u.active).length
-  const pendingPw = usersData.users.filter((u) => u.forcePasswordChange).length
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Total Users" value={usersData.users.length} sub={`${activeUsers} active`} accent="#E05050" icon="👥" />
-        <StatCard label="Pending Pw Change" value={pendingPw} sub="Need to reset" accent="#E09E3C" icon="🔑" />
-        <StatCard label="Total Items" value={analytics.totalItems} sub={`${analytics.totalStock} units`} accent="#E4AF4A" icon="📦" />
+        <StatCard label="Active Items" value={analytics.totalItems} sub={`${analytics.totalStock} units`} accent="#E4AF4A" icon="📦" />
         <StatCard label="Total Challans" value={analytics.totalChallans} sub="All time" accent="#4A9EE0" icon="🧾" />
+        <StatCard label="Low Stock" value={analytics.lowStockCount} sub="Needs reorder" accent="#E09E3C" icon="⚠️" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -123,7 +122,7 @@ function UsersTab() {
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'Failed')
-      setMsg('✓ Password reset. User must change on next login.')
+      setMsg('✓ Password updated. User can login with new password.')
       setNewPw('')
       setTimeout(() => { setResetUser(null); setMsg(''); refresh() }, 1500)
     } catch (e) {
@@ -142,8 +141,7 @@ function UsersTab() {
               <th className="py-2 pr-3">Email</th>
               <th className="py-2 pr-3">Role</th>
               <th className="py-2 pr-3">Phone</th>
-              <th className="py-2 pr-3">Pw Status</th>
-              <th className="py-2 pr-3">Active</th>
+              <th className="py-2 pr-3">Status</th>
               <th className="py-2">Actions</th>
             </tr>
           </thead>
@@ -161,14 +159,11 @@ function UsersTab() {
                   </td>
                   <td className="py-2 pr-3 text-[#96A8BF]">{u.phone || '—'}</td>
                   <td className="py-2 pr-3">
-                    {u.forcePasswordChange ? <Badge label="Must Change" color="#E09E3C" /> : <Badge label="OK" color="#3CB87A" />}
-                  </td>
-                  <td className="py-2 pr-3">
                     {u.active ? <Badge label="Active" color="#3CB87A" /> : <Badge label="Disabled" color="#E05050" />}
                   </td>
                   <td className="py-2">
                     <div className="flex gap-1">
-                      <Btn size="sm" onClick={() => { setResetUser(u); setNewPw(''); setMsg('') }}>🔑 Reset</Btn>
+                      <Btn size="sm" onClick={() => { setResetUser(u); setNewPw(''); setMsg('') }}>🔑 Change Pw</Btn>
                       <Btn size="sm" variant={u.active ? 'danger' : 'success'} onClick={() => toggleActive(u)}>{u.active ? 'Disable' : 'Enable'}</Btn>
                     </div>
                   </td>
@@ -179,7 +174,7 @@ function UsersTab() {
         </table>
       </div>
 
-      <Modal open={!!resetUser} onClose={() => setResetUser(null)} title="Reset Password">
+      <Modal open={!!resetUser} onClose={() => setResetUser(null)} title="Change Password">
         {resetUser && (
           <div className="space-y-3">
             <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
@@ -187,11 +182,11 @@ function UsersTab() {
               <div className="text-[11px] text-[#96A8BF]">{resetUser.email}</div>
             </div>
             <Input label="New Password" value={newPw} onChange={setNewPw} type="text" placeholder="Min 6 characters" required />
-            <div className="text-[11px] text-[#96A8BF]">User will be forced to change this password on next login.</div>
+            <div className="text-[11px] text-[#96A8BF]">User can login directly with this new password — no forced change.</div>
             {msg && <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">{msg}</div>}
             <div className="flex justify-end gap-2">
               <Btn onClick={() => setResetUser(null)}>Cancel</Btn>
-              <Btn variant="gold" onClick={doReset} disabled={saving || !newPw}>{saving ? 'Resetting…' : 'Reset Password'}</Btn>
+              <Btn variant="gold" onClick={doReset} disabled={saving || !newPw}>{saving ? 'Saving…' : 'Update Password'}</Btn>
             </div>
           </div>
         )}
