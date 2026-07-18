@@ -16,12 +16,12 @@ export async function GET() {
   return NextResponse.json({ users })
 }
 
-// PATCH /api/users — toggle active
+// PATCH /api/users — toggle active  (ADMIN + IT_MANAGER)
 export async function PATCH(req: NextRequest) {
   const user = await getSession()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Only Admin can toggle users' }, { status: 403 })
+  if (user.role !== 'ADMIN' && user.role !== 'IT_MANAGER') {
+    return NextResponse.json({ error: 'Only Admin or IT Manager can toggle users' }, { status: 403 })
   }
   const { id, active } = await req.json()
   await db.user.update({ where: { id }, data: { active: Boolean(active) } })

@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 
-// POST /api/users/[id]/reset-password  (ADMIN only)
+// POST /api/users/[id]/reset-password  (ADMIN + IT_MANAGER)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSession()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Only Admin can reset passwords' }, { status: 403 })
+  if (user.role !== 'ADMIN' && user.role !== 'IT_MANAGER') {
+    return NextResponse.json({ error: 'Only Admin or IT Manager can reset passwords' }, { status: 403 })
   }
   const { id } = await params
   const { newPassword } = await req.json()

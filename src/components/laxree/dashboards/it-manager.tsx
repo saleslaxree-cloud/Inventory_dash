@@ -1,8 +1,8 @@
 'use client'
 import { useState } from 'react'
-import { useFetch, apiPost } from '../use-fetch'
+import { useFetch, apiPost, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
-import { fmtINR, fmtDate, STATUS_COLORS, SessionUser } from '../types'
+import { fmtINR, fmtDate, STATUS_COLORS, ROLE_META, SessionUser } from '../types'
 import { StockLookupCard } from '../stock-lookup'
 
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; unit:string; currentStock:number; minStock:number; fastMoving:boolean; inwardCount:number; outwardCount:number; active:boolean }
@@ -740,30 +740,101 @@ function AnalyticsTab() {
 }
 
 function UsersTab() {
-  const { data, loading } = useFetch<{ users: UserRow[] }>('/api/users')
+  const { data, loading, refresh } = useFetch<{ users: UserRow[] }>('/api/users')
+  const [resetUser, setResetUser] = useState<UserRow | null>(null)
+  const [newPw, setNewPw] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading users…</div>
   if (!data) return null
 
-  const roleColors: Record<string,string> = { OWNER:'#E4AF4A', SALES:'#4A9EE0', ACCOUNT:'#3CB87A', COORDINATOR:'#9B6ED4', SUPPORT:'#E09E3C', IT_MANAGER:'#E05050' }
+  const toggleActive = async (u: UserRow) => {
+    await apiPatch('/api/users', { id: u.id, active: !u.active })
+    refresh()
+  }
+
+  const doReset = async () => {
+    if (!resetUser || !newPw) return
+    if (newPw.length < 6) { setMsg('Min 6 characters'); return }
+    setSaving(true)
+    setMsg('')
+    try {
+      const res = await fetch(`/api/users/${resetUser.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: newPw }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Failed')
+      setMsg('✓ Password updated. User can login with new password.')
+      setNewPw('')
+      setTimeout(() => { setResetUser(null); setMsg(''); refresh() }, 1500)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Failed')
+    } finally { setSaving(false) }
+  }
 
   return (
     <Card className="p-4">
-      <SectionTitle icon="👥" title="System Users" sub={`${data.users.length} accounts`} />
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {data.users.map((u) => (
-          <div key={u.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[13px] text-[#EDE4D0] font-medium">{u.name}</div>
-              {u.active ? <Badge label="Active" color="#3CB87A" /> : <Badge label="Disabled" color="#E05050" />}
+      <SectionTitle icon="👥" title="User Management" sub={`${data.users.length} accounts • Reset passwords, toggle active`} />
+      <div className="overflow-x-auto -mx-4 px-4">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+              <th className="py-2 pr-3">Name / Department</th>
+              <th className="py-2 pr-3">Email</th>
+              <th className="py-2 pr-3">Role</th>
+              <th className="py-2 pr-3">Phone</th>
+              <th className="py-2 pr-3">Status</th>
+              <th className="py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.users.map((u) => {
+              const meta = ROLE_META[u.role as keyof typeof ROLE_META]
+              return (
+                <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{u.name}</td>
+                  <td className="py-2 pr-3 text-[#96A8BF]">{u.email}</td>
+                  <td className="py-2 pr-3">
+                    <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: meta?.color }}>
+                      {meta?.icon} {meta?.label}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-[#96A8BF]">{u.phone || '—'}</td>
+                  <td className="py-2 pr-3">
+                    {u.active ? <Badge label="Active" color="#3CB87A" /> : <Badge label="Disabled" color="#E05050" />}
+                  </td>
+                  <td className="py-2">
+                    <div className="flex gap-1">
+                      <Btn size="sm" onClick={() => { setResetUser(u); setNewPw(''); setMsg('') }}>🔑 Change Pw</Btn>
+                      <Btn size="sm" variant={u.active ? 'danger' : 'success'} onClick={() => toggleActive(u)}>{u.active ? 'Disable' : 'Enable'}</Btn>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal open={!!resetUser} onClose={() => setResetUser(null)} title="Change Password">
+        {resetUser && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+              <div className="text-[13px] text-[#EDE4D0] font-medium">{resetUser.name}</div>
+              <div className="text-[11px] text-[#96A8BF]">{resetUser.email}</div>
             </div>
-            <div className="text-[11px] text-[#96A8BF]">{u.email}</div>
-            <div className="flex items-center justify-between mt-2">
-              <Badge label={u.role.replace(/_/g,' ')} color={roleColors[u.role]} />
-              <span className="text-[10px] text-[#4E6180]">{u.phone || '—'}</span>
+            <Input label="New Password" value={newPw} onChange={setNewPw} type="text" placeholder="Min 6 characters" required />
+            <div className="text-[11px] text-[#96A8BF]">User can login directly with this new password — no forced change.</div>
+            {msg && <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">{msg}</div>}
+            <div className="flex justify-end gap-2">
+              <Btn onClick={() => setResetUser(null)}>Cancel</Btn>
+              <Btn variant="gold" onClick={doReset} disabled={saving || !newPw}>{saving ? 'Saving…' : 'Update Password'}</Btn>
             </div>
           </div>
-        ))}
-      </div>
+        )}
+      </Modal>
     </Card>
   )
 }

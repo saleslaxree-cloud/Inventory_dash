@@ -693,3 +693,21 @@ Stage Summary:
 - `refreshKey` state preserved in both files — internal data refresh on verify/dispatch actions still works.
 - All sub-components, types, API calls, and styling untouched.
 - tsc clean for both files (no account/support errors).
+
+---
+Task ID: PW-1
+Agent: main (password permission refactor)
+Task: Restrict "Change Password" sidebar button to ADMIN/IT_MANAGER/OWNER only; give Admin + IT Manager power to change any user's password from their dashboard
+
+Work Log:
+- Updated `src/app/api/users/[id]/reset-password/route.ts`: changed role check from `ADMIN`-only to `ADMIN || IT_MANAGER`
+- Updated `src/app/api/users/route.ts` PATCH handler: changed toggle-active permission from `ADMIN`-only to `ADMIN || IT_MANAGER`
+- Updated `src/components/laxree/app-shell.tsx`: "Change Password" button now conditionally rendered only for ADMIN, IT_MANAGER, OWNER; non-privileged roles (SALES, ACCOUNT, COORDINATOR, SUPPORT) see only the full-width Logout button
+- Upgraded `src/components/laxree/dashboards/it-manager.tsx` UsersTab: replaced read-only card grid with full management table mirroring Admin's UsersTab — includes "🔑 Change Pw" button (opens reset modal) + "Disable/Enable" toggle per user; added `apiPatch` and `ROLE_META` imports
+
+Stage Summary:
+- Non-privileged roles (Sales, Account, Coordinator, Support) no longer see "Change Password" in sidebar — only Logout
+- Admin and IT Manager both have full user management: table view + password reset modal + active/inactive toggle
+- Owner can change only their own password via sidebar button (no user management tab)
+- Browser-verified: Coordinator sees only Logout; IT Manager sees Change Password + can reset any user's password (tested resetting Sales password to sales999, logged in successfully, then restored to laxree123)
+- tsc + lint both clean; all API calls return 200

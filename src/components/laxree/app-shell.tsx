@@ -83,10 +83,12 @@ export function AppShell({
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setPwModal(true)} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2 text-[11px] font-medium text-[#96A8BF] hover:border-[#C8922A]/30 hover:text-[#E4AF4A] transition-all">
-              <span className="text-sm">🔑</span> Change Password
-            </button>
-            <button onClick={onLogout} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 px-2 py-2 text-[11px] font-medium text-[#E05050] hover:bg-[#E05050]/15 transition-all">
+            {(user.role === 'ADMIN' || user.role === 'IT_MANAGER' || user.role === 'OWNER') && (
+              <button onClick={() => setPwModal(true)} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2 text-[11px] font-medium text-[#96A8BF] hover:border-[#C8922A]/30 hover:text-[#E4AF4A] transition-all">
+                <span className="text-sm">🔑</span> Change Password
+              </button>
+            )}
+            <button onClick={onLogout} className={`${user.role === 'ADMIN' || user.role === 'IT_MANAGER' || user.role === 'OWNER' ? 'flex-1' : 'w-full'} flex items-center justify-center gap-1.5 rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 px-2 py-2 text-[11px] font-medium text-[#E05050] hover:bg-[#E05050]/15 transition-all`}>
               <span className="text-sm">⏻</span> Logout
             </button>
           </div>
