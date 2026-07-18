@@ -150,7 +150,7 @@ async function loadProvider(): Promise<VlmProvider | null> {
     return {
       kind: 'gemini',
       apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     }
   }
 
@@ -200,11 +200,15 @@ async function callZai(cfg: Extract<VlmProvider, { kind: 'zai' }>, base64: strin
 
 /** Google Gemini — recommended for Vercel / public clouds (supports PDF natively) */
 async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64: string, _fileName: string): Promise<string> {
-  // Try the configured model first; if it 404s (model deprecated/renamed), fall back to
-  // a list of known-good PDF-capable models. This makes the integration resilient to
-  // Google deprecating model versions.
-  const requestedModel = cfg.model || 'gemini-2.0-flash'
-  const fallbackChain = [requestedModel, 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+  // Try the configured model first; fall back to other PDF-capable models on:
+  //   - 404 / "not a valid model"        → model deprecated/renamed by Google
+  //   - 429 / "quota exceeded" / "rate"   → per-model free-tier quota exhausted
+  // Different Gemini models have SEPARATE free-tier quotas, so if gemini-2.0-flash
+  // is quota-blocked, gemini-2.5-flash or gemini-1.5-flash often still work.
+  // Order: prefer the newest (2.5-flash) first, then 2.0-flash, then 1.5-flash
+  // (1.5-flash has the most generous free tier as a last-resort fallback).
+  const requestedModel = cfg.model || 'gemini-2.5-flash'
+  const fallbackChain = [requestedModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
     .filter((m, i, arr) => arr.indexOf(m) === i) // dedupe
 
   let lastError: Error | null = null
@@ -214,14 +218,33 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       lastError = err instanceof Error ? err : new Error(msg)
-      // If it's a 404 (model not found) or "not supported for generateContent" → try next model
-      if (/404|not found|not supported for generateContent|is not a valid model/i.test(msg)) {
-        console.warn(`[challans/extract] Gemini model "${model}" unavailable, trying next...`)
+      // Retry-worthy: model not found / not supported, OR quota/rate-limit errors.
+      // Each model has its own quota, so a 429 on one model does NOT mean the
+      // others will fail.
+      const isModelNotFound = /404|not found|not supported for generateContent|is not a valid model/i.test(msg)
+      const isQuotaOrRate = /quota|rate.?limit|429|resource.?exhausted|RESOURCE_EXHAUSTED/i.test(msg)
+      if (isModelNotFound || isQuotaOrRate) {
+        console.warn(`[challans/extract] Gemini model "${model}" unavailable (${isQuotaOrRate ? 'quota' : 'not found'}), trying next...`)
         continue
       }
-      // For any other error (auth, location, safety, quota), don't retry with another model
+      // For any other error (auth, location, safety, permission) → don't retry,
+      // the same error will occur on every model.
       throw err
     }
+  }
+  // All models in the chain failed. If the last failure was a quota error,
+  // surface a clear, actionable message (the user's free tier is exhausted
+  // across all models — they need to enable billing or wait for reset).
+  if (lastError && /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(lastError.message)) {
+    throw new Error(
+      'Gemini free-tier quota exhausted on all available models. Options:\n' +
+        '  1. Wait for the daily quota to reset (usually resets at midnight Pacific time).\n' +
+        '  2. Enable billing on your Google Cloud project at https://console.cloud.google.com/billing ' +
+        '(pay-as-you-go, very cheap — ~$0.075 per 1M input tokens for Flash models).\n' +
+        '  3. Generate a new API key from a different Google account at https://aistudio.google.com/apikey ' +
+        'and update GEMINI_API_KEY in Vercel.\n' +
+        'Meanwhile, you can fill the form manually below.'
+    )
   }
   throw lastError || new Error('All Gemini models failed')
 }
