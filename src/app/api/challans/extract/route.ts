@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
+import { extractChallanFromText } from '@/lib/pdf-text-extract'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 
 // POST /api/challans/extract
 // Accepts multipart/form-data with a `file` field (PDF).
-// Uses a VLM to parse the Laxree challan format and returns structured data
-// matching the Sales upload form's Section A/B/C fields.
+// Extracts Laxree challan fields and returns structured data matching the
+// Sales upload form's Section A/B/C fields.
 //
-// Provider resolution (first available wins):
-//   1. ZAI (sandbox)        — /etc/.z-ai-config OR ZAI_BASE_URL+ZAI_API_KEY env vars
-//   2. Google Gemini        — GEMINI_API_KEY env var (recommended for Vercel)
+// EXTRACTION METHOD (first that succeeds wins):
+//   1. TEXT+REGEX  (default, always available) — uses pdfjs-dist to pull text
+//      from the PDF, then regex tuned to the Laxree challan layout extracts
+//      all fields. ZERO API key needed, works on every cloud, ~100ms.
+//   2. VLM (ZAI or Gemini) — only used as a fallback if text extraction
+//      returns no challan number (e.g. scanned PDF with no text layer).
+//      Requires ZAI config (sandbox) or GEMINI_API_KEY env var (Vercel).
 //
-// The sandbox auto-provisions a ZAI config pointing at internal-api.z.ai which
-// is only reachable inside the Z.ai sandbox network. On Vercel (or any other
-// public cloud) set GEMINI_API_KEY instead — Gemini supports PDF understanding
-// natively, has a generous free tier, and works everywhere.
-//
-// If no provider is configured, returns a clear error so the Sales person can
-// fall back to filling the form manually.
+// This means PDF extraction works OUT OF THE BOX on Vercel with no
+// configuration. The VLM is only needed for edge cases (scanned PDFs).
 export const runtime = 'nodejs'
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
@@ -436,27 +436,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 })
     }
 
-    // ── Resolve VLM provider ──
+    // ── Read PDF ──
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    console.log(`[challans/extract] Processing PDF: ${file.name} (${buffer.length} bytes)`)
+
+    // ── METHOD 1: Text + Regex extraction (default — no API key needed) ──
+    // This works on Vercel out of the box. Only fails on scanned PDFs (no text layer).
+    try {
+      const result = await extractChallanFromText(buffer, file.name)
+      // If we got a challan number OR at least one item, consider it a success
+      if (result.challanNumber || result.items.length > 0) {
+        console.log(`[challans/extract] Text extraction success: challan=${result.challanNumber}, items=${result.items.length}`)
+        return NextResponse.json({ ok: true, data: result, provider: 'text-regex' })
+      }
+      console.warn('[challans/extract] Text extraction returned no challan number/items — falling back to VLM')
+    } catch (textErr: unknown) {
+      const textMsg = textErr instanceof Error ? textErr.message : String(textErr)
+      console.warn(`[challans/extract] Text extraction failed: ${textMsg} — falling back to VLM`)
+    }
+
+    // ── METHOD 2: VLM fallback (for scanned PDFs without text layer) ──
     const provider = await loadProvider()
     if (!provider) {
+      // No VLM configured AND text extraction failed — tell user to fill manually
       return NextResponse.json(
         {
           error:
-            'PDF auto-extraction is not configured. Set GEMINI_API_KEY (recommended — free tier at aistudio.google.com/apikey) OR ZAI_BASE_URL + ZAI_API_KEY in environment variables. You can also fill the form manually below.',
+            'Could not extract text from this PDF (it may be a scanned image with no text layer). ' +
+            'Either fill the form manually below, or set GEMINI_API_KEY env var to enable VLM-based extraction for scanned PDFs.',
         },
         { status: 503 }
       )
     }
 
-    // ── Read PDF ──
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    console.log(`[challans/extract] Processing PDF: ${file.name} (${buffer.length} bytes) via ${provider.kind}`)
-
-    // ── Call VLM ──
+    console.log(`[challans/extract] Falling back to VLM provider: ${provider.kind}`)
     const raw = await callVlm(provider, buffer, file.name)
 
-    // ── Parse + normalize ──
     let parsed_json: Record<string, unknown>
     try {
       parsed_json = parseVlmJson(raw)
@@ -468,7 +484,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = normalizeResult(parsed_json, file.name, buffer.length)
-    console.log(`[challans/extract] Success: challan=${result.challanNumber}, items=${result.items.length}`)
+    console.log(`[challans/extract] VLM success: challan=${result.challanNumber}, items=${result.items.length}`)
     return NextResponse.json({ ok: true, data: result, provider: provider.kind })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -490,21 +506,12 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // Health check — reports which VLM provider is configured
+  // Health check — reports which extraction methods are available
   const provider = await loadProvider()
-  if (!provider) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          'No VLM configured. Set GEMINI_API_KEY (recommended) or ZAI_BASE_URL + ZAI_API_KEY env vars.',
-      },
-      { status: 503 }
-    )
-  }
   return NextResponse.json({
     ok: true,
-    provider: provider.kind,
-    ...(provider.kind === 'gemini' ? { model: provider.model } : { baseUrl: provider.baseUrl }),
+    primaryMethod: 'text-regex',
+    vlmFallback: provider ? provider.kind : 'none',
+    ...(provider?.kind === 'gemini' ? { model: provider.model } : provider?.kind === 'zai' ? { baseUrl: provider.baseUrl } : {}),
   })
 }
