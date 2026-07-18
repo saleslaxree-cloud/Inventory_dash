@@ -199,9 +199,36 @@ async function callZai(cfg: Extract<VlmProvider, { kind: 'zai' }>, base64: strin
 }
 
 /** Google Gemini — recommended for Vercel / public clouds (supports PDF natively) */
-async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64: string, fileName: string): Promise<string> {
-  const model = cfg.model || 'gemini-2.0-flash'
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cfg.apiKey}`
+async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64: string, _fileName: string): Promise<string> {
+  // Try the configured model first; if it 404s (model deprecated/renamed), fall back to
+  // a list of known-good PDF-capable models. This makes the integration resilient to
+  // Google deprecating model versions.
+  const requestedModel = cfg.model || 'gemini-2.0-flash'
+  const fallbackChain = [requestedModel, 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    .filter((m, i, arr) => arr.indexOf(m) === i) // dedupe
+
+  let lastError: Error | null = null
+  for (const model of fallbackChain) {
+    try {
+      return await callGeminiOnce(cfg.apiKey, model, base64)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      lastError = err instanceof Error ? err : new Error(msg)
+      // If it's a 404 (model not found) or "not supported for generateContent" → try next model
+      if (/404|not found|not supported for generateContent|is not a valid model/i.test(msg)) {
+        console.warn(`[challans/extract] Gemini model "${model}" unavailable, trying next...`)
+        continue
+      }
+      // For any other error (auth, location, safety, quota), don't retry with another model
+      throw err
+    }
+  }
+  throw lastError || new Error('All Gemini models failed')
+}
+
+/** Single Gemini call attempt. */
+async function callGeminiOnce(apiKey: string, model: string, base64: string): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const body = {
     contents: [
@@ -230,11 +257,38 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
   if (!res.ok) {
     const errText = await res.text()
     let errMsg = `Gemini API error (${res.status})`
+    let errStatus = ''
     try {
       const errJson = JSON.parse(errText)
       errMsg = errJson.error?.message || errMsg
+      errStatus = errJson.error?.status || ''
     } catch {
       errMsg = `${errMsg}: ${errText.slice(0, 200)}`
+    }
+
+    // Surface a clearer, actionable error for the common geographic restriction
+    // (Gemini API is not available in mainland China / Hong Kong / some regions).
+    // On Vercel (servers in US/EU/Asia-Pacific ex-China) this should never happen.
+    if (/location is not supported/i.test(errMsg)) {
+      throw new Error(
+        'Gemini API is not available in this server region. If you are on Vercel, redeploy in a US/EU region. ' +
+          'If you are testing locally from a restricted region, deploy to Vercel or use a VPN. ' +
+          `Original error: ${errMsg}`
+      )
+    }
+    // Surface invalid API key clearly
+    if (res.status === 400 && /API key not valid/i.test(errMsg)) {
+      throw new Error(
+        'The Gemini API key is invalid or has been revoked. Get a fresh key at https://aistudio.google.com/apikey ' +
+          'and update the GEMINI_API_KEY environment variable in Vercel → Project Settings → Environment Variables.'
+      )
+    }
+    // Permission / quota errors
+    if (errStatus === 'PERMISSION_DENIED' || res.status === 403) {
+      throw new Error(
+        `Gemini permission denied: ${errMsg}. Make sure the Generative Language API is enabled for your Google Cloud project, ` +
+          'and that the API key has access to the Gemini model you selected.'
+      )
     }
     throw new Error(errMsg)
   }
@@ -247,9 +301,23 @@ async function callGemini(cfg: Extract<VlmProvider, { kind: 'gemini' }>, base64:
   if (!text) {
     const blockReason = data?.promptFeedback?.blockReason
     if (blockReason) {
-      throw new Error(`Gemini blocked the request: ${blockReason}`)
+      throw new Error(
+        `Gemini blocked the request (${blockReason}). The PDF may contain content Gemini considers unsafe. ` +
+          'Try a different file or fill the form manually below.'
+      )
     }
-    throw new Error('Gemini returned an empty response')
+    // Check finish reason — could be MAX_TOKENS or RECITATION
+    const finishReason = data?.candidates?.[0]?.finishReason
+    if (finishReason && finishReason !== 'STOP') {
+      throw new Error(
+        `Gemini stopped generating (reason: ${finishReason}). The challan may be too long. ` +
+          'Try removing extra pages or fill the form manually below.'
+      )
+    }
+    throw new Error(
+      'Gemini returned an empty response. The PDF may be empty, corrupted, or scanned without OCR text. ' +
+        'Try a different file or fill the form manually below.'
+    )
   }
   return text
 }
