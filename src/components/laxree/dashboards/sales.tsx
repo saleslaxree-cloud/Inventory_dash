@@ -1,36 +1,140 @@
 'use client'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFetch, apiPost, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
 import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
 
-type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number }
-type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:string|null; quantity:number; status:string; matchedItem: Item|null; corrected:boolean }
-type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; clientMobile:string|null; expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number; paymentType:string; paymentStatus:string; status:string; createdAt:string; challanItems:ChallanItem[]; uploadedBy:{name:string;role:string} }
+/* ============================================================ */
+/* Types                                                        */
+/* ============================================================ */
 
-// OutwardLog shape returned by /api/outward
-type OutwardLog = {
-  id:string; date:string; category:string; itemName:string; model:string;
-  colour:string|null; quantity:number; unit:string; clientName:string;
-  challanNumber:string|null; billNumber:string|null; remarks:string|null;
-  enteredBy?: { name:string; role:string }
+type Item = {
+  id: string
+  category: string
+  itemName: string
+  model: string
+  colour: string | null
+  currentStock: number
 }
 
-// StockHold shape returned by /api/stock-hold
-type StockHold = {
-  id:string; date:string; category:string; itemName:string; model:string;
-  colour:string|null; holdQty:number; clientName:string; advanceAmount:number;
-  remarks:string|null; status:'ACTIVE'|'RELEASED'|'CONVERTED';
-  item: { id:string; currentStock:number; category:string; itemName:string; model:string; colour:string|null };
-  heldBy?: { name:string; role:string }
+type StockCheckItem = {
+  id: string
+  category: string
+  itemName: string
+  model: string
+  colour: string | null
+  unit: string
+  currentStock: number
+  heldQty: number
+  availableStock: number
+  minStock: number
+  fastMoving: boolean
 }
 
-// StockRegister row used to look up live available stock per item
+type ChallanItem = {
+  id: string
+  category: string | null
+  itemName: string
+  itemNumber: string | null
+  model: string | null
+  colour: string | null
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  status: string             // MATCHED | NOT_FOUND | WRONG_MODEL
+  stockStatus: string        // AVAILABLE | ON_HOLD | WILL_BE_AVAILABLE
+  stockRemark: string | null
+  expectedAvailabilityDays: number | null
+  availableQty: number | null
+  matchedItem: Item | null
+}
+
+type Challan = {
+  id: string
+  challanNumber: string
+  quotationNumber: string | null
+  clientName: string
+  clientCity: string
+  clientMobile: string | null
+  expectedDeliveryDate: string | null
+  billingName: string | null
+  billingAddress: string | null
+  shippingAddress: string | null
+  gstNumber: string | null
+  amountWithoutGst: number
+  amountWithGst: number
+  gstPercentage: number
+  amountTotal: number
+  amountAdvance: number
+  amountReceived: number
+  packingCharge: number
+  paymentType: string
+  paymentStatus: string
+  paymentMode: string | null
+  accountVerified: boolean
+  accountRejected: boolean
+  accountRejectReason: string | null
+  status: string
+  pdfFileName: string | null
+  createdAt: string
+  uploadedBy: { id: string; name: string; role: string }
+  challanItems: ChallanItem[]
+}
+
+type DashboardData = {
+  total: number
+  totalAmount: number
+  totalAdvance: number
+  totalReceived: number
+  byStatus: Record<string, number>
+  byPaymentStatus: Record<string, number>
+  monthly: Array<{ month: string; label: string; count: number; amount: number }>
+  challans: Challan[]
+}
+
+type StockSummary = {
+  available: number
+  onHold: number
+  willBeAvailable: number
+}
+
+type UploadResponse = {
+  challan: Challan
+  stockSummary: StockSummary
+  message: string
+}
+
 type StockRow = {
-  id:string; category:string; itemName:string; model:string; colour:string|null;
-  unit:string; inward:number; dispatched:number; balance:number; onHold:number;
-  available:number; minStock:number; fastMoving:boolean;
-  status:'OK'|'LOW'|'OUT_OF_STOCK'
+  id: string
+  category: string
+  itemName: string
+  model: string
+  colour: string | null
+  unit: string
+  inward: number
+  dispatched: number
+  balance: number
+  onHold: number
+  available: number
+  minStock: number
+  fastMoving: boolean
+  status: 'OK' | 'LOW' | 'OUT_OF_STOCK'
+}
+
+type StockHold = {
+  id: string
+  date: string
+  category: string
+  itemName: string
+  model: string
+  colour: string | null
+  holdQty: number
+  clientName: string
+  advanceAmount: number
+  remarks: string | null
+  status: 'ACTIVE' | 'RELEASED' | 'CONVERTED'
+  item: { id: string; currentStock: number; category: string; itemName: string; model: string; colour: string | null }
+  heldBy?: { name: string; role: string }
 }
 
 const CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Banquet Furniture','Linen','Bath Linen','Bath Tubs','Spare Parts']
@@ -41,202 +145,1026 @@ const HOLD_STATUS_COLOR: Record<string, string> = {
   CONVERTED: '#3CB87A',
 }
 
-export function SalesDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
+const STOCK_STATUS_COLOR: Record<string, string> = {
+  AVAILABLE: '#3CB87A',
+  ON_HOLD: '#E09E3C',
+  WILL_BE_AVAILABLE: '#E05050',
+  PENDING: '#96A8BF',
+}
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+/* ============================================================ */
+/* Main Dashboard                                               */
+/* ============================================================ */
+
+export function SalesDashboard({ user, activeTab, onTabChange }: {
+  user: SessionUser
+  activeTab: string
+  onTabChange: (id: string) => void
+}) {
   const nav = [
-    { id:'list', label:'My Challans', icon:'🧾' },
-    { id:'upload', label:'Upload Challan', icon:'📤' },
-    { id:'outward', label:'Outward Entry', icon:'📤' },
-    { id:'hold', label:'Stock Hold', icon:'🔒' },
+    { id: 'dashboard',   label: 'Dashboard',     icon: '📊' },
+    { id: 'stock-check', label: 'Check Stock',   icon: '📦' },
+    { id: 'upload',      label: 'Upload Challan',icon: '📤' },
+    { id: 'list',        label: 'My Challans',   icon: '🧾' },
+    { id: 'hold',        label: 'Stock Hold',    icon: '🔒' },
   ]
+
   return (
     <div className="space-y-4">
       <div className="flex gap-1.5 flex-wrap">
         {nav.map((n) => (
-          <button key={n.id} onClick={() => onTabChange(n.id)}
+          <button
+            key={n.id}
+            onClick={() => onTabChange(n.id)}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
-              activeTab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
-            }`}>
-            <span className="mr-1">{n.icon}</span>{n.label}
+              activeTab === n.id
+                ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25'
+                : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+            }`}
+          >
+            <span className="mr-1">{n.icon}</span>
+            {n.label}
           </button>
         ))}
       </div>
-      {activeTab === 'list' && <ChallanList user={user} />}
-      {activeTab === 'upload' && <UploadForm user={user} onDone={() => onTabChange('list')} />}
-      {activeTab === 'outward' && <OutwardTab user={user} />}
-      {activeTab === 'hold' && <StockHoldTab user={user} />}
+
+      {activeTab === 'dashboard'   && <DashboardTab user={user} />}
+      {activeTab === 'stock-check' && <StockCheckTab />}
+      {activeTab === 'upload'      && <UploadTab user={user} onDone={() => onTabChange('list')} />}
+      {activeTab === 'list'        && <MyChallansTab user={user} />}
+      {activeTab === 'hold'        && <StockHoldTab />}
     </div>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Outward Entry tab — dispatch stock to client                        */
-/* ------------------------------------------------------------------ */
-function OutwardTab({ user }: { user: SessionUser }) {
-  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
-  const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
-  const { data: logsData, loading: logsLoading, refresh: refreshLogs } = useFetch<{ logs: OutwardLog[] }>('/api/outward?limit=100')
+/* ============================================================ */
+/* Tab 1: Dashboard — monthly summary                           */
+/* ============================================================ */
 
-  const [date, setDate] = useState('')
+function DashboardTab({ user }: { user: SessionUser }) {
+  const now = new Date()
+  const [month, setMonth] = useState(String(now.getMonth() + 1))
+  const [year, setYear] = useState(String(now.getFullYear()))
+
+  const url = `/api/challans/dashboard?role=SALES&userId=${user.id}&month=${month}&year=${year}`
+  const { data, loading, error, refresh } = useFetch<DashboardData>(url, [month, year])
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4">
+        <SectionTitle
+          icon="📊"
+          title="Sales Dashboard"
+          sub="Monthly performance summary"
+          right={
+            <div className="flex gap-2">
+              <Select
+                value={month}
+                onChange={setMonth}
+                options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))}
+              />
+              <Select
+                value={year}
+                onChange={setYear}
+                options={[2024, 2025, 2026].map((y) => ({ value: String(y), label: String(y) }))}
+              />
+              <Btn size="sm" onClick={refresh}>↻</Btn>
+            </div>
+          }
+        />
+
+        {loading ? (
+          <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+        ) : error ? (
+          <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+        ) : !data ? null : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatCard label="Total Challans" value={data.total} accent="#E4AF4A" icon="🧾" />
+              <StatCard label="Total Amount" value={fmtINR(data.totalAmount)} accent="#E4AF4A" icon="💰" />
+              <StatCard label="Total Advance" value={fmtINR(data.totalAdvance)} accent="#3CB87A" icon="✅" />
+              <StatCard label="Total Received" value={fmtINR(data.totalReceived)} accent="#3CB87A" icon="🏦" />
+            </div>
+          </>
+        )}
+      </Card>
+
+      {data && !loading && (
+        <>
+          {/* Monthly breakdown — last 12 months */}
+          <Card className="p-4">
+            <SectionTitle icon="📈" title="Last 12 Months" sub="Challan count per month" />
+            <MonthlyBars monthly={data.monthly} />
+          </Card>
+
+          {/* Status breakdown */}
+          <Card className="p-4">
+            <SectionTitle icon="🏷️" title="Status Breakdown" sub={`${MONTH_NAMES[Number(month) - 1]} ${year}`} />
+            {Object.keys(data.byStatus).length === 0 ? (
+              <EmptyState icon="🏷️" title="No challans this month" sub="Try another month or upload a new challan" />
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {Object.entries(data.byStatus).map(([status, count]) => (
+                  <div key={status} className="rounded-lg border border-white/7 bg-[#0c1928]/60 px-3 py-2.5 flex items-center justify-between">
+                    <Badge label={status.replace(/_/g, ' ')} color={STATUS_COLORS[status] || '#96A8BF'} />
+                    <span className="font-serif text-lg font-bold text-[#EDE4D0]">{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Latest 10 challans */}
+          <Card className="p-4">
+            <SectionTitle icon="🧾" title="Latest Challans" sub={`Showing ${data.challans.length} most recent`} />
+            {data.challans.length === 0 ? (
+              <EmptyState icon="🧾" title="No challans yet" sub="Upload your first challan to get started" />
+            ) : (
+              <div className="overflow-x-auto -mx-4 px-4">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+                      <th className="py-2 pr-3">Challan #</th>
+                      <th className="py-2 pr-3">Client</th>
+                      <th className="py-2 pr-3">Date</th>
+                      <th className="py-2 pr-3 text-right">Total</th>
+                      <th className="py-2 pr-3 text-right">Advance</th>
+                      <th className="py-2 pr-3">Payment</th>
+                      <th className="py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.challans.map((c) => (
+                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
+                        <td className="py-2 pr-3 text-[#EDE4D0]">
+                          {c.clientName}
+                          <div className="text-[10px] text-[#4E6180]">{c.clientCity}</div>
+                        </td>
+                        <td className="py-2 pr-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(c.createdAt)}</td>
+                        <td className="py-2 pr-3 text-right text-[#EDE4D0]">{fmtINR(c.amountTotal)}</td>
+                        <td className="py-2 pr-3 text-right text-[#3CB87A]">{fmtINR(c.amountAdvance)}</td>
+                        <td className="py-2 pr-3"><Badge label={c.paymentStatus} color={STATUS_COLORS[c.paymentStatus]} /></td>
+                        <td className="py-2"><Badge label={c.status.replace(/_/g, ' ')} color={STATUS_COLORS[c.status]} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+function MonthlyBars({ monthly }: { monthly: DashboardData['monthly'] }) {
+  const max = Math.max(1, ...monthly.map((m) => m.count))
+  return (
+    <div className="flex items-end gap-1.5 h-32 overflow-x-auto pb-1">
+      {monthly.map((m) => {
+        const h = Math.max(4, Math.round((m.count / max) * 100))
+        return (
+          <div key={m.month} className="flex flex-col items-center gap-1 min-w-[44px] flex-1">
+            <div className="text-[10px] text-[#96A8BF] font-semibold">{m.count}</div>
+            <div
+              className="w-full rounded-t-md transition-all"
+              style={{
+                height: `${h}%`,
+                background: m.count > 0
+                  ? 'linear-gradient(to top, #C8922A, #E4AF4A)'
+                  : 'rgba(150,168,191,0.15)',
+              }}
+              title={`${m.label}: ${m.count} challans · ${fmtINR(m.amount)}`}
+            />
+            <div className="text-[9px] text-[#4E6180] whitespace-nowrap">{m.label}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ============================================================ */
+/* Tab 2: Check Stock — cascading dropdowns                     */
+/* ============================================================ */
+
+function StockCheckTab() {
   const [category, setCategory] = useState('')
-  const [itemId, setItemId] = useState('')
-  const [qty, setQty] = useState('')
-  const [clientName, setClientName] = useState('')
-  const [challanNumber, setChallanNumber] = useState('')
-  const [billNumber, setBillNumber] = useState('')
-  const [remarks, setRemarks] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
-  const [ok, setOk] = useState('')
+  const [itemName, setItemName] = useState('')
+  const [model, setModel] = useState('')
+  const [colour, setColour] = useState('')
 
-  const items = itemsData?.items || []
-  const filteredItems = useMemo(
-    () => items.filter((i) => !category || i.category === category),
-    [items, category],
-  )
-  const selectedItem = useMemo(
-    () => items.find((i) => i.id === itemId) || null,
-    [items, itemId],
-  )
-  const regRow = useMemo(
-    () => regData?.rows.find((r) => r.id === itemId) || null,
-    [regData, itemId],
-  )
-  const available = regRow?.available ?? null
+  const [itemNames, setItemNames] = useState<string[]>([])
+  const [models, setModels] = useState<string[]>([])
+  const [colours, setColours] = useState<string[]>([])
 
-  const qtyNum = Number(qty) || 0
-  const qtyValid = qtyNum > 0 && (available === null || qtyNum <= available)
+  const [catLoading, setCatLoading] = useState(false)
+  const [nameLoading, setNameLoading] = useState(false)
+  const [modelLoading, setModelLoading] = useState(false)
+  const [colourLoading, setColourLoading] = useState(false)
+
+  // Step 1: fetch categories on mount
+  const { data: catData, loading: catInitLoading } = useFetch<{ categories: string[] }>('/api/stock-check')
+  const categories = catData?.categories || []
+
+  // Step 2: when category changes, fetch item names
+  useEffect(() => {
+    if (!category) { setItemNames([]); return }
+    setNameLoading(true)
+    setItemName(''); setItemNames([])
+    setModel(''); setModels([])
+    setColour(''); setColours([])
+    fetch(`/api/stock-check?category=${encodeURIComponent(category)}`)
+      .then((r) => r.json())
+      .then((d) => setItemNames(d.itemNames || []))
+      .finally(() => setNameLoading(false))
+  }, [category])
+
+  // Step 3: when itemName changes, fetch models
+  useEffect(() => {
+    if (!category || !itemName) { setModels([]); return }
+    setModelLoading(true)
+    setModel(''); setModels([])
+    setColour(''); setColours([])
+    fetch(`/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}`)
+      .then((r) => r.json())
+      .then((d) => setModels(d.models || []))
+      .finally(() => setModelLoading(false))
+  }, [category, itemName])
+
+  // Step 4: when model changes, fetch colours
+  useEffect(() => {
+    if (!category || !itemName || !model) { setColours([]); return }
+    setColourLoading(true)
+    setColour(''); setColours([])
+    fetch(`/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}&model=${encodeURIComponent(model)}`)
+      .then((r) => r.json())
+      .then((d) => setColours(d.colours || []))
+      .finally(() => setColourLoading(false))
+  }, [category, itemName, model])
+
+  // Set catLoading for spinners
+  useEffect(() => { setCatLoading(catInitLoading) }, [catInitLoading])
+
+  // Step 5: when all selected, fetch items
+  const finalUrl = (category && itemName && model && colour)
+    ? `/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}&model=${encodeURIComponent(model)}&colour=${encodeURIComponent(colour)}`
+    : ''
+  const { data: resultData, loading: resultLoading } = useFetch<{ items: StockCheckItem[] }>(finalUrl, [colour])
+
+  const result = resultData?.items || []
+  const allReady = !!(category && itemName && model && colour)
 
   const reset = () => {
-    setDate(''); setCategory(''); setItemId(''); setQty(''); setClientName('')
-    setChallanNumber(''); setBillNumber(''); setRemarks('')
-  }
-
-  const submit = async () => {
-    setErr(''); setOk('')
-    if (!itemId) { setErr('Select an item'); return }
-    if (!clientName.trim()) { setErr('Client name is required'); return }
-    if (qtyNum <= 0) { setErr('Quantity must be greater than 0'); return }
-    if (available !== null && qtyNum > available) {
-      setErr(`Only ${available} units available`); return
-    }
-    setSaving(true)
-    try {
-      const res = await apiPost('/api/outward', {
-        itemId, quantity: qtyNum, clientName: clientName.trim(),
-        challanNumber: challanNumber || undefined,
-        billNumber: billNumber || undefined,
-        remarks: remarks || undefined,
-        date: date || undefined,
-      })
-      setOk(res.message || `Dispatched ${qtyNum} unit(s) to ${clientName}`)
-      reset()
-      refreshReg(); refreshLogs()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to dispatch')
-    } finally { setSaving(false) }
+    setCategory(''); setItemName(''); setModel(''); setColour('')
+    setItemNames([]); setModels([]); setColours([])
   }
 
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle icon="📤" title="Outward Entry" sub="Dispatch stock to a client — reduces current stock automatically" />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <Input label="Date" type="date" value={date} onChange={setDate} />
-          <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
-            options={[{value:'',label:'— All Categories —'}, ...CATEGORIES.map((c) => ({value:c,label:c}))]} />
-          <Select label="Item" value={itemId} onChange={setItemId} required
-            options={[{value:'',label:'— Select Item —'}, ...filteredItems.map((it) => ({
-              value: it.id,
-              label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
-            }))]} />
-          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
-          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
-          <div>
-            <Input label="Quantity" type="number" value={qty} onChange={setQty} placeholder="0" required
-              step="1" />
-            {itemId && (
-              <div className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${
-                available === null ? 'text-[#96A8BF]' :
-                available <= 0 ? 'text-[#E05050]' :
-                available <= (regRow?.minStock || 0) ? 'text-[#E09E3C]' :
-                'text-[#3CB87A]'
-              }`}>
-                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
-                Available: <span className="font-semibold">{available ?? '…'}</span>
-                {regRow && regRow.onHold > 0 && <span className="text-[#4E6180]"> (held: {regRow.onHold})</span>}
-                {qty && !qtyValid && available !== null && (
-                  <span className="ml-1 text-[#E05050]">· exceeds stock</span>
-                )}
-              </div>
-            )}
-          </div>
-          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
-          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0002" />
-          <Input label="Bill / Invoice Number" value={billNumber} onChange={setBillNumber} placeholder="INV-…" />
-          <div className="md:col-span-2 lg:col-span-3">
-            <Textarea label="Remarks" value={remarks} onChange={setRemarks} placeholder="Optional notes about dispatch…" rows={2} />
-          </div>
+        <SectionTitle
+          icon="📦"
+          title="Check Stock"
+          sub="Cascading lookup — find available stock before discussing with the client"
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Select
+            label="Category"
+            value={category}
+            onChange={setCategory}
+            required
+            options={[
+              { value: '', label: catLoading ? 'Loading…' : '— Select Category —' },
+              ...categories.map((c) => ({ value: c, label: c })),
+            ]}
+          />
+          <Select
+            label="Item Name"
+            value={itemName}
+            onChange={setItemName}
+            required
+            options={[
+              { value: '', label: !category ? '— Pick category first —' : nameLoading ? 'Loading…' : '— Select Item —' },
+              ...itemNames.map((n) => ({ value: n, label: n })),
+            ]}
+          />
+          <Select
+            label="Model"
+            value={model}
+            onChange={setModel}
+            required
+            options={[
+              { value: '', label: !itemName ? '— Pick item first —' : modelLoading ? 'Loading…' : '— Select Model —' },
+              ...models.map((m) => ({ value: m, label: m })),
+            ]}
+          />
+          <Select
+            label="Colour"
+            value={colour}
+            onChange={setColour}
+            required
+            options={[
+              { value: '', label: !model ? '— Pick model first —' : colourLoading ? 'Loading…' : '— Select Colour —' },
+              ...colours.map((c) => ({ value: c, label: c })),
+            ]}
+          />
         </div>
 
-        {err && <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
-        {ok && <div className="mt-3 rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">✓ {ok}</div>}
-
-        <div className="flex justify-end gap-2 mt-4">
-          <Btn onClick={reset} disabled={saving}>Clear</Btn>
-          <Btn variant="gold" onClick={submit} disabled={saving || !itemId || !qtyValid}>
-            {saving ? 'Dispatching…' : '📤 Dispatch Stock'}
-          </Btn>
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle icon="📋" title="Recent Outward Logs" sub={`${logsData?.logs.length || 0} recent dispatches`} right={
-          <Btn size="sm" onClick={refreshLogs}>↻ Refresh</Btn>
-        } />
-        {logsLoading ? <div className="text-center py-6 text-[#96A8BF] text-sm">Loading…</div> :
-         !logsData || logsData.logs.length === 0 ? <EmptyState icon="📤" title="No outward entries yet" sub="Dispatched stock will appear here" /> : (
-          <div className="overflow-x-auto -mx-4 px-4">
-            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-white/7">
-              <table className="w-full text-[12px]">
-                <thead className="sticky top-0 bg-[#111f32] z-10">
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-                    <th className="py-2 px-3">Date</th>
-                    <th className="py-2 px-3">Item</th>
-                    <th className="py-2 px-3">Model</th>
-                    <th className="py-2 px-3">Colour</th>
-                    <th className="py-2 px-3 text-right">Qty</th>
-                    <th className="py-2 px-3">Client</th>
-                    <th className="py-2 px-3">Challan</th>
-                    <th className="py-2 px-3">Bill No</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logsData.logs.map((l) => (
-                    <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                      <td className="py-2 px-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(l.date)}</td>
-                      <td className="py-2 px-3 text-[#EDE4D0]">{l.itemName}</td>
-                      <td className="py-2 px-3 text-[#96A8BF] font-mono">{l.model || '—'}</td>
-                      <td className="py-2 px-3 text-[#96A8BF]">{l.colour || '—'}</td>
-                      <td className="py-2 px-3 text-right text-[#E05050] font-semibold">−{l.quantity}</td>
-                      <td className="py-2 px-3 text-[#EDE4D0]">{l.clientName}</td>
-                      <td className="py-2 px-3 text-[#E4AF4A] font-mono">{l.challanNumber || '—'}</td>
-                      <td className="py-2 px-3 text-[#96A8BF] font-mono">{l.billNumber || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {allReady && (
+          <div className="flex justify-end mt-3">
+            <Btn size="sm" onClick={reset}>↺ Reset</Btn>
           </div>
         )}
       </Card>
+
+      {/* Results */}
+      {allReady && (
+        <Card className="p-4">
+          <SectionTitle
+            icon="🔍"
+            title="Stock Result"
+            sub={`${category} → ${itemName} → ${model} → ${colour}`}
+          />
+          {resultLoading ? (
+            <div className="text-center py-6 text-[#96A8BF] text-sm">Checking stock…</div>
+          ) : result.length === 0 ? (
+            <EmptyState icon="❓" title="No matching item" sub="Try a different combination" />
+          ) : (
+            <div className="space-y-3">
+              {result.map((it) => {
+                const out = it.availableStock <= 0
+                return (
+                  <div key={it.id} className="rounded-lg border border-white/7 bg-[#0c1928]/60 p-3.5">
+                    <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                      <div>
+                        <div className="font-serif text-sm font-bold text-[#EDE4D0]">{it.itemName}</div>
+                        <div className="text-[11px] text-[#96A8BF] mt-0.5">
+                          {it.category} · Model <span className="font-mono text-[#E4AF4A]">{it.model}</span>
+                          {it.colour && <> · Colour <span className="text-[#EDE4D0]">{it.colour}</span></>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1.5">
+                        {it.fastMoving && <Badge label="⚡ Fast Moving" color="#E4AF4A" />}
+                        <Badge
+                          label={
+                            it.availableStock <= it.minStock ? 'LOW STOCK' :
+                            it.availableStock <= 0 ? 'OUT OF STOCK' : 'IN STOCK'
+                          }
+                          color={
+                            it.availableStock <= 0 ? '#E05050' :
+                            it.availableStock <= it.minStock ? '#E09E3C' : '#3CB87A'
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 text-[12px]">
+                      <StockStat label="Current Stock" value={it.currentStock} color="#EDE4D0" />
+                      <StockStat label="Held Qty" value={it.heldQty} color="#E09E3C" />
+                      <StockStat
+                        label="Available Stock"
+                        value={it.availableStock}
+                        color="#E4AF4A"
+                        highlight
+                      />
+                      <StockStat label="Min Stock" value={it.minStock} color="#96A8BF" />
+                      <StockStat label="Unit" value={it.unit || 'pcs'} color="#96A8BF" />
+                    </div>
+
+                    {out && (
+                      <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[12px] text-[#E05050]">
+                        ⚠ Will be available in <strong>25–30 days</strong>. Plan accordingly before committing to client.
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Stock Hold tab — reserve stock against advance                      */
-/* ------------------------------------------------------------------ */
-function StockHoldTab({ user }: { user: SessionUser }) {
+function StockStat({ label, value, color, highlight }: { label: string; value: React.ReactNode; color: string; highlight?: boolean }) {
+  return (
+    <div
+      className={`rounded-lg px-3 py-2 ${highlight ? 'border border-[#C8922A]/40 bg-[#C8922A]/8' : 'border border-white/7 bg-[#0c1928]/60'}`}
+    >
+      <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">{label}</div>
+      <div className="font-serif text-base font-bold" style={{ color }}>{value}</div>
+    </div>
+  )
+}
+
+/* ============================================================ */
+/* Tab 3: Upload Challan — multi-section form                   */
+/* ============================================================ */
+
+type ItemRow = {
+  category: string
+  itemName: string
+  itemNumber: string
+  model: string
+  colour: string
+  quantity: number
+  unitPrice: number
+}
+
+function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) {
+  // Section A: Client details
+  const [challanNumber, setChallanNumber] = useState('')
+  const [quotationNumber, setQuotationNumber] = useState('')
+  const [clientName, setClientName] = useState('')
+  const [clientCity, setClientCity] = useState('')
+  const [clientMobile, setClientMobile] = useState('')
+  const [billingName, setBillingName] = useState('')
+  const [billingAddress, setBillingAddress] = useState('')
+  const [shippingAddress, setShippingAddress] = useState('')
+  const [gstNumber, setGstNumber] = useState('')
+  const [expectedDate, setExpectedDate] = useState('')
+
+  // Section B: Financial details
+  const [amountWithoutGst, setAmountWithoutGst] = useState('')
+  const [gstPercentage, setGstPercentage] = useState('18')
+  const [packingCharge, setPackingCharge] = useState('')
+
+  // Section C: Items
+  const [items, setItems] = useState<ItemRow[]>([
+    { category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 },
+  ])
+
+  // Section D: PDF
+  const [pdfFileName, setPdfFileName] = useState('')
+
+  // Submit flow
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentMode, setPaymentMode] = useState<'FULL' | 'PARTIAL' | null>(null)
+  const [advanceInput, setAdvanceInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const [result, setResult] = useState<UploadResponse | null>(null)
+
+  // Auto-calculations
+  const amtWithoutGstNum = Number(amountWithoutGst) || 0
+  const gstNum = Number(gstPercentage) || 0
+  const packingNum = Number(packingCharge) || 0
+  const amountWithGst = useMemo(() => amtWithoutGstNum * (1 + gstNum / 100), [amtWithoutGstNum, gstNum])
+  const amountTotal = useMemo(() => amountWithGst + packingNum, [amountWithGst, packingNum])
+
+  const updateItem = (idx: number, patch: Partial<ItemRow>) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+  }
+  const addItem = () => setItems((prev) => [...prev, { category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 }])
+  const removeItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx))
+
+  // Sync billing name default to client name when empty
+  useEffect(() => {
+    if (!billingName && clientName) setBillingName(clientName)
+  }, [clientName, billingName])
+
+  const validate = (): string | null => {
+    if (!challanNumber.trim()) return 'Challan number is required'
+    if (!clientName.trim()) return 'Client name is required'
+    if (!clientCity.trim()) return 'Client city is required'
+    const validItems = items.filter((i) => i.itemName.trim())
+    if (validItems.length === 0) return 'Add at least one item with an item name'
+    if (validItems.some((i) => i.quantity <= 0)) return 'All item quantities must be greater than 0'
+    return null
+  }
+
+  const openPaymentModal = () => {
+    const v = validate()
+    if (v) { setErr(v); return }
+    setErr('')
+    setPaymentMode(null)
+    setAdvanceInput('')
+    setShowPaymentModal(true)
+  }
+
+  const confirmSubmit = async () => {
+    if (!paymentMode) return
+    const advance = paymentMode === 'FULL' ? amountTotal : Number(advanceInput) || 0
+    if (paymentMode === 'PARTIAL' && advance <= 0) {
+      setErr('Enter a valid advance amount')
+      return
+    }
+    setSaving(true)
+    setErr('')
+    try {
+      const res = await apiPost('/api/challans/upload', {
+        challanNumber: challanNumber.trim(),
+        quotationNumber: quotationNumber.trim() || undefined,
+        clientName: clientName.trim(),
+        clientCity: clientCity.trim(),
+        clientMobile: clientMobile.trim() || undefined,
+        billingName: billingName.trim() || clientName.trim(),
+        billingAddress: billingAddress.trim() || undefined,
+        shippingAddress: shippingAddress.trim() || undefined,
+        gstNumber: gstNumber.trim() || undefined,
+        expectedDeliveryDate: expectedDate || undefined,
+        amountWithoutGst: amtWithoutGstNum,
+        amountWithGst,
+        gstPercentage: gstNum,
+        amountTotal,
+        packingCharge: packingNum,
+        paymentMode,
+        amountAdvance: advance,
+        items: items
+          .filter((i) => i.itemName.trim())
+          .map((i) => ({
+            category: i.category.trim() || undefined,
+            itemName: i.itemName.trim(),
+            itemNumber: i.itemNumber.trim() || undefined,
+            model: i.model.trim() || undefined,
+            colour: i.colour.trim() || undefined,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            totalPrice: i.quantity * i.unitPrice,
+          })),
+        pdfFileName: pdfFileName || undefined,
+      }) as UploadResponse
+      setResult(res)
+      setShowPaymentModal(false)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetForm = () => {
+    setChallanNumber(''); setQuotationNumber(''); setClientName(''); setClientCity(''); setClientMobile('')
+    setBillingName(''); setBillingAddress(''); setShippingAddress(''); setGstNumber(''); setExpectedDate('')
+    setAmountWithoutGst(''); setGstPercentage('18'); setPackingCharge('')
+    setItems([{ category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 }])
+    setPdfFileName('')
+    setResult(null); setErr(''); setPaymentMode(null); setAdvanceInput('')
+  }
+
+  /* ---------- Success view ---------- */
+  if (result) {
+    return <UploadResult result={result} onDone={onDone} onUploadAnother={resetForm} />
+  }
+
+  /* ---------- Form view ---------- */
+  return (
+    <div className="space-y-4">
+      {/* Section A: Client Details */}
+      <Card className="p-4">
+        <SectionTitle icon="👤" title="A · Client Details" sub="Customer & billing information" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0001" required />
+          <Input label="Quotation Number" value={quotationNumber} onChange={setQuotationNumber} placeholder="Q-2026-0001" />
+          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
+          <Input label="Client City" value={clientCity} onChange={setClientCity} placeholder="Mumbai" required />
+          <Input label="Client Mobile" value={clientMobile} onChange={setClientMobile} placeholder="+91…" />
+          <Input label="Billing Name" value={billingName} onChange={setBillingName} placeholder="(defaults to client name)" />
+          <Input label="GST Number" value={gstNumber} onChange={setGstNumber} placeholder="27ABCDE1234F1Z5" />
+          <Input label="Expected Delivery Date" type="date" value={expectedDate} onChange={setExpectedDate} />
+          <div className="md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Textarea label="Billing Address" value={billingAddress} onChange={setBillingAddress} placeholder="Street, city, state, PIN" rows={2} />
+            <Textarea label="Shipping Address" value={shippingAddress} onChange={setShippingAddress} placeholder="Street, city, state, PIN" rows={2} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Section B: Financial Details */}
+      <Card className="p-4">
+        <SectionTitle icon="💰" title="B · Financial Details" sub="GST, packing & totals — auto-calculated" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Input label="Amount Without GST (₹)" type="number" value={amountWithoutGst} onChange={setAmountWithoutGst} placeholder="0" step="0.01" />
+          <Input label="GST Percentage (%)" type="number" value={gstPercentage} onChange={setGstPercentage} placeholder="18" step="0.01" />
+          <Input label="Packing Charge (₹)" type="number" value={packingCharge} onChange={setPackingCharge} placeholder="0" step="0.01" />
+          <ReadonlyField label="Amount With GST (auto)" value={fmtINR(amountWithGst)} />
+          <ReadonlyField label="Amount Total (auto)" value={fmtINR(amountTotal)} accent />
+          <div className="flex items-end">
+            <div className="rounded-lg border border-[#4A9EE0]/25 bg-[#4A9EE0]/8 px-3 py-2 text-[11px] text-[#4A9EE0] w-full">
+              🚚 Shipping charge will be decided by Coordinator
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Section C: Items */}
+      <Card className="p-4">
+        <SectionTitle
+          icon="📦"
+          title="C · Items"
+          sub="Add one row per line item — total price auto-calculated"
+          right={<Btn size="sm" variant="gold" onClick={addItem}>+ Add Item</Btn>}
+        />
+        <div className="space-y-2">
+          {items.map((it, idx) => {
+            const total = (it.quantity || 0) * (it.unitPrice || 0)
+            return (
+              <div key={idx} className="rounded-lg border border-white/7 bg-[#0c1928]/40 p-2.5">
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-12 md:col-span-2">
+                    <Input label={idx === 0 ? 'Category' : undefined} value={it.category} onChange={(v) => updateItem(idx, { category: v })} placeholder="Linen" />
+                  </div>
+                  <div className="col-span-12 md:col-span-3">
+                    <Input label={idx === 0 ? 'Item Name *' : undefined} value={it.itemName} onChange={(v) => updateItem(idx, { itemName: v })} placeholder="Bath Towel" required />
+                  </div>
+                  <div className="col-span-6 md:col-span-2">
+                    <Input label={idx === 0 ? 'Item #' : undefined} value={it.itemNumber} onChange={(v) => updateItem(idx, { itemNumber: v })} placeholder="BT-001" />
+                  </div>
+                  <div className="col-span-6 md:col-span-2">
+                    <Input label={idx === 0 ? 'Model' : undefined} value={it.model} onChange={(v) => updateItem(idx, { model: v })} placeholder="LR-BT-700" />
+                  </div>
+                  <div className="col-span-6 md:col-span-1">
+                    <Input label={idx === 0 ? 'Colour' : undefined} value={it.colour} onChange={(v) => updateItem(idx, { colour: v })} placeholder="White" />
+                  </div>
+                  <div className="col-span-3 md:col-span-1">
+                    <Input label={idx === 0 ? 'Qty' : undefined} type="number" value={it.quantity} onChange={(v) => updateItem(idx, { quantity: Number(v) || 0 })} placeholder="0" step="1" />
+                  </div>
+                  <div className="col-span-3 md:col-span-1">
+                    <Input label={idx === 0 ? 'Price ₹' : undefined} type="number" value={it.unitPrice} onChange={(v) => updateItem(idx, { unitPrice: Number(v) || 0 })} placeholder="0" step="0.01" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
+                  <div className="text-[11px] text-[#96A8BF]">
+                    Line total: <span className="font-serif text-[#E4AF4A] font-bold">{fmtINR(total)}</span>
+                  </div>
+                  {items.length > 1 && (
+                    <Btn size="sm" variant="danger" onClick={() => removeItem(idx)}>✕ Remove</Btn>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {items.length === 0 && (
+          <EmptyState icon="📦" title="No items yet" sub="Click + Add Item to add a line" />
+        )}
+      </Card>
+
+      {/* Section D: PDF Upload */}
+      <Card className="p-4">
+        <SectionTitle icon="📎" title="D · PDF Upload (optional)" sub="Attach the customer challan / PO PDF" />
+        <label className="block">
+          <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">PDF File</span>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setPdfFileName(e.target.files?.[0]?.name || '')}
+            className="w-full text-[12px] text-[#EDE4D0] file:mr-3 file:rounded-lg file:border-0 file:bg-[#C8922A] file:px-3 file:py-1.5 file:text-[#07101f] file:font-semibold hover:file:opacity-90"
+          />
+        </label>
+        {pdfFileName && (
+          <div className="mt-2.5 rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2 text-[12px] text-[#3CB87A]">
+            ✓ PDF attached: <span className="font-mono">{pdfFileName}</span>
+          </div>
+        )}
+      </Card>
+
+      {err && (
+        <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Btn onClick={onDone}>Cancel</Btn>
+        <Btn variant="gold" onClick={openPaymentModal}>📤 Submit Challan</Btn>
+      </div>
+
+      {/* Payment Modal */}
+      <Modal open={showPaymentModal} onClose={() => !saving && setShowPaymentModal(false)} title="Confirm Payment" wide>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-white/7 bg-[#0c1928]/60 p-3">
+            <div className="text-[11px] text-[#96A8BF] mb-1">Challan Total</div>
+            <div className="font-serif text-2xl font-bold text-[#E4AF4A]">{fmtINR(amountTotal)}</div>
+            <div className="text-[11px] text-[#4E6180] mt-1">
+              {challanNumber} · {clientName} ({clientCity})
+            </div>
+          </div>
+
+          <div className="text-[12px] text-[#96A8BF]">
+            How much has the client paid? This will be sent to the Account team for verification.
+          </div>
+
+          {!paymentMode && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <button
+                onClick={() => setPaymentMode('FULL')}
+                className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-4 py-4 text-left hover:bg-[#3CB87A]/20 transition-colors"
+              >
+                <div className="font-serif text-base font-bold text-[#3CB87A]">✓ Full Amount Paid</div>
+                <div className="text-[11px] text-[#96A8BF] mt-1">Mark advance = {fmtINR(amountTotal)}</div>
+              </button>
+              <button
+                onClick={() => setPaymentMode('PARTIAL')}
+                className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 px-4 py-4 text-left hover:bg-[#E09E3C]/20 transition-colors"
+              >
+                <div className="font-serif text-base font-bold text-[#E09E3C]">🔶 Partial Amount Paid</div>
+                <div className="text-[11px] text-[#96A8BF] mt-1">Enter advance amount received</div>
+              </button>
+            </div>
+          )}
+
+          {paymentMode === 'FULL' && (
+            <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2.5 text-[12px] text-[#3CB87A]">
+              ✓ Full payment mode — advance will be set to <strong>{fmtINR(amountTotal)}</strong>
+            </div>
+          )}
+
+          {paymentMode === 'PARTIAL' && (
+            <div>
+              <Input
+                label="Advance Amount Received (₹)"
+                type="number"
+                value={advanceInput}
+                onChange={setAdvanceInput}
+                placeholder="0"
+                step="0.01"
+                required
+              />
+              <div className="text-[11px] text-[#4E6180] mt-1.5">
+                Remaining after advance: <span className="text-[#E09E3C] font-semibold">{fmtINR(amountTotal - (Number(advanceInput) || 0))}</span>
+              </div>
+            </div>
+          )}
+
+          {err && (
+            <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-white/7">
+            <Btn onClick={() => setShowPaymentModal(false)} disabled={saving}>Back</Btn>
+            {paymentMode && (
+              <Btn variant="gold" onClick={confirmSubmit} disabled={saving || (paymentMode === 'PARTIAL' && !advanceInput)}>
+                {saving ? 'Uploading & Analyzing…' : `📤 Confirm & Upload (${paymentMode})`}
+              </Btn>
+            )}
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+function UploadResult({ result, onDone, onUploadAnother }: {
+  result: UploadResponse
+  onDone: () => void
+  onUploadAnother: () => void
+}) {
+  const { challan, stockSummary } = result
+  const items = challan.challanItems
+
+  return (
+    <Card className="p-4">
+      <div className="text-center mb-4">
+        <div className="text-3xl mb-2">✅</div>
+        <h3 className="font-serif text-lg font-bold text-[#3CB87A]">Challan Uploaded &amp; Analyzed!</h3>
+        <p className="text-[12px] text-[#96A8BF] mt-1">
+          System auto-analyzed {items.length} item(s) against master inventory.
+        </p>
+      </div>
+
+      {/* Stock summary */}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2.5 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Available</div>
+          <div className="font-serif text-xl font-bold text-[#3CB87A]">{stockSummary.available}</div>
+        </div>
+        <div className="rounded-lg border border-[#E09E3C]/25 bg-[#E09E3C]/8 px-3 py-2.5 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Partial</div>
+          <div className="font-serif text-xl font-bold text-[#E09E3C]">{stockSummary.onHold}</div>
+        </div>
+        <div className="rounded-lg border border-[#E05050]/25 bg-[#E05050]/8 px-3 py-2.5 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">25–30 Days</div>
+          <div className="font-serif text-xl font-bold text-[#E05050]">{stockSummary.willBeAvailable}</div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-[#C8922A]/25 bg-[#C8922A]/8 px-3 py-2 text-[12px] text-[#E4AF4A] mb-4">
+        📝 <strong>{stockSummary.available}</strong> item(s) available,{' '}
+        <strong>{stockSummary.onHold}</strong> partial,{' '}
+        <strong>{stockSummary.willBeAvailable}</strong> will be available in 25–30 days.
+      </div>
+
+      {/* Per-item stock status */}
+      <SectionTitle icon="📋" title="Per-Item Stock Analysis" sub={`Challan ${challan.challanNumber}`} />
+      <div className="rounded-lg border border-white/7 overflow-hidden">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
+              <th className="py-2 px-3">Item</th>
+              <th className="py-2 px-3">Model</th>
+              <th className="py-2 px-3 text-right">Qty</th>
+              <th className="py-2 px-3 text-right">Available</th>
+              <th className="py-2 px-3">Stock Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((ci) => (
+              <tr key={ci.id} className="border-b border-white/5">
+                <td className="py-2 px-3 text-[#EDE4D0]">
+                  {ci.itemName}
+                  {ci.category && <div className="text-[10px] text-[#4E6180]">{ci.category}</div>}
+                </td>
+                <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
+                <td className="py-2 px-3 text-right text-[#EDE4D0] font-semibold">{ci.quantity}</td>
+                <td className="py-2 px-3 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+                <td className="py-2 px-3">
+                  <Badge
+                    label={ci.stockStatus.replace(/_/g, ' ')}
+                    color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
+                  />
+                  {ci.stockRemark && (
+                    <div className="text-[10px] text-[#4E6180] mt-0.5">{ci.stockRemark}</div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <Btn onClick={onUploadAnother}>📤 Upload Another</Btn>
+        <Btn variant="gold" onClick={onDone}>Go to My Challans →</Btn>
+      </div>
+    </Card>
+  )
+}
+
+/* ============================================================ */
+/* Tab 4: My Challans — list with expandable stock status       */
+/* ============================================================ */
+
+function MyChallansTab({ user }: { user: SessionUser }) {
+  const url = `/api/challans?role=SALES&userId=${user.id}`
+  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>(url)
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+  if (error) return (
+    <Card className="p-4">
+      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+    </Card>
+  )
+  const challans = data?.challans || []
+
+  return (
+    <Card className="p-4">
+      <SectionTitle
+        icon="🧾"
+        title="My Challans"
+        sub={`${challans.length} uploaded by you`}
+        right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+      />
+
+      {challans.length === 0 ? (
+        <EmptyState icon="🧾" title="No challans yet" sub="Upload your first challan to begin" />
+      ) : (
+        <div className="space-y-2">
+          {challans.map((c) => {
+            const isOpen = expanded === c.id
+            const stockCounts = c.challanItems.reduce(
+              (acc, ci) => {
+                if (ci.stockStatus === 'AVAILABLE') acc.available += 1
+                else if (ci.stockStatus === 'ON_HOLD') acc.partial += 1
+                else if (ci.stockStatus === 'WILL_BE_AVAILABLE') acc.willBe += 1
+                return acc
+              },
+              { available: 0, partial: 0, willBe: 0 },
+            )
+
+            const verifyBadge = c.accountRejected
+              ? <Badge label="REJECTED" color="#E05050" />
+              : c.accountVerified
+                ? <Badge label="VERIFIED" color="#3CB87A" />
+                : <Badge label="PENDING VERIFY" color="#E09E3C" />
+
+            return (
+              <div key={c.id} className="rounded-lg border border-white/7 bg-[#0c1928]/40 overflow-hidden">
+                <button
+                  onClick={() => setExpanded(isOpen ? null : c.id)}
+                  className="w-full text-left px-3.5 py-3 hover:bg-white/[0.02] transition-colors"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="font-mono text-[#E4AF4A] text-[13px] font-semibold">{c.challanNumber}</div>
+                      <div className="text-[#EDE4D0] text-[13px] truncate">{c.clientName}</div>
+                      <div className="text-[10px] text-[#4E6180]">{c.clientCity}</div>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-[#96A8BF] whitespace-nowrap">{fmtDate(c.createdAt)}</span>
+                      <span className="text-[#EDE4D0] font-semibold whitespace-nowrap">{fmtINR(c.amountTotal)}</span>
+                      <Badge label={c.paymentStatus} color={STATUS_COLORS[c.paymentStatus]} />
+                      {verifyBadge}
+                      <span className="text-[#4E6180] text-[14px] leading-none">{isOpen ? '▾' : '▸'}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2 text-[10px]">
+                    <span className="text-[#4E6180]">Stock:</span>
+                    <span className="text-[#3CB87A]">{stockCounts.available} available</span>
+                    <span className="text-[#E09E3C]">· {stockCounts.partial} partial</span>
+                    <span className="text-[#E05050]">· {stockCounts.willBe} 25–30 days</span>
+                    <span className="text-[#4E6180]">· {c.challanItems.length} items total</span>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="border-t border-white/7 px-3.5 py-3 space-y-3">
+                    {/* Client + payment details */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                      <DetailPair label="Quotation" value={c.quotationNumber || '—'} />
+                      <DetailPair label="Mobile" value={c.clientMobile || '—'} />
+                      <DetailPair label="Expected Delivery" value={fmtDate(c.expectedDeliveryDate)} />
+                      <DetailPair label="GST Number" value={c.gstNumber || '—'} />
+                      <DetailPair label="Amount (excl GST)" value={fmtINR(c.amountWithoutGst)} />
+                      <DetailPair label="Amount (with GST)" value={fmtINR(c.amountWithGst)} />
+                      <DetailPair label="Packing" value={fmtINR(c.packingCharge)} />
+                      <DetailPair label="Advance" value={fmtINR(c.amountAdvance)} accent="#3CB87A" />
+                    </div>
+
+                    {c.billingAddress && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                        <div className="rounded border border-white/7 bg-[#07101f]/60 px-2.5 py-1.5">
+                          <div className="text-[10px] uppercase text-[#4E6180] mb-0.5">Billing</div>
+                          <div className="text-[#96A8BF]">{c.billingName || c.clientName}<br />{c.billingAddress}</div>
+                        </div>
+                        <div className="rounded border border-white/7 bg-[#07101f]/60 px-2.5 py-1.5">
+                          <div className="text-[10px] uppercase text-[#4E6180] mb-0.5">Shipping</div>
+                          <div className="text-[#96A8BF]">{c.shippingAddress || 'Same as billing'}</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Per-item stock status */}
+                    <div className="rounded-lg border border-white/7 overflow-hidden">
+                      <table className="w-full text-[12px]">
+                        <thead>
+                          <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
+                            <th className="py-2 px-2.5">Item</th>
+                            <th className="py-2 px-2.5">Model</th>
+                            <th className="py-2 px-2.5 text-right">Qty</th>
+                            <th className="py-2 px-2.5 text-right">Avail.</th>
+                            <th className="py-2 px-2.5">Stock Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {c.challanItems.map((ci) => (
+                            <tr key={ci.id} className="border-b border-white/5">
+                              <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
+                              <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
+                              <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
+                              <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+                              <td className="py-1.5 px-2.5">
+                                <Badge
+                                  label={ci.stockStatus.replace(/_/g, ' ')}
+                                  color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {c.accountRejected && c.accountRejectReason && (
+                      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[12px] text-[#E05050]">
+                        ✕ Account rejected: {c.accountRejectReason}
+                      </div>
+                    )}
+
+                    {c.pdfFileName && (
+                      <div className="text-[11px] text-[#96A8BF]">📎 PDF: <span className="font-mono text-[#E4AF4A]">{c.pdfFileName}</span></div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function DetailPair({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">{label}</div>
+      <div className="text-[12px]" style={{ color: accent || '#EDE4D0' }}>{value}</div>
+    </div>
+  )
+}
+
+/* ============================================================ */
+/* Tab 5: Stock Hold — existing functionality                   */
+/* ============================================================ */
+
+function StockHoldTab() {
   const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
   const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
   const { data: holdsData, loading: holdsLoading, refresh: refreshHolds } = useFetch<{ holds: StockHold[] }>('/api/stock-hold?status=ACTIVE')
@@ -258,15 +1186,8 @@ function StockHoldTab({ user }: { user: SessionUser }) {
     () => items.filter((i) => !category || i.category === category),
     [items, category],
   )
-  const selectedItem = useMemo(
-    () => items.find((i) => i.id === itemId) || null,
-    [items, itemId],
-  )
-  const regRow = useMemo(
-    () => regData?.rows.find((r) => r.id === itemId) || null,
-    [regData, itemId],
-  )
-  // available after existing holds = regRow.available (already subtracts active holds)
+  const selectedItem = useMemo(() => items.find((i) => i.id === itemId) || null, [items, itemId])
+  const regRow = useMemo(() => regData?.rows.find((r) => r.id === itemId) || null, [regData, itemId])
   const availableAfterHold = regRow?.available ?? null
 
   const holds = holdsData?.holds || []
@@ -295,7 +1216,9 @@ function StockHoldTab({ user }: { user: SessionUser }) {
     setSaving(true)
     try {
       const res = await apiPost('/api/stock-hold', {
-        itemId, holdQty: qtyNum, clientName: clientName.trim(),
+        itemId,
+        holdQty: qtyNum,
+        clientName: clientName.trim(),
         advanceAmount: Number(advanceAmount) || 0,
         remarks: remarks || undefined,
       })
@@ -333,9 +1256,9 @@ function StockHoldTab({ user }: { user: SessionUser }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <Input label="Date" type="date" value={date} onChange={setDate} />
           <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
-            options={[{value:'',label:'— All Categories —'}, ...CATEGORIES.map((c) => ({value:c,label:c}))]} />
+            options={[{ value: '', label: '— All Categories —' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]} />
           <Select label="Item" value={itemId} onChange={setItemId} required
-            options={[{value:'',label:'— Select Item —'}, ...filteredItems.map((it) => ({
+            options={[{ value: '', label: '— Select Item —' }, ...filteredItems.map((it) => ({
               value: it.id,
               label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
             }))]} />
@@ -420,8 +1343,7 @@ function StockHoldTab({ user }: { user: SessionUser }) {
                         <td className="py-2 px-3"><Badge label={h.status} color={HOLD_STATUS_COLOR[h.status]} /></td>
                         <td className="py-2 px-3 text-right">
                           {h.status === 'ACTIVE' ? (
-                            <Btn size="sm" variant="danger" disabled={releasing === h.id}
-                              onClick={() => release(h.id)}>
+                            <Btn size="sm" variant="danger" disabled={releasing === h.id} onClick={() => release(h.id)}>
                               {releasing === h.id ? 'Releasing…' : 'Release'}
                             </Btn>
                           ) : <span className="text-[#4E6180] text-[11px]">—</span>}
@@ -439,276 +1361,23 @@ function StockHoldTab({ user }: { user: SessionUser }) {
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Shared read-only display field                                      */
-/* ------------------------------------------------------------------ */
-function ReadonlyField({ label, value }: { label: string; value: string }) {
+/* ============================================================ */
+/* Shared read-only display field                               */
+/* ============================================================ */
+
+function ReadonlyField({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <label className="block">
       <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">{label}</span>
-      <div className="w-full rounded-lg border border-white/10 bg-[#0c1928]/60 px-3 py-2 text-[13px] text-[#EDE4D0] font-mono">
+      <div
+        className={`w-full rounded-lg border px-3 py-2 text-[13px] font-mono ${
+          accent
+            ? 'border-[#C8922A]/40 bg-[#C8922A]/8 text-[#E4AF4A] font-bold'
+            : 'border-white/10 bg-[#0c1928]/60 text-[#EDE4D0]'
+        }`}
+      >
         {value}
       </div>
     </label>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* Existing tabs — Challan list + analysis + upload (unchanged)        */
-/* ------------------------------------------------------------------ */
-function ChallanList({ user }: { user: SessionUser }) {
-  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
-  const [sel, setSel] = useState<Challan | null>(null)
-  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
-  if (!data) return null
-
-  const mine = data.challans // sales sees all but can filter
-
-  return (
-    <Card className="p-4">
-      <SectionTitle icon="🧾" title="Challans" sub={`${mine.length} total`} />
-      {mine.length === 0 ? <EmptyState icon="🧾" title="No challans" sub="Upload your first challan to begin" /> : (
-        <div className="overflow-x-auto -mx-4 px-4">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
-                <th className="py-2 pr-3">Challan #</th>
-                <th className="py-2 pr-3">Client</th>
-                <th className="py-2 pr-3">Expected</th>
-                <th className="py-2 pr-3 text-right">Advance</th>
-                <th className="py-2 pr-3 text-right">Total</th>
-                <th className="py-2 pr-3">Items</th>
-                <th className="py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mine.map((c) => {
-                const matched = c.challanItems.filter((i) => i.status==='MATCHED').length
-                const issues = c.challanItems.length - matched
-                return (
-                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer" onClick={() => setSel(c)}>
-                    <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
-                    <td className="py-2 pr-3 text-[#EDE4D0]">{c.clientName}<div className="text-[10px] text-[#4E6180]">{c.clientCity}</div></td>
-                    <td className="py-2 pr-3 text-[#96A8BF]">{fmtDate(c.expectedDeliveryDate)}</td>
-                    <td className="py-2 pr-3 text-right text-[#3CB87A]">{fmtINR(c.amountAdvance)}</td>
-                    <td className="py-2 pr-3 text-right text-[#EDE4D0]">{fmtINR(c.amountTotal)}</td>
-                    <td className="py-2 pr-3">
-                      <span className="text-[#3CB87A]">{matched}</span>
-                      {issues > 0 && <span className="text-[#E09E3C]"> / {issues}⚠</span>}
-                      <span className="text-[#4E6180]"> / {c.challanItems.length}</span>
-                    </td>
-                    <td className="py-2"><Badge label={c.status.replace(/_/g,' ')} color={STATUS_COLORS[c.status]} /></td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <Modal open={!!sel} onClose={() => { setSel(null); refresh() }} title={sel ? `${sel.challanNumber} — Analysis` : ''} wide>
-        {sel && <ChallanAnalysis c={sel} />}
-      </Modal>
-    </Card>
-  )
-}
-
-function ChallanAnalysis({ c }: { c: Challan }) {
-  const matched = c.challanItems.filter((i) => i.status === 'MATCHED')
-  const wrong = c.challanItems.filter((i) => i.status === 'WRONG_MODEL')
-  const notFound = c.challanItems.filter((i) => i.status === 'NOT_FOUND')
-  const remaining = c.amountTotal - c.amountReceived
-
-  return (
-    <div className="space-y-4">
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <StatCard label="Total" value={fmtINR(c.amountTotal)} accent="#E4AF4A" />
-        <StatCard label="Advance" value={fmtINR(c.amountAdvance)} accent="#3CB87A" />
-        <StatCard label="Received" value={fmtINR(c.amountReceived)} accent="#4A9EE0" />
-        <StatCard label="Remaining" value={fmtINR(remaining)} accent={remaining>0?'#E09E3C':'#3CB87A'} />
-      </div>
-
-      {/* Summary: available / not available */}
-      <Card className="p-3">
-        <SectionTitle icon="📋" title="Summary — Item Availability" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-          <div className="rounded-lg border border-[#3CB87A]/20 bg-[#3CB87A]/5 p-2.5">
-            <div className="text-[#3CB87A] font-semibold mb-1">✓ Available ({matched.length})</div>
-            {matched.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName} <span className="text-[#96A8BF]">×{i.quantity}</span></div>)}
-            {matched.length === 0 && <div className="text-[#4E6180]">None</div>}
-          </div>
-          <div className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 p-2.5">
-            <div className="text-[#E09E3C] font-semibold mb-1">⚠ Model Mismatch ({wrong.length})</div>
-            {wrong.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName}<div className="text-[10px] text-[#96A8BF]">Challan: {i.model} → Stock: {i.matchedItem?.model}</div></div>)}
-            {wrong.length === 0 && <div className="text-[#4E6180]">None</div>}
-          </div>
-          <div className="rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 p-2.5">
-            <div className="text-[#E05050] font-semibold mb-1">✕ Not in Catalogue ({notFound.length})</div>
-            {notFound.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName} <span className="text-[#96A8BF]">({i.model})</span></div>)}
-            {notFound.length === 0 && <div className="text-[#4E6180]">None</div>}
-          </div>
-        </div>
-      </Card>
-
-      {/* Detailed items table */}
-      <div>
-        <h4 className="text-[12px] font-semibold text-[#E4AF4A] mb-2">Item Analysis Detail</h4>
-        <div className="rounded-lg border border-white/7 overflow-hidden">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="text-left text-[10px] uppercase text-[#4E6180] bg-white/[0.02]">
-                <th className="py-2 px-3">Item Name</th>
-                <th className="py-2 px-3">Item #</th>
-                <th className="py-2 px-3">Model (Challan)</th>
-                <th className="py-2 px-3">Model (Stock)</th>
-                <th className="py-2 px-3 text-right">Qty</th>
-                <th className="py-2 px-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {c.challanItems.map((ci) => (
-                <tr key={ci.id} className="border-t border-white/5">
-                  <td className="py-2 px-3 text-[#EDE4D0]">{ci.itemName}</td>
-                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.itemNumber || '—'}</td>
-                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
-                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.matchedItem?.model || '—'}</td>
-                  <td className="py-2 px-3 text-right">{ci.quantity}</td>
-                  <td className="py-2 px-3"><Badge label={ci.status.replace(/_/g,' ')} color={STATUS_COLORS[ci.status]} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {c.paymentStatus === 'PARTIAL' && (
-        <div className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 p-3 text-[12px] text-[#E09E3C]">
-          ⚠ Partial payment: ₹{remaining.toLocaleString('en-IN')} remaining. Account team has been notified to verify the advance.
-        </div>
-      )}
-      {c.paymentStatus === 'PAID' && (
-        <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 p-3 text-[12px] text-[#3CB87A]">
-          ✓ Full payment received. Challan sent to Account team for verification.
-        </div>
-      )}
-    </div>
-  )
-}
-
-function UploadForm({ user, onDone }: { user: SessionUser; onDone: () => void }) {
-  const [challanNumber, setChallanNumber] = useState('')
-  const [clientName, setClientName] = useState('')
-  const [clientCity, setClientCity] = useState('')
-  const [clientMobile, setClientMobile] = useState('')
-  const [expectedDate, setExpectedDate] = useState('')
-  const [amountTotal, setAmountTotal] = useState('')
-  const [amountAdvance, setAmountAdvance] = useState('')
-  const [paymentType, setPaymentType] = useState('ADVANCE')
-  const [items, setItems] = useState([{ itemName:'', itemNumber:'', model:'', quantity:1 }])
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
-  const [result, setResult] = useState<Challan | null>(null)
-  const [autoHoldCount, setAutoHoldCount] = useState(0)
-
-  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
-
-  const submit = async () => {
-    setErr('')
-    if (!challanNumber || !clientName) { setErr('Challan number and client name required'); return }
-    const validItems = items.filter((i) => i.itemName.trim())
-    if (!validItems.length) { setErr('Add at least one item'); return }
-    if (paymentType === 'ADVANCE' && !amountAdvance) { setErr('Advance amount is mandatory when payment type is Advance'); return }
-    setSaving(true)
-    try {
-      const res = await apiPost('/api/challans/upload', {
-        challanNumber, clientName, clientCity, clientMobile,
-        expectedDeliveryDate: expectedDate || null,
-        amountTotal: Number(amountTotal) || 0,
-        amountAdvance: Number(amountAdvance) || 0,
-        paymentType,
-        items: validItems,
-      })
-      setResult(res.challan)
-      setAutoHoldCount(typeof res.autoHoldCount === 'number' ? res.autoHoldCount : 0)
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Upload failed')
-    } finally { setSaving(false) }
-  }
-
-  if (result) {
-    return (
-      <Card className="p-4">
-        <div className="text-center mb-4">
-          <div className="text-3xl mb-2">✅</div>
-          <h3 className="font-serif text-lg font-bold text-[#3CB87A]">Challan Uploaded &amp; Analyzed!</h3>
-          <p className="text-[12px] text-[#96A8BF] mt-1">System auto-analyzed {result.challanItems.length} items</p>
-        </div>
-        {autoHoldCount > 0 && (
-          <div className="mb-4 rounded-lg border border-[#9B6ED4]/30 bg-[#9B6ED4]/10 px-3 py-2.5 text-[12px] text-[#9B6ED4]">
-            🔒 <strong>Stock Auto-Held:</strong> {autoHoldCount} matched item(s) have been put on hold for <strong>{result.clientName}</strong> to protect stock health. Holds are linked to challan <span className="font-mono">{result.challanNumber}</span> — see the Stock Hold tab.
-          </div>
-        )}
-        <ChallanAnalysis c={result} />
-        <div className="flex justify-end gap-2 mt-4">
-          <Btn onClick={() => { setResult(null); setAutoHoldCount(0); onDone() }}>Done</Btn>
-          <Btn variant="gold" onClick={() => { setResult(null); setAutoHoldCount(0); setChallanNumber(''); setClientName(''); setClientCity(''); setClientMobile(''); setExpectedDate(''); setAmountTotal(''); setAmountAdvance(''); setItems([{ itemName:'', itemNumber:'', model:'', quantity:1 }]) }}>Upload Another</Btn>
-        </div>
-      </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <SectionTitle icon="📤" title="Upload New Challan" sub="System will auto-analyze each item against master inventory" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0002" required />
-          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel Name" required />
-          <Input label="City" value={clientCity} onChange={setClientCity} placeholder="City" />
-          <Input label="Mobile" value={clientMobile} onChange={setClientMobile} placeholder="+91…" />
-          <Input label="Expected Delivery Date" type="date" value={expectedDate} onChange={setExpectedDate} />
-          <Select label="Payment Type" value={paymentType} onChange={setPaymentType} options={[
-            { value:'FULL', label:'Full Payment' },
-            { value:'ADVANCE', label:'Advance Payment' },
-            { value:'NONE', label:'No Payment Yet' },
-          ]} />
-          <Input label="Total Amount (₹)" type="number" value={amountTotal} onChange={setAmountTotal} placeholder="0" />
-          <Input label={paymentType==='ADVANCE'?'Advance Amount (₹) *':'Advance Amount (₹)'} type="number" value={amountAdvance} onChange={setAmountAdvance} placeholder="0" required={paymentType==='ADVANCE'} />
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle icon="📦" title="Challan Items" sub="Add each item — system will check name + model" />
-        <div className="space-y-2">
-          {items.map((it, idx) => (
-            <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-              <div className="col-span-4">
-                <Select label={idx===0?'Item Name':''} value={it.itemName} onChange={(v) => {
-                  const n=[...items]; n[idx]={...it,itemName:v}
-                  const f = itemsData?.items.find((m)=>m.itemName===v)
-                  if (f) { n[idx].model = f.model; n[idx].itemNumber = f.model.split('-').pop() || '' }
-                  setItems(n)
-                }} options={[{value:'',label:'— Select / Type —'},...(itemsData?.items.map((m)=>({value:m.itemName,label:`${m.itemName} (${m.model})`}))||[])]} />
-              </div>
-              <div className="col-span-3"><Input label={idx===0?'Item #':''} value={it.itemNumber} onChange={(v)=>{const n=[...items];n[idx]={...it,itemNumber:v};setItems(n)}} placeholder="MB-40L" /></div>
-              <div className="col-span-3"><Input label={idx===0?'Model':''} value={it.model} onChange={(v)=>{const n=[...items];n[idx]={...it,model:v};setItems(n)}} placeholder="LR-MB-40L" /></div>
-              <div className="col-span-1"><Input label={idx===0?'Qty':''} type="number" value={it.quantity} onChange={(v)=>{const n=[...items];n[idx]={...it,quantity:Number(v)||1};setItems(n)}} /></div>
-              <div className="col-span-1 flex gap-1">
-                {idx===items.length-1 && <Btn size="sm" onClick={()=>setItems([...items,{itemName:'',itemNumber:'',model:'',quantity:1}])}>+</Btn>}
-                {items.length>1 && <Btn size="sm" variant="danger" onClick={()=>setItems(items.filter((_,i)=>i!==idx))}>×</Btn>}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
-
-      <div className="flex justify-end gap-2">
-        <Btn onClick={onDone}>Cancel</Btn>
-        <Btn variant="gold" onClick={submit} disabled={saving}>{saving ? 'Uploading & Analyzing…' : '📤 Upload & Analyze'}</Btn>
-      </div>
-    </div>
   )
 }

@@ -33,6 +33,12 @@ model User {
   inwardEntries     InwardLog[]
   outwardEntries    OutwardLog[]
   stockHolds        StockHold[]
+  accountVerified   Challan[]         @relation("AccountVerifier")
+  coordinatorApproved Challan[]      @relation("CoordinatorApprover")
+  vehicleArranged   Challan[]         @relation("VehicleArranger")
+  billsUploaded     Challan[]         @relation("BillsUploader")
+  auditedItems      ChallanItem[]     @relation("ItemAuditor")
+  warehouseItems    ChallanItem[]     @relation("WarehouseWorker")
 }
 
 // ═══════════════════════════════════════════
@@ -67,6 +73,7 @@ model Item {
 model Challan {
   id                  String   @id @default(cuid())
   challanNumber       String   @unique
+  quotationNumber     String?
   clientName          String
   clientCity          String
   clientMobile        String?
@@ -74,14 +81,80 @@ model Challan {
   expectedDeliveryDate DateTime?
   date                DateTime @default(now())
 
+  // Billing & shipping details
+  billingName         String?
+  billingAddress      String?
+  shippingAddress     String?
+  gstNumber           String?
+
+  // Financial breakdown
+  amountWithoutGst    Float    @default(0)
+  amountWithGst       Float    @default(0)
+  gstPercentage       Float    @default(18)
   amountTotal         Float    @default(0)
   amountAdvance       Float    @default(0)
   amountReceived      Float    @default(0)
+  packingCharge       Float    @default(0)
+  shippingCharge      Float    @default(0)
+  freightAmount       Float    @default(0)
   paymentType         String   @default("ADVANCE")
   paymentStatus       String   @default("PENDING")
+  paymentMode         String?  // FULL | PARTIAL
+
+  // Account verification
   accountVerified     Boolean  @default(false)
   accountVerifiedById String?
+  accountVerifiedBy   User?    @relation("AccountVerifier", fields: [accountVerifiedById], references: [id])
   accountVerifiedAt   DateTime?
+  accountRejected     Boolean  @default(false)
+  accountRejectedById String?
+  accountRejectedAt   DateTime?
+  accountRejectReason String?
+
+  // Coordinator audit & warehouse
+  coordinatorApproved Boolean  @default(false)
+  coordinatorApprovedById String?
+  coordinatorApprovedBy   User? @relation("CoordinatorApprover", fields: [coordinatorApprovedById], references: [id])
+  coordinatorApprovedAt   DateTime?
+  warehouseCompleted  Boolean  @default(false)
+  warehouseCompletedAt DateTime?
+  vehicleArranged     Boolean  @default(false)
+  vehicleArrangedAt   DateTime?
+  vehicleArrangedById String?
+  vehicleArrangedBy   User?    @relation("VehicleArranger", fields: [vehicleArrangedById], references: [id])
+
+  // E-way bill & invoice (uploaded by Account)
+  ewayBillNo          String?
+  ewayBillFile        String?
+  invoiceNo           String?
+  invoiceFile         String?
+  billsUploadedAt     DateTime?
+  billsUploadedById   String?
+  billsUploadedBy     User?    @relation("BillsUploader", fields: [billsUploadedById], references: [id])
+
+  // Dispatch & tracking
+  dispatchDate        DateTime?
+  trackingLink        String?
+  transporterName     String?
+  vehicleNumber       String?
+  dispatchImages      String?  // JSON array of image paths
+
+  // WhatsApp & client communication
+  whatsappSent        Boolean  @default(false)
+  whatsappSentAt      DateTime?
+  emailSent           Boolean  @default(false)
+  emailSentAt         DateTime?
+
+  // Client review
+  reviewRequested     Boolean  @default(false)
+  reviewRequestedAt   DateTime?
+  reviewReceived      String?
+  reviewRating        Int?
+  reviewReceivedAt    DateTime?
+
+  // PDF uploaded by sales
+  pdfFileName         String?
+  aiAnalysisData      String?  // JSON: AI-extracted overview
 
   status              String   @default("UPLOADED")
 
@@ -103,18 +176,44 @@ model ChallanItem {
   challanId   String
   challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
 
+  category    String?
   itemName    String
   itemNumber  String?
   model       String?
   colour      String?
   quantity    Int      @default(1)
+  unitPrice   Float    @default(0)
+  totalPrice  Float    @default(0)
 
-  status      String   @default("PENDING")
+  // Stock status (auto-checked on upload)
+  status      String   @default("PENDING")  // MATCHED | NOT_FOUND | WRONG_MODEL
+  stockStatus String   @default("PENDING")  // AVAILABLE | ON_HOLD | WILL_BE_AVAILABLE
+  stockRemark String?
+  expectedAvailabilityDays Int?
+  availableQty Int?
+
   matchedItemId String?
   matchedItem Item?    @relation(fields: [matchedItemId], references: [id])
 
   correctedItemId String?
   corrected       Boolean @default(false)
+
+  // Coordinator audit (per-item approve/reject)
+  auditStatus    String   @default("PENDING")  // PENDING | APPROVED | REJECTED | ON_HOLD
+  auditNotes     String?
+  auditedAt      DateTime?
+  auditedById    String?
+  auditedBy      User?    @relation("ItemAuditor", fields: [auditedById], references: [id])
+
+  // Warehouse workflow (per-item: quality check → packaging → done)
+  warehouseStatus String  @default("PENDING")  // PENDING | QUALITY_CHECK | PACKAGING | DONE
+  warehouseNotes  String?
+  warehouseDoneAt DateTime?
+  warehouseDoneById String?
+  warehouseDoneBy   User? @relation("WarehouseWorker", fields: [warehouseDoneById], references: [id])
+
+  // Dispatch image (per-item, uploaded by coordinator in final review)
+  dispatchImagePath String?
 
   createdAt   DateTime @default(now())
 }
