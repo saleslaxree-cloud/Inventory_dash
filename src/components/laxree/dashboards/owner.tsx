@@ -189,28 +189,6 @@ function OverviewTab({ onTabChange }: { onTabChange: (id: string) => void }) {
           {Object.keys(data.byCategory).length === 0 && <EmptyState title="No stock data" />}
         </div>
       </Card>
-
-      {/* ── Quick Navigation (links to dedicated tabs, no data duplication) ── */}
-      <Card className="p-4">
-        <SectionTitle icon="🧭" title="Quick Access" sub="Jump to a dedicated section" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
-          {[
-            { id: 'stock', label: 'Current Stock', icon: '📦' },
-            { id: 'fast', label: 'Fast Moving', icon: '⚡' },
-            { id: 'challans', label: 'Challans', icon: '🧾' },
-            { id: 'pr', label: 'Purchase Requests', icon: '📋' },
-            { id: 'register', label: 'Stock Register', icon: '📋' },
-            { id: 'forecast', label: 'Forecast', icon: '📈' },
-            { id: 'activity', label: 'Activity Log', icon: '📜' },
-          ].map((q) => (
-            <button key={q.id} onClick={() => onTabChange(q.id)}
-              className="flex items-center gap-2 rounded-lg border border-white/7 bg-white/[0.02] p-3 text-left transition-all hover:border-[#C8922A]/30 hover:bg-white/5">
-              <span className="text-lg">{q.icon}</span>
-              <span className="text-[11px] font-medium text-[#96A8BF]">{q.label}</span>
-            </button>
-          ))}
-        </div>
-      </Card>
     </div>
   )
 }

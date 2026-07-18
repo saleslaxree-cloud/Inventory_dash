@@ -881,6 +881,7 @@ function VehicleTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: 
                       <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold">{c.challanNumber}</span>
                       <span className="text-[12px] text-[#EDE4D0] ml-2">{c.clientName}</span>
                       <span className="text-[10px] text-[#96A8BF] ml-2">{c.clientCity}</span>
+                      {c.clientMobile && <span className="text-[10px] text-[#9B6ED4] ml-2">📞 {c.clientMobile}</span>}
                     </div>
                     <Badge label="Ready" color="#3CB87A" />
                   </div>
@@ -950,7 +951,10 @@ function VehicleTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: 
                   <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold">{c.challanNumber}</span>
                   <Badge label={c.dispatchDate ? 'Dispatched' : 'Arranged'} color={c.dispatchDate ? '#9B6ED4' : '#3CB87A'} />
                 </div>
-                <div className="text-[12px] text-[#EDE4D0] mb-2">{c.clientName} • {c.clientCity}</div>
+                <div className="text-[12px] text-[#EDE4D0] mb-2">
+                  {c.clientName} • {c.clientCity}
+                  {c.clientMobile && <span className="text-[10px] text-[#9B6ED4]"> • 📞 {c.clientMobile}</span>}
+                </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div>
                     <div className="text-[#4E6180]">Freight</div>
@@ -1053,6 +1057,7 @@ function ReviewTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: (
                       <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold">{c.challanNumber}</span>
                       <span className="text-[12px] text-[#EDE4D0] ml-2">{c.clientName}</span>
                       <span className="text-[10px] text-[#96A8BF] ml-2">{c.clientCity}</span>
+                      {c.clientMobile && <span className="text-[10px] text-[#9B6ED4] ml-2">📞 {c.clientMobile}</span>}
                     </div>
                     <Badge label={`${withImg}/${total} images`} color={allImaged ? '#3CB87A' : '#E09E3C'} />
                   </div>
