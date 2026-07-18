@@ -1,0 +1,814 @@
+     1→     1→'use client'
+     2→     2→import { useState } from 'react'
+     3→     3→import { useFetch, apiPost } from '../use-fetch'
+     4→     4→import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
+     5→     5→import { fmtINR, fmtDate, STATUS_COLORS, SessionUser } from '../types'
+     6→     6→import { StockLookupCard } from '../stock-lookup'
+     7→     7→
+     8→     8→type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; unit:string; currentStock:number; minStock:number; fastMoving:boolean; inwardCount:number; outwardCount:number; active:boolean }
+     9→     9→type UserRow = { id:string; name:string; email:string; role:string; phone:string|null; active:boolean }
+    10→    10→
+    11→    11→type InwardLog = {
+    12→    12→  id:string; date:string; category:string; itemName:string; model:string;
+    13→    13→  colour:string|null; quantity:number; unit:string; vendor:string|null;
+    14→    14→  billNo:string|null; remarks:string|null;
+    15→    15→  enteredBy?: { name:string; role:string }
+    16→    16→}
+    17→    17→type ActivityLog = {
+    18→    18→  id:string; type:'IN'|'OUT'; date:string; category:string; itemName:string;
+    19→    19→  model:string; colour:string|null; quantity:number; unit:string;
+    20→    20→  party:string; challanNumber:string|null; billNumber:string|null;
+    21→    21→  remarks:string|null; enteredBy?: { name:string; role:string }
+    22→    22→}
+    23→    23→type StockRow = {
+    24→    24→  id:string; category:string; itemName:string; model:string; colour:string|null;
+    25→    25→  unit:string; inward:number; dispatched:number; balance:number; onHold:number;
+    26→    26→  available:number; minStock:number; fastMoving:boolean;
+    27→    27→  status:'OK'|'LOW'|'OUT_OF_STOCK'
+    28→    28→}
+    29→    29→type StockSummary = {
+    30→    30→  totalSKUs:number; totalInward:number; totalDispatched:number; totalBalance:number;
+    31→    31→  totalOnHold:number; totalAvailable:number; outOfStock:number; lowStock:number
+    32→    32→}
+    33→    33→type ForecastRow = {
+    34→    34→  id:string; category:string; itemName:string; model:string; colour:string|null;
+    35→    35→  balance:number; held:number; available:number; minStock:number;
+    36→    36→  totalDispatched:number; avgPerDay:number; daysLeft:number|null;
+    37→    37→  last30Dispatch:number; suggestedReorder:number;
+    38→    38→  status:'critical'|'warn'|'ok'|'nodata'
+    39→    39→}
+    40→    40→type ForecastSummary = {
+    41→    41→  totalSKUs:number; critical:number; warn:number; ok:number; nodata:number;
+    42→    42→  topMoving:ForecastRow[]; criticalItems:ForecastRow[]
+    43→    43→}
+    44→    44→
+    45→    45→const CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Banquet Furniture','Linen','Bath Linen','Bath Tubs','Spare Parts']
+    46→    46→
+    47→    47→const STATUS_COLOR_MAP: Record<string, string> = {
+    48→    48→  OK: '#3CB87A', LOW: '#E09E3C', OUT_OF_STOCK: '#E05050',
+    49→    49→  critical: '#E05050', warn: '#E09E3C', ok: '#3CB87A', nodata: '#4E6180',
+    50→    50→}
+    51→    51→const STATUS_LABEL_MAP: Record<string, string> = {
+    52→    52→  OK: 'OK', LOW: 'LOW', OUT_OF_STOCK: 'OUT',
+    53→    53→  critical: 'CRITICAL', warn: 'WATCH', ok: 'OK', nodata: 'NO DATA',
+    54→    54→}
+    55→    55→
+    56→    56→export function ITManagerDashboard({ user }: { user: SessionUser }) {
+    57→    57→  const [tab, setTab] = useState('items')
+    58→    58→  const nav = [
+    59→    59→    { id:'items', label:'Item Master', icon:'📦' },
+    60→    60→    { id:'add', label:'Add Item', icon:'➕' },
+    61→    61→    { id:'inward', label:'Inward Entry', icon:'📥' },
+    62→    62→    { id:'register', label:'Stock Register', icon:'📋' },
+    63→    63→    { id:'activity', label:'Activity Log', icon:'📜' },
+    64→    64→    { id:'forecast', label:'Forecast', icon:'📈' },
+    65→    65→    { id:'analytics', label:'Analytics', icon:'📊' },
+    66→    66→    { id:'users', label:'Users', icon:'👥' },
+    67→    67→    { id:'all-challans', label:'All Challans', icon:'🧾' },
+    68→    68→  ]
+    69→    69→  return (
+    70→    70→    <div className="space-y-4">
+    71→    71→      <div className="flex gap-1.5 flex-wrap">
+    72→    72→        {nav.map((n) => (
+    73→    73→          <button key={n.id} onClick={() => setTab(n.id)}
+    74→    74→            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
+    75→    75→              tab===n.id ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+    76→    76→            }`}>
+    77→    77→            <span className="mr-1">{n.icon}</span>{n.label}
+    78→    78→          </button>
+    79→    79→        ))}
+    80→    80→      </div>
+    81→    81→      {tab === 'items' && <ItemsTab />}
+    82→    82→      {tab === 'add' && <AddItemTab />}
+    83→    83→      {tab === 'inward' && <InwardTab />}
+    84→    84→      {tab === 'register' && <StockRegisterTab />}
+    85→    85→      {tab === 'activity' && <ActivityLogTab />}
+    86→    86→      {tab === 'forecast' && <ForecastTab />}
+    87→    87→      {tab === 'analytics' && <AnalyticsTab />}
+    88→    88→      {tab === 'users' && <UsersTab />}
+    89→    89→      {tab === 'all-challans' && <AllChallansTab />}
+    90→    90→    </div>
+    91→    91→  )
+    92→    92→}
+    93→    93→
+    94→    94→function ItemsTab() {
+    95→    95→  const { data, loading, refresh } = useFetch<{ items: Item[] }>('/api/items')
+    96→    96→  const [cat, setCat] = useState('ALL')
+    97→    97→  const [editItem, setEditItem] = useState<Item | null>(null)
+    98→    98→
+    99→    99→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   100→   100→  if (!data) return null
+   101→   101→
+   102→   102→  const cats = ['ALL', ...Array.from(new Set(data.items.map((i) => i.category)))]
+   103→   103→  const filtered = cat === 'ALL' ? data.items : data.items.filter((i) => i.category === cat)
+   104→   104→
+   105→   105→  return (
+   106→   106→    <div className="space-y-4">
+   107→   107→      {/* Cascading lookup: Category → Item → Model → live stock */}
+   108→   108→      <StockLookupCard />
+   109→   109→
+   110→   110→      <Card className="p-4">
+   111→   111→        <SectionTitle icon="📦" title="Item Master — Inward / Outward" sub={`${filtered.length} items`} right={
+   112→   112→          <Select value={cat} onChange={setCat} options={cats.map((c) => ({ value:c, label:c==='ALL'?'All Categories':c }))} />
+   113→   113→        } />
+   114→   114→        <div className="overflow-x-auto -mx-4 px-4">
+   115→   115→          <div className="max-h-[60vh] overflow-y-auto">
+   116→   116→            <table className="w-full text-[12px]">
+   117→   117→              <thead className="sticky top-0 bg-[#111f32] z-10">
+   118→   118→                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   119→   119→                  <th className="py-2 pr-3">Category</th>
+   120→   120→                  <th className="py-2 pr-3">Item Name</th>
+   121→   121→                  <th className="py-2 pr-3">Model</th>
+   122→   122→                  <th className="py-2 pr-3">Colour</th>
+   123→   123→                  <th className="py-2 pr-3 text-right">Stock</th>
+   124→   124→                  <th className="py-2 pr-3 text-right">Inward</th>
+   125→   125→                  <th className="py-2 pr-3 text-right">Outward</th>
+   126→   126→                  <th className="py-2 pr-3">Fast</th>
+   127→   127→                  <th className="py-2">Active</th>
+   128→   128→                </tr>
+   129→   129→              </thead>
+   130→   130→              <tbody>
+   131→   131→                {filtered.map((it) => (
+   132→   132→                  <tr key={it.id} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer" onClick={() => setEditItem(it)}>
+   133→   133→                    <td className="py-2 pr-3 text-[#96A8BF]">{it.category}</td>
+   134→   134→                    <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{it.itemName}</td>
+   135→   135→                    <td className="py-2 pr-3 text-[#96A8BF] font-mono">{it.model}</td>
+   136→   136→                    <td className="py-2 pr-3 text-[#96A8BF]">{it.colour || '—'}</td>
+   137→   137→                    <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{it.currentStock}</td>
+   138→   138→                    <td className="py-2 pr-3 text-right text-[#3CB87A]">{it.inwardCount}</td>
+   139→   139→                    <td className="py-2 pr-3 text-right text-[#E05050]">{it.outwardCount}</td>
+   140→   140→                    <td className="py-2 pr-3">{it.fastMoving ? '⚡' : '—'}</td>
+   141→   141→                    <td className="py-2">{it.active ? <Badge label="Yes" color="#3CB87A" /> : <Badge label="No" color="#E05050" />}</td>
+   142→   142→                  </tr>
+   143→   143→                ))}
+   144→   144→              </tbody>
+   145→   145→            </table>
+   146→   146→            </div>
+   147→   147→          </div>
+   148→   148→
+   149→   149→        <Modal open={!!editItem} onClose={() => { setEditItem(null); refresh() }} title="Edit Item">
+   150→   150→          {editItem && <EditItemForm item={editItem} />}
+   151→   151→        </Modal>
+   152→   152→      </Card>
+   153→   153→    </div>
+   154→   154→  )
+   155→   155→}
+   156→   156→
+   157→   157→function EditItemForm({ item }: { item: Item }) {
+   158→   158→  const [form, setForm] = useState({
+   159→   159→    category: item.category, itemName: item.itemName, model: item.model, colour: item.colour || '',
+   160→   160→    unit: item.unit, currentStock: String(item.currentStock), minStock: String(item.minStock),
+   161→   161→    fastMoving: item.fastMoving, active: item.active,
+   162→   162→  })
+   163→   163→  const [saving, setSaving] = useState(false)
+   164→   164→  const [msg, setMsg] = useState('')
+   165→   165→
+   166→   166→  const save = async () => {
+   167→   167→    setSaving(true)
+   168→   168→    setMsg('')
+   169→   169→    try {
+   170→   170→      const res = await fetch(`/api/items/${item.id}`, {
+   171→   171→        method: 'PATCH',
+   172→   172→        headers: { 'Content-Type': 'application/json' },
+   173→   173→        body: JSON.stringify(form),
+   174→   174→      })
+   175→   175→      const data = await res.json()
+   176→   176→      if (!res.ok) throw new Error(data.error || 'Failed')
+   177→   177→      setMsg('✓ Item updated successfully')
+   178→   178→    } catch (e) {
+   179→   179→      setMsg(e instanceof Error ? e.message : 'Failed')
+   180→   180→    } finally { setSaving(false) }
+   181→   181→  }
+   182→   182→
+   183→   183→  return (
+   184→   184→    <div className="space-y-3">
+   185→   185→      <div className="grid grid-cols-2 gap-3">
+   186→   186→        <Input label="Category" value={form.category} onChange={(v) => setForm({...form, category:v})} />
+   187→   187→        <Input label="Item Name" value={form.itemName} onChange={(v) => setForm({...form, itemName:v})} />
+   188→   188→        <Input label="Model" value={form.model} onChange={(v) => setForm({...form, model:v})} />
+   189→   189→        <Input label="Colour" value={form.colour} onChange={(v) => setForm({...form, colour:v})} />
+   190→   190→        <Input label="Unit" value={form.unit} onChange={(v) => setForm({...form, unit:v})} />
+   191→   191→        <Input label="Min Stock" type="number" value={form.minStock} onChange={(v) => setForm({...form, minStock:v})} />
+   192→   192→        <Input label="Current Stock" type="number" value={form.currentStock} onChange={(v) => setForm({...form, currentStock:v})} />
+   193→   193→        <Select label="Fast Moving" value={form.fastMoving ? 'yes' : 'no'} onChange={(v) => setForm({...form, fastMoving: v==='yes'})} options={[{value:'yes',label:'Yes'},{value:'no',label:'No'}]} />
+   194→   194→      </div>
+   195→   195→      {msg && <div className="text-[11px] text-[#3CB87A]">{msg}</div>}
+   196→   196→      <Btn variant="gold" onClick={save} disabled={saving} className="w-full">{saving ? 'Saving…' : 'Save Changes'}</Btn>
+   197→   197→    </div>
+   198→   198→  )
+   199→   199→}
+   200→   200→
+   201→   201→function AddItemTab() {
+   202→   202→  const [form, setForm] = useState({
+   203→   203→    category: '', itemName: '', model: '', colour: '', unit: 'PCS',
+   204→   204→    currentStock: '0', minStock: '5', fastMoving: false,
+   205→   205→  })
+   206→   206→  const [saving, setSaving] = useState(false)
+   207→   207→  const [done, setDone] = useState(false)
+   208→   208→
+   209→   209→  const save = async () => {
+   210→   210→    setSaving(true)
+   211→   211→    try {
+   212→   212→      await apiPost('/api/items', form)
+   213→   213→      setDone(true)
+   214→   214→      setForm({ category:'', itemName:'', model:'', colour:'', unit:'PCS', currentStock:'0', minStock:'5', fastMoving:false })
+   215→   215→    } catch (e) {
+   216→   216→      alert(e instanceof Error ? e.message : 'Failed')
+   217→   217→    } finally { setSaving(false) }
+   218→   218→  }
+   219→   219→
+   220→   220→  return (
+   221→   221→    <Card className="p-4">
+   222→   222→      <SectionTitle icon="➕" title="Add New Item" sub="Add item category, name, model, colour to master inventory" />
+   223→   223→      {done && (
+   224→   224→        <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 p-3 text-[12px] text-[#3CB87A] mb-3 flex justify-between items-center">
+   225→   225→          ✓ Item added successfully to master inventory
+   226→   226→          <Btn size="sm" onClick={() => setDone(false)}>Add Another</Btn>
+   227→   227→        </div>
+   228→   228→      )}
+   229→   229→      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   230→   230→        <Select label="Category" value={form.category} onChange={(v) => setForm({...form, category:v})} options={[{value:'',label:'— Select —'},...CATEGORIES.map((c)=>({value:c,label:c}))]} />
+   231→   231→        <Input label="Item Name" value={form.itemName} onChange={(v) => setForm({...form, itemName:v})} required />
+   232→   232→        <Input label="Model" value={form.model} onChange={(v) => setForm({...form, model:v})} placeholder="LR-XX-01" required />
+   233→   233→        <Input label="Colour" value={form.colour} onChange={(v) => setForm({...form, colour:v})} />
+   234→   234→        <Input label="Unit" value={form.unit} onChange={(v) => setForm({...form, unit:v})} />
+   235→   235→        <Input label="Min Stock" type="number" value={form.minStock} onChange={(v) => setForm({...form, minStock:v})} />
+   236→   236→        <Input label="Current Stock" type="number" value={form.currentStock} onChange={(v) => setForm({...form, currentStock:v})} />
+   237→   237→        <Select label="Fast Moving" value={form.fastMoving ? 'yes' : 'no'} onChange={(v) => setForm({...form, fastMoving: v==='yes'})} options={[{value:'yes',label:'Yes ⚡'},{value:'no',label:'No'}]} />
+   238→   238→      </div>
+   239→   239→      <div className="flex justify-end mt-4">
+   240→   240→        <Btn variant="gold" onClick={save} disabled={saving || !form.category || !form.itemName || !form.model}>{saving ? 'Saving…' : '➕ Add Item'}</Btn>
+   241→   241→      </div>
+   242→   242→    </Card>
+   243→   243→  )
+   244→   244→}
+   245→   245→
+   246→   246→// ═══════════════════════════════════════════
+   247→   247→// INWARD ENTRY — Add stock received from vendor
+   248→   248→// ═══════════════════════════════════════════
+   249→   249→function InwardTab() {
+   250→   250→  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
+   251→   251→  const { data, loading, refresh } = useFetch<{ logs: InwardLog[] }>('/api/inward?limit=50')
+   252→   252→  const [form, setForm] = useState({
+   253→   253→    date: new Date().toISOString().slice(0, 10),
+   254→   254→    category: '', itemId: '', quantity: '', vendor: '', billNo: '', remarks: '',
+   255→   255→  })
+   256→   256→  const [saving, setSaving] = useState(false)
+   257→   257→  const [done, setDone] = useState('')
+   258→   258→
+   259→   259→  const items = (itemsData?.items || []).filter((i) => !form.category || i.category === form.category)
+   260→   260→  const selectedItem = items.find((i) => i.id === form.itemId)
+   261→   261→
+   262→   262→  const submit = async () => {
+   263→   263→    if (!form.itemId || !form.quantity) {
+   264→   264→      alert('Please select an item and enter quantity')
+   265→   265→      return
+   266→   266→    }
+   267→   267→    setSaving(true); setDone('')
+   268→   268→    try {
+   269→   269→      const res = await apiPost('/api/inward', {
+   270→   270→        itemId: form.itemId,
+   271→   271→        quantity: Number(form.quantity),
+   272→   272→        vendor: form.vendor,
+   273→   273→        billNo: form.billNo,
+   274→   274→        remarks: form.remarks,
+   275→   275→        date: form.date,
+   276→   276→      })
+   277→   277→      setDone(`✓ ${res.message || `Added ${form.quantity} units`}`)
+   278→   278→      setForm({ ...form, itemId: '', quantity: '', vendor: '', billNo: '', remarks: '' })
+   279→   279→      refresh()
+   280→   280→    } catch (e) {
+   281→   281→      alert(e instanceof Error ? e.message : 'Failed to add inward entry')
+   282→   282→    } finally { setSaving(false) }
+   283→   283→  }
+   284→   284→
+   285→   285→  const resetItem = () => setForm({ ...form, itemId: '' })
+   286→   286→
+   287→   287→  return (
+   288→   288→    <div className="space-y-4">
+   289→   289→      <Card className="p-4">
+   290→   290→        <SectionTitle icon="📥" title="Inward Entry — Stock Received" sub="Add stock received from vendor / supplier" />
+   291→   291→        {done && (
+   292→   292→          <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 p-3 text-[12px] text-[#3CB87A] mb-3 flex justify-between items-center">
+   293→   293→            {done}
+   294→   294→            <Btn size="sm" onClick={() => setDone('')}>Dismiss</Btn>
+   295→   295→          </div>
+   296→   296→        )}
+   297→   297→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   298→   298→          <Input label="Date" type="date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} required />
+   299→   299→          <Select label="Category" value={form.category} onChange={(v) => setForm({ ...form, category: v, itemId: '' })}
+   300→   300→            options={[{ value: '', label: '— Select Category —' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]} required />
+   301→   301→          <Select label="Item" value={form.itemId} onChange={(v) => setForm({ ...form, itemId: v })}
+   302→   302→            options={[{ value: '', label: form.category ? '— Select Item —' : '— Select Category First —' },
+   303→   303→              ...items.map((i) => ({ value: i.id, label: `${i.itemName}${i.colour ? ` (${i.colour})` : ''}` }))]}
+   304→   304→            required />
+   305→   305→          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
+   306→   306→          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
+   307→   307→          <Input label="Quantity" type="number" value={form.quantity} onChange={(v) => setForm({ ...form, quantity: v })} required placeholder="0" />
+   308→   308→          <Input label="Vendor / Supplier" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} placeholder="Vendor name" />
+   309→   309→          <Input label="Bill / Invoice No" value={form.billNo} onChange={(v) => setForm({ ...form, billNo: v })} placeholder="Bill number" />
+   310→   310→        </div>
+   311→   311→        <div className="mt-3">
+   312→   312→          <Textarea label="Remarks" value={form.remarks} onChange={(v) => setForm({ ...form, remarks: v })} placeholder="Optional notes about this inward entry" rows={2} />
+   313→   313→        </div>
+   314→   314→        <div className="flex justify-end mt-4 gap-2">
+   315→   315→          {form.itemId && <Btn variant="ghost" onClick={resetItem}>Reset Item</Btn>}
+   316→   316→          <Btn variant="gold" onClick={submit} disabled={saving || !form.itemId || !form.quantity}>
+   317→   317→            {saving ? 'Saving…' : '📥 Add Inward Entry'}
+   318→   318→          </Btn>
+   319→   319→        </div>
+   320→   320→      </Card>
+   321→   321→
+   322→   322→      <Card className="p-4">
+   323→   323→        <SectionTitle icon="📋" title="Recent Inward Logs" sub={`${data?.logs.length || 0} recent entries`} />
+   324→   324→        {loading ? (
+   325→   325→          <div className="text-center py-8 text-[#96A8BF] text-sm">Loading inward logs…</div>
+   326→   326→        ) : !data || data.logs.length === 0 ? (
+   327→   327→          <EmptyState icon="📥" title="No inward entries yet" sub="Add stock using the form above" />
+   328→   328→        ) : (
+   329→   329→          <div className="overflow-x-auto -mx-4 px-4">
+   330→   330→            <div className="max-h-[60vh] overflow-y-auto">
+   331→   331→              <table className="w-full text-[12px]">
+   332→   332→                <thead className="sticky top-0 bg-[#111f32] z-10">
+   333→   333→                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   334→   334→                    <th className="py-2 pr-3">Date</th>
+   335→   335→                    <th className="py-2 pr-3">Category</th>
+   336→   336→                    <th className="py-2 pr-3">Item</th>
+   337→   337→                    <th className="py-2 pr-3">Model</th>
+   338→   338→                    <th className="py-2 pr-3">Colour</th>
+   339→   339→                    <th className="py-2 pr-3 text-right">Qty</th>
+   340→   340→                    <th className="py-2 pr-3">Vendor</th>
+   341→   341→                    <th className="py-2 pr-3">Bill No</th>
+   342→   342→                    <th className="py-2">Entered By</th>
+   343→   343→                  </tr>
+   344→   344→                </thead>
+   345→   345→                <tbody>
+   346→   346→                  {data.logs.map((l) => (
+   347→   347→                    <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   348→   348→                      <td className="py-2 pr-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(l.date)}</td>
+   349→   349→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.category}</td>
+   350→   350→                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{l.itemName}</td>
+   351→   351→                      <td className="py-2 pr-3 text-[#96A8BF] font-mono">{l.model}</td>
+   352→   352→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.colour || '—'}</td>
+   353→   353→                      <td className="py-2 pr-3 text-right text-[#3CB87A] font-semibold">+{l.quantity}</td>
+   354→   354→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.vendor || '—'}</td>
+   355→   355→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.billNo || '—'}</td>
+   356→   356→                      <td className="py-2 text-[#4E6180] text-[10px]">{l.enteredBy?.name || '—'}</td>
+   357→   357→                    </tr>
+   358→   358→                  ))}
+   359→   359→                </tbody>
+   360→   360→              </table>
+   361→   361→            </div>
+   362→   362→          </div>
+   363→   363→        )}
+   364→   364→      </Card>
+   365→   365→    </div>
+   366→   366→  )
+   367→   367→}
+   368→   368→
+   369→   369→function ReadonlyField({ label, value }: { label: string; value: string }) {
+   370→   370→  return (
+   371→   371→    <label className="block">
+   372→   372→      <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">{label}</span>
+   373→   373→      <div className="w-full rounded-lg border border-white/10 bg-[#0c1928]/60 px-3 py-2 text-[13px] text-[#EDE4D0] font-mono">
+   374→   374→        {value}
+   375→   375→      </div>
+   376→   376→    </label>
+   377→   377→  )
+   378→   378→}
+   379→   379→
+   380→   380→// ═══════════════════════════════════════════
+   381→   381→// STOCK REGISTER — Full stock table with holds
+   382→   382→// ═══════════════════════════════════════════
+   383→   383→function StockRegisterTab() {
+   384→   384→  const [cat, setCat] = useState('ALL')
+   385→   385→  const [lowOnly, setLowOnly] = useState(false)
+   386→   386→  const url = `/api/stock-register?category=${cat}${lowOnly ? '&lowStock=true' : ''}`
+   387→   387→  const { data, loading } = useFetch<{ rows: StockRow[]; summary: StockSummary }>(url)
+   388→   388→
+   389→   389→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading stock register…</div>
+   390→   390→  if (!data) return null
+   391→   391→
+   392→   392→  const s = data.summary
+   393→   393→
+   394→   394→  return (
+   395→   395→    <div className="space-y-4">
+   396→   396→      {/* Cascading lookup: Category → Item → Model → live stock */}
+   397→   397→      <StockLookupCard />
+   398→   398→
+   399→   399→      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+   400→   400→        <StatCard label="Total SKUs" value={s.totalSKUs} accent="#E4AF4A" icon="📦" />
+   401→   401→        <StatCard label="Total Inward" value={s.totalInward} accent="#3CB87A" icon="📥" />
+   402→   402→        <StatCard label="Dispatched" value={s.totalDispatched} accent="#E05050" icon="📤" />
+   403→   403→        <StatCard label="Balance" value={s.totalBalance} accent="#4A9EE0" icon="⚖️" />
+   404→   404→        <StatCard label="On Hold" value={s.totalOnHold} accent="#9B6ED4" icon="🔒" />
+   405→   405→        <StatCard label="Available" value={s.totalAvailable} accent="#E09E3C" icon="✅" />
+   406→   406→      </div>
+   407→   407→
+   408→   408→      <Card className="p-4">
+   409→   409→        <SectionTitle icon="📋" title="Stock Register" sub={`${data.rows.length} SKUs`} right={
+   410→   410→          <div className="flex items-center gap-2 flex-wrap">
+   411→   411→            <Select value={cat} onChange={setCat} options={[
+   412→   412→              { value: 'ALL', label: 'All Categories' },
+   413→   413→              ...CATEGORIES.map((c) => ({ value: c, label: c })),
+   414→   414→            ]} />
+   415→   415→            <button onClick={() => setLowOnly(!lowOnly)}
+   416→   416→              className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all whitespace-nowrap ${
+   417→   417→                lowOnly ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+   418→   418→              }`}>
+   419→   419→              {lowOnly ? '✓ ' : ''}Low Stock Only
+   420→   420→            </button>
+   421→   421→          </div>
+   422→   422→        } />
+   423→   423→        {data.rows.length === 0 ? (
+   424→   424→          <EmptyState icon="📦" title="No items match filters" sub="Try changing category or disabling the low-stock filter" />
+   425→   425→        ) : (
+   426→   426→          <div className="overflow-x-auto -mx-4 px-4">
+   427→   427→            <div className="max-h-[60vh] overflow-y-auto">
+   428→   428→              <table className="w-full text-[12px]">
+   429→   429→                <thead className="sticky top-0 bg-[#111f32] z-10">
+   430→   430→                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   431→   431→                    <th className="py-2 pr-3 text-right">Sr</th>
+   432→   432→                    <th className="py-2 pr-3">Category</th>
+   433→   433→                    <th className="py-2 pr-3">Item</th>
+   434→   434→                    <th className="py-2 pr-3">Model</th>
+   435→   435→                    <th className="py-2 pr-3">Colour</th>
+   436→   436→                    <th className="py-2 pr-3 text-right">Inward</th>
+   437→   437→                    <th className="py-2 pr-3 text-right">Dispatched</th>
+   438→   438→                    <th className="py-2 pr-3 text-right">Balance</th>
+   439→   439→                    <th className="py-2 pr-3 text-right">On Hold</th>
+   440→   440→                    <th className="py-2 pr-3 text-right">Available</th>
+   441→   441→                    <th className="py-2">Status</th>
+   442→   442→                  </tr>
+   443→   443→                </thead>
+   444→   444→                <tbody>
+   445→   445→                  {data.rows.map((r, idx) => {
+   446→   446→                    const color = STATUS_COLOR_MAP[r.status] || '#96A8BF'
+   447→   447→                    return (
+   448→   448→                      <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   449→   449→                        <td className="py-2 pr-3 text-right text-[#4E6180]">{idx + 1}</td>
+   450→   450→                        <td className="py-2 pr-3 text-[#96A8BF]">{r.category}</td>
+   451→   451→                        <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{r.itemName}</td>
+   452→   452→                        <td className="py-2 pr-3 text-[#96A8BF] font-mono">{r.model}</td>
+   453→   453→                        <td className="py-2 pr-3 text-[#96A8BF]">{r.colour || '—'}</td>
+   454→   454→                        <td className="py-2 pr-3 text-right text-[#3CB87A]">{r.inward}</td>
+   455→   455→                        <td className="py-2 pr-3 text-right text-[#E05050]">{r.dispatched}</td>
+   456→   456→                        <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{r.balance}</td>
+   457→   457→                        <td className="py-2 pr-3 text-right text-[#9B6ED4]">{r.onHold || '—'}</td>
+   458→   458→                        <td className="py-2 pr-3 text-right text-[#E4AF4A] font-semibold">{r.available}</td>
+   459→   459→                        <td className="py-2"><Badge label={STATUS_LABEL_MAP[r.status]} color={color} /></td>
+   460→   460→                      </tr>
+   461→   461→                    )
+   462→   462→                  })}
+   463→   463→                </tbody>
+   464→   464→              </table>
+   465→   465→            </div>
+   466→   466→          </div>
+   467→   467→        )}
+   468→   468→      </Card>
+   469→   469→    </div>
+   470→   470→  )
+   471→   471→}
+   472→   472→
+   473→   473→// ═══════════════════════════════════════════
+   474→   474→// ACTIVITY LOG — Combined IN+OUT transactions
+   475→   475→// ═══════════════════════════════════════════
+   476→   476→function ActivityLogTab() {
+   477→   477→  const [type, setType] = useState<'ALL' | 'IN' | 'OUT'>('ALL')
+   478→   478→  const url = `/api/activity-log?limit=200${type !== 'ALL' ? `&type=${type}` : ''}`
+   479→   479→  const { data, loading } = useFetch<{ logs: ActivityLog[] }>(url)
+   480→   480→
+   481→   481→  return (
+   482→   482→    <Card className="p-4">
+   483→   483→      <SectionTitle icon="📜" title="Activity Log" sub={`${data?.logs.length || 0} transactions`} right={
+   484→   484→        <div className="flex gap-1.5">
+   485→   485→          {(['ALL', 'IN', 'OUT'] as const).map((t) => (
+   486→   486→            <button key={t} onClick={() => setType(t)}
+   487→   487→              className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+   488→   488→                type === t
+   489→   489→                  ? t === 'IN' ? 'bg-[#3CB87A]/15 text-[#3CB87A] border-[#3CB87A]/25'
+   490→   490→                    : t === 'OUT' ? 'bg-[#E05050]/15 text-[#E05050] border-[#E05050]/25'
+   491→   491→                    : 'bg-[#E4AF4A]/15 text-[#E4AF4A] border-[#E4AF4A]/25'
+   492→   492→                  : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+   493→   493→              }`}>
+   494→   494→              {t === 'ALL' ? 'All' : t === 'IN' ? '📥 Inward' : '📤 Outward'}
+   495→   495→            </button>
+   496→   496→          ))}
+   497→   497→        </div>
+   498→   498→      } />
+   499→   499→      {loading ? (
+   500→   500→        <div className="text-center py-8 text-[#96A8BF] text-sm">Loading activity log…</div>
+   501→   501→      ) : !data || data.logs.length === 0 ? (
+   502→   502→        <EmptyState icon="📜" title="No activity yet" sub="Inward and outward transactions will appear here" />
+   503→   503→      ) : (
+   504→   504→        <div className="overflow-x-auto -mx-4 px-4">
+   505→   505→          <div className="max-h-[60vh] overflow-y-auto">
+   506→   506→            <table className="w-full text-[12px]">
+   507→   507→              <thead className="sticky top-0 bg-[#111f32] z-10">
+   508→   508→                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   509→   509→                  <th className="py-2 pr-3">Date</th>
+   510→   510→                  <th className="py-2 pr-3">Type</th>
+   511→   511→                  <th className="py-2 pr-3">Category</th>
+   512→   512→                  <th className="py-2 pr-3">Item</th>
+   513→   513→                  <th className="py-2 pr-3">Model</th>
+   514→   514→                  <th className="py-2 pr-3">Colour</th>
+   515→   515→                  <th className="py-2 pr-3 text-right">Qty</th>
+   516→   516→                  <th className="py-2 pr-3">Party</th>
+   517→   517→                  <th className="py-2 pr-3">Challan</th>
+   518→   518→                  <th className="py-2 pr-3">Bill No</th>
+   519→   519→                  <th className="py-2">Entered By</th>
+   520→   520→                </tr>
+   521→   521→              </thead>
+   522→   522→              <tbody>
+   523→   523→                {data.logs.map((l) => {
+   524→   524→                  const isIn = l.type === 'IN'
+   525→   525→                  const color = isIn ? '#3CB87A' : '#E05050'
+   526→   526→                  return (
+   527→   527→                    <tr key={`${l.type}-${l.id}`} className="border-b border-white/5 hover:bg-white/[0.02]">
+   528→   528→                      <td className="py-2 pr-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(l.date)}</td>
+   529→   529→                      <td className="py-2 pr-3"><Badge label={isIn ? 'IN' : 'OUT'} color={color} /></td>
+   530→   530→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.category}</td>
+   531→   531→                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{l.itemName}</td>
+   532→   532→                      <td className="py-2 pr-3 text-[#96A8BF] font-mono">{l.model}</td>
+   533→   533→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.colour || '—'}</td>
+   534→   534→                      <td className={`py-2 pr-3 text-right font-semibold ${isIn ? 'text-[#3CB87A]' : 'text-[#E05050]'}`}>
+   535→   535→                        {isIn ? '+' : '−'}{l.quantity}
+   536→   536→                      </td>
+   537→   537→                      <td className="py-2 pr-3 text-[#EDE4D0] max-w-[160px] truncate" title={l.party}>{l.party || '—'}</td>
+   538→   538→                      <td className="py-2 pr-3 text-[#E4AF4A] font-mono text-[11px]">{l.challanNumber || '—'}</td>
+   539→   539→                      <td className="py-2 pr-3 text-[#96A8BF]">{l.billNumber || '—'}</td>
+   540→   540→                      <td className="py-2 text-[#4E6180] text-[10px] whitespace-nowrap">{l.enteredBy?.name || '—'}</td>
+   541→   541→                    </tr>
+   542→   542→                  )
+   543→   543→                })}
+   544→   544→              </tbody>
+   545→   545→            </table>
+   546→   546→          </div>
+   547→   547→        </div>
+   548→   548→      )}
+   549→   549→    </Card>
+   550→   550→  )
+   551→   551→}
+   552→   552→
+   553→   553→// ═══════════════════════════════════════════
+   554→   554→// FORECAST — Depletion forecast engine
+   555→   555→// ═══════════════════════════════════════════
+   556→   556→function ForecastTab() {
+   557→   557→  const { data, loading } = useFetch<{ forecasts: ForecastRow[]; summary: ForecastSummary }>('/api/forecast')
+   558→   558→
+   559→   559→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading forecast…</div>
+   560→   560→  if (!data) return null
+   561→   561→
+   562→   562→  const s = data.summary
+   563→   563→  const fullList = [...data.forecasts].sort((a, b) => {
+   564→   564→    const order: Record<string, number> = { critical: 0, warn: 1, ok: 2, nodata: 3 }
+   565→   565→    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
+   566→   566→    return (a.daysLeft ?? 9999) - (b.daysLeft ?? 9999)
+   567→   567→  })
+   568→   568→
+   569→   569→  return (
+   570→   570→    <div className="space-y-4">
+   571→   571→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   572→   572→        <StatCard label="Critical" value={s.critical} sub="< 30 days left" accent="#E05050" icon="🚨" />
+   573→   573→        <StatCard label="Watch" value={s.warn} sub="30–90 days left" accent="#E09E3C" icon="⚠️" />
+   574→   574→        <StatCard label="OK" value={s.ok} sub="> 90 days left" accent="#3CB87A" icon="✅" />
+   575→   575→        <StatCard label="No Data" value={s.nodata} sub="No outward history" accent="#4E6180" icon="❓" />
+   576→   576→      </div>
+   577→   577→
+   578→   578→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   579→   579→        <Card className="p-4">
+   580→   580→          <SectionTitle icon="🚨" title="Critical Items — Depleting Soon" sub={`Top ${s.criticalItems.length} urgent reorders`} />
+   581→   581→          {s.criticalItems.length === 0 ? (
+   582→   582→            <EmptyState icon="✅" title="No critical items" sub="All stock levels are healthy" />
+   583→   583→          ) : (
+   584→   584→            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+   585→   585→              {s.criticalItems.map((f) => (
+   586→   586→                <div key={f.id} className="flex items-center justify-between rounded-lg border border-[#E05050]/15 bg-[#E05050]/5 px-3 py-2">
+   587→   587→                  <div className="min-w-0">
+   588→   588→                    <div className="text-[12px] text-[#EDE4D0] font-medium truncate">{f.itemName}</div>
+   589→   589→                    <div className="text-[10px] text-[#96A8BF]">{f.category} • {f.model}{f.colour ? ` • ${f.colour}` : ''}</div>
+   590→   590→                  </div>
+   591→   591→                  <div className="text-right ml-2 shrink-0">
+   592→   592→                    <div className="text-[#E05050] font-bold text-[14px]">{f.daysLeft ?? '—'}d</div>
+   593→   593→                    <div className="text-[9px] text-[#4E6180]">bal {f.available}</div>
+   594→   594→                  </div>
+   595→   595→                </div>
+   596→   596→              ))}
+   597→   597→            </div>
+   598→   598→          )}
+   599→   599→        </Card>
+   600→   600→
+   601→   601→        <Card className="p-4">
+   602→   602→          <SectionTitle icon="📈" title="Top Moving Items" sub="Last 30 days dispatch — top 8" />
+   603→   603→          {s.topMoving.length === 0 ? (
+   604→   604→            <EmptyState icon="📊" title="No movement data" sub="No outward entries in the last 30 days" />
+   605→   605→          ) : (
+   606→   606→            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+   607→   607→              {s.topMoving.map((f, idx) => (
+   608→   608→                <div key={f.id} className="flex items-center justify-between rounded-lg border border-[#E4AF4A]/15 bg-[#E4AF4A]/5 px-3 py-2">
+   609→   609→                  <div className="flex items-center gap-2 min-w-0">
+   610→   610→                    <span className="text-[10px] font-bold text-[#E4AF4A] w-4">#{idx + 1}</span>
+   611→   611→                    <div className="min-w-0">
+   612→   612→                      <div className="text-[12px] text-[#EDE4D0] font-medium truncate">{f.itemName}</div>
+   613→   613→                      <div className="text-[10px] text-[#96A8BF]">{f.model}{f.colour ? ` • ${f.colour}` : ''}</div>
+   614→   614→                    </div>
+   615→   615→                  </div>
+   616→   616→                  <div className="text-right ml-2 shrink-0">
+   617→   617→                    <div className="text-[#E4AF4A] font-bold text-[14px]">{f.last30Dispatch}</div>
+   618→   618→                    <div className="text-[9px] text-[#4E6180]">30d out</div>
+   619→   619→                  </div>
+   620→   620→                </div>
+   621→   621→              ))}
+   622→   622→            </div>
+   623→   623→          )}
+   624→   624→        </Card>
+   625→   625→      </div>
+   626→   626→
+   627→   627→      <Card className="p-4">
+   628→   628→        <SectionTitle icon="📋" title="Full Forecast Table" sub={`${fullList.length} SKUs analyzed`} />
+   629→   629→        <div className="overflow-x-auto -mx-4 px-4">
+   630→   630→          <div className="max-h-[60vh] overflow-y-auto">
+   631→   631→            <table className="w-full text-[12px]">
+   632→   632→              <thead className="sticky top-0 bg-[#111f32] z-10">
+   633→   633→                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   634→   634→                  <th className="py-2 pr-3 text-right">Sr</th>
+   635→   635→                  <th className="py-2 pr-3">Category</th>
+   636→   636→                  <th className="py-2 pr-3">Item</th>
+   637→   637→                  <th className="py-2 pr-3">Model</th>
+   638→   638→                  <th className="py-2 pr-3">Colour</th>
+   639→   639→                  <th className="py-2 pr-3 text-right">Balance</th>
+   640→   640→                  <th className="py-2 pr-3 text-right">Avg/Day</th>
+   641→   641→                  <th className="py-2 pr-3 text-right">Days Left</th>
+   642→   642→                  <th className="py-2 pr-3 text-right">Reorder</th>
+   643→   643→                  <th className="py-2">Status</th>
+   644→   644→                </tr>
+   645→   645→              </thead>
+   646→   646→              <tbody>
+   647→   647→                {fullList.map((f, idx) => {
+   648→   648→                  const color = STATUS_COLOR_MAP[f.status] || '#96A8BF'
+   649→   649→                  return (
+   650→   650→                    <tr key={f.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   651→   651→                      <td className="py-2 pr-3 text-right text-[#4E6180]">{idx + 1}</td>
+   652→   652→                      <td className="py-2 pr-3 text-[#96A8BF]">{f.category}</td>
+   653→   653→                      <td className="py-2 pr-3 text-[#EDE4D0] font-medium">{f.itemName}</td>
+   654→   654→                      <td className="py-2 pr-3 text-[#96A8BF] font-mono">{f.model}</td>
+   655→   655→                      <td className="py-2 pr-3 text-[#96A8BF]">{f.colour || '—'}</td>
+   656→   656→                      <td className="py-2 pr-3 text-right text-[#EDE4D0] font-semibold">{f.balance}</td>
+   657→   657→                      <td className="py-2 pr-3 text-right text-[#96A8BF]">{f.avgPerDay.toFixed(2)}</td>
+   658→   658→                      <td className="py-2 pr-3 text-right font-semibold" style={{ color }}>
+   659→   659→                        {f.daysLeft !== null ? `${f.daysLeft}d` : '—'}
+   660→   660→                      </td>
+   661→   661→                      <td className="py-2 pr-3 text-right text-[#E4AF4A]">{f.suggestedReorder}</td>
+   662→   662→                      <td className="py-2"><Badge label={STATUS_LABEL_MAP[f.status]} color={color} /></td>
+   663→   663→                    </tr>
+   664→   664→                  )
+   665→   665→                })}
+   666→   666→              </tbody>
+   667→   667→            </table>
+   668→   668→          </div>
+   669→   669→        </div>
+   670→   670→      </Card>
+   671→   671→    </div>
+   672→   672→  )
+   673→   673→}
+   674→   674→
+   675→   675→function AnalyticsTab() {
+   676→   676→  const { data, loading } = useFetch<{ totalItems:number; totalStock:number; lowStockCount:number; fastMovingCount:number; totalChallans:number; totalRevenue:number; totalReceived:number; totalPending:number; byCategory:Record<string,number>; challansByStatus:Record<string,number>; lowStock:Item[] }>('/api/analytics')
+   677→   677→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading analytics…</div>
+   678→   678→  if (!data) return null
+   679→   679→
+   680→   680→  const cats = Object.entries(data.byCategory).sort((a,b) => b[1]-a[1])
+   681→   681→  const maxCat = Math.max(...cats.map(([,v]) => v), 1)
+   682→   682→
+   683→   683→  return (
+   684→   684→    <div className="space-y-4">
+   685→   685→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   686→   686→        <StatCard label="Total Items" value={data.totalItems} accent="#E4AF4A" icon="📦" />
+   687→   687→        <StatCard label="Total Stock" value={data.totalStock} accent="#4A9EE0" icon="📈" />
+   688→   688→        <StatCard label="Low Stock" value={data.lowStockCount} accent="#E05050" icon="⚠️" />
+   689→   689→        <StatCard label="Fast Moving" value={data.fastMovingCount} accent="#3CB87A" icon="⚡" />
+   690→   690→      </div>
+   691→   691→
+   692→   692→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   693→   693→        <Card className="p-4">
+   694→   694→          <SectionTitle icon="⚠️" title="Low Stock Items — Reorder Alert" sub={`${data.lowStock.length} items need reorder`} />
+   695→   695→          {data.lowStock.length === 0 ? <EmptyState icon="✅" title="All stock healthy" /> : (
+   696→   696→            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+   697→   697→              {data.lowStock.map((it) => (
+   698→   698→                <div key={it.id} className="flex items-center justify-between rounded-lg border border-[#E05050]/15 bg-[#E05050]/5 px-3 py-2">
+   699→   699→                  <div>
+   700→   700→                    <div className="text-[12px] text-[#EDE4D0] font-medium">{it.itemName}</div>
+   701→   701→                    <div className="text-[10px] text-[#96A8BF]">{it.category} • {it.model}</div>
+   702→   702→                  </div>
+   703→   703→                  <div className="text-right">
+   704→   704→                    <div className="text-[#E05050] font-bold text-[14px]">{it.currentStock}</div>
+   705→   705→                    <div className="text-[9px] text-[#4E6180]">min {it.minStock}</div>
+   706→   706→                  </div>
+   707→   707→                </div>
+   708→   708→              ))}
+   709→   709→            </div>
+   710→   710→          )}
+   711→   711→        </Card>
+   712→   712→
+   713→   713→        <Card className="p-4">
+   714→   714→          <SectionTitle icon="📊" title="Stock by Category" />
+   715→   715→          <div className="space-y-2.5">
+   716→   716→            {cats.map(([cat, val]) => (
+   717→   717→              <div key={cat}>
+   718→   718→                <div className="flex justify-between text-[11px] mb-1">
+   719→   719→                  <span className="text-[#96A8BF]">{cat}</span>
+   720→   720→                  <span className="text-[#EDE4D0] font-semibold">{val}</span>
+   721→   721→                </div>
+   722→   722→                <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+   723→   723→                  <div className="h-full rounded-full bg-gradient-to-r from-[#C8922A] to-[#E4AF4A]" style={{ width: `${(val/maxCat)*100}%` }} />
+   724→   724→                </div>
+   725→   725→              </div>
+   726→   726→            ))}
+   727→   727→          </div>
+   728→   728→        </Card>
+   729→   729→      </div>
+   730→   730→
+   731→   731→      <Card className="p-4">
+   732→   732→        <SectionTitle icon="💰" title="Revenue Overview" />
+   733→   733→        <div className="grid grid-cols-3 gap-3">
+   734→   734→          <StatCard label="Total Revenue" value={fmtINR(data.totalRevenue)} sub={`${data.totalChallans} challans`} accent="#E4AF4A" />
+   735→   735→          <StatCard label="Received" value={fmtINR(data.totalReceived)} accent="#3CB87A" />
+   736→   736→          <StatCard label="Pending" value={fmtINR(data.totalPending)} accent="#E09E3C" />
+   737→   737→        </div>
+   738→   738→      </Card>
+   739→   739→    </div>
+   740→   740→  )
+   741→   741→}
+   742→   742→
+   743→   743→function UsersTab() {
+   744→   744→  const { data, loading } = useFetch<{ users: UserRow[] }>('/api/users')
+   745→   745→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading users…</div>
+   746→   746→  if (!data) return null
+   747→   747→
+   748→   748→  const roleColors: Record<string,string> = { OWNER:'#E4AF4A', SALES:'#4A9EE0', ACCOUNT:'#3CB87A', COORDINATOR:'#9B6ED4', SUPPORT:'#E09E3C', IT_MANAGER:'#E05050' }
+   749→   749→
+   750→   750→  return (
+   751→   751→    <Card className="p-4">
+   752→   752→      <SectionTitle icon="👥" title="System Users" sub={`${data.users.length} accounts`} />
+   753→   753→      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   754→   754→        {data.users.map((u) => (
+   755→   755→          <div key={u.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+   756→   756→            <div className="flex items-center justify-between mb-1">
+   757→   757→              <div className="text-[13px] text-[#EDE4D0] font-medium">{u.name}</div>
+   758→   758→              {u.active ? <Badge label="Active" color="#3CB87A" /> : <Badge label="Disabled" color="#E05050" />}
+   759→   759→            </div>
+   760→   760→            <div className="text-[11px] text-[#96A8BF]">{u.email}</div>
+   761→   761→            <div className="flex items-center justify-between mt-2">
+   762→   762→              <Badge label={u.role.replace(/_/g,' ')} color={roleColors[u.role]} />
+   763→   763→              <span className="text-[10px] text-[#4E6180]">{u.phone || '—'}</span>
+   764→   764→            </div>
+   765→   765→          </div>
+   766→   766→        ))}
+   767→   767→      </div>
+   768→   768→    </Card>
+   769→   769→  )
+   770→   770→}
+   771→   771→
+   772→   772→function AllChallansTab() {
+   773→   773→  const { data, loading } = useFetch<{ challans: unknown[] }>('/api/challans')
+   774→   774→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   775→   775→  if (!data) return null
+   776→   776→
+   777→   777→  const challans = data.challans as Array<{ id:string; challanNumber:string; clientName:string; clientCity:string; status:string; paymentStatus:string; amountTotal:number; amountReceived:number; createdAt:string }>
+   778→   778→  return (
+   779→   779→    <Card className="p-4">
+   780→   780→      <SectionTitle icon="🧾" title="All Challans (Admin View)" sub={`${challans.length} total`} />
+   781→   781→      <div className="overflow-x-auto -mx-4 px-4">
+   782→   782→        <table className="w-full text-[12px]">
+   783→   783→          <thead>
+   784→   784→            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   785→   785→              <th className="py-2 pr-3">Challan #</th>
+   786→   786→              <th className="py-2 pr-3">Client</th>
+   787→   787→              <th className="py-2 pr-3">City</th>
+   788→   788→              <th className="py-2 pr-3 text-right">Total</th>
+   789→   789→              <th className="py-2 pr-3 text-right">Received</th>
+   790→   790→              <th className="py-2 pr-3">Payment</th>
+   791→   791→              <th className="py-2 pr-3">Status</th>
+   792→   792→              <th className="py-2">Date</th>
+   793→   793→            </tr>
+   794→   794→          </thead>
+   795→   795→          <tbody>
+   796→   796→            {challans.map((c) => (
+   797→   797→              <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   798→   798→                <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
+   799→   799→                <td className="py-2 pr-3 text-[#EDE4D0]">{c.clientName}</td>
+   800→   800→                <td className="py-2 pr-3 text-[#96A8BF]">{c.clientCity}</td>
+   801→   801→                <td className="py-2 pr-3 text-right text-[#EDE4D0]">{fmtINR(c.amountTotal)}</td>
+   802→   802→                <td className="py-2 pr-3 text-right" style={{ color: STATUS_COLORS[c.paymentStatus] }}>{fmtINR(c.amountReceived)}</td>
+   803→   803→                <td className="py-2 pr-3"><Badge label={c.paymentStatus} color={STATUS_COLORS[c.paymentStatus]} /></td>
+   804→   804→                <td className="py-2 pr-3"><Badge label={c.status.replace(/_/g,' ')} color={STATUS_COLORS[c.status]} /></td>
+   805→   805→                <td className="py-2 text-[#4E6180] text-[10px]">{new Date(c.createdAt).toLocaleDateString('en-IN')}</td>
+   806→   806→              </tr>
+   807→   807→            ))}
+   808→   808→          </tbody>
+   809→   809→        </table>
+   810→   810→      </div>
+   811→   811→    </Card>
+   812→   812→  )
+   813→   813→}
+   814→   814→

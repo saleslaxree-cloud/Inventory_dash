@@ -1,0 +1,1449 @@
+     1→'use client'
+     2→import { useEffect, useMemo, useRef, useState } from 'react'
+     3→import { useFetch, apiPost, apiPatch } from '../use-fetch'
+     4→import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
+     5→import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
+     6→
+     7→/* ============================================================ */
+     8→/* Types                                                        */
+     9→/* ============================================================ */
+    10→
+    11→type Item = {
+    12→  id: string
+    13→  category: string
+    14→  itemName: string
+    15→  model: string
+    16→  colour: string | null
+    17→  currentStock: number
+    18→}
+    19→
+    20→type StockCheckItem = {
+    21→  id: string
+    22→  category: string
+    23→  itemName: string
+    24→  model: string
+    25→  colour: string | null
+    26→  unit: string
+    27→  currentStock: number
+    28→  heldQty: number
+    29→  availableStock: number
+    30→  minStock: number
+    31→  fastMoving: boolean
+    32→}
+    33→
+    34→type ChallanItem = {
+    35→  id: string
+    36→  category: string | null
+    37→  itemName: string
+    38→  itemNumber: string | null
+    39→  model: string | null
+    40→  colour: string | null
+    41→  quantity: number
+    42→  unitPrice: number
+    43→  totalPrice: number
+    44→  status: string             // MATCHED | NOT_FOUND | WRONG_MODEL
+    45→  stockStatus: string        // AVAILABLE | ON_HOLD | WILL_BE_AVAILABLE
+    46→  stockRemark: string | null
+    47→  expectedAvailabilityDays: number | null
+    48→  availableQty: number | null
+    49→  matchedItem: Item | null
+    50→}
+    51→
+    52→type Challan = {
+    53→  id: string
+    54→  challanNumber: string
+    55→  quotationNumber: string | null
+    56→  clientName: string
+    57→  clientCity: string
+    58→  clientMobile: string | null
+    59→  expectedDeliveryDate: string | null
+    60→  billingName: string | null
+    61→  billingAddress: string | null
+    62→  shippingAddress: string | null
+    63→  gstNumber: string | null
+    64→  amountWithoutGst: number
+    65→  amountWithGst: number
+    66→  gstPercentage: number
+    67→  amountTotal: number
+    68→  amountAdvance: number
+    69→  amountReceived: number
+    70→  packingCharge: number
+    71→  paymentType: string
+    72→  paymentStatus: string
+    73→  paymentMode: string | null
+    74→  accountVerified: boolean
+    75→  accountRejected: boolean
+    76→  accountRejectReason: string | null
+    77→  status: string
+    78→  pdfFileName: string | null
+    79→  createdAt: string
+    80→  uploadedBy: { id: string; name: string; role: string }
+    81→  challanItems: ChallanItem[]
+    82→}
+    83→
+    84→type DashboardData = {
+    85→  total: number
+    86→  totalAmount: number
+    87→  totalAdvance: number
+    88→  totalReceived: number
+    89→  byStatus: Record<string, number>
+    90→  byPaymentStatus: Record<string, number>
+    91→  monthly: Array<{ month: string; label: string; count: number; amount: number }>
+    92→  challans: Challan[]
+    93→}
+    94→
+    95→type StockSummary = {
+    96→  available: number
+    97→  onHold: number
+    98→  willBeAvailable: number
+    99→}
+   100→
+   101→type UploadResponse = {
+   102→  challan: Challan
+   103→  stockSummary: StockSummary
+   104→  message: string
+   105→}
+   106→
+   107→type StockRow = {
+   108→  id: string
+   109→  category: string
+   110→  itemName: string
+   111→  model: string
+   112→  colour: string | null
+   113→  unit: string
+   114→  inward: number
+   115→  dispatched: number
+   116→  balance: number
+   117→  onHold: number
+   118→  available: number
+   119→  minStock: number
+   120→  fastMoving: boolean
+   121→  status: 'OK' | 'LOW' | 'OUT_OF_STOCK'
+   122→}
+   123→
+   124→type StockHold = {
+   125→  id: string
+   126→  date: string
+   127→  category: string
+   128→  itemName: string
+   129→  model: string
+   130→  colour: string | null
+   131→  holdQty: number
+   132→  clientName: string
+   133→  advanceAmount: number
+   134→  remarks: string | null
+   135→  status: 'ACTIVE' | 'RELEASED' | 'CONVERTED'
+   136→  item: { id: string; currentStock: number; category: string; itemName: string; model: string; colour: string | null }
+   137→  heldBy?: { name: string; role: string }
+   138→}
+   139→
+   140→const CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Banquet Furniture','Linen','Bath Linen','Bath Tubs','Spare Parts']
+   141→
+   142→const HOLD_STATUS_COLOR: Record<string, string> = {
+   143→  ACTIVE: '#E09E3C',
+   144→  RELEASED: '#4E6180',
+   145→  CONVERTED: '#3CB87A',
+   146→}
+   147→
+   148→const STOCK_STATUS_COLOR: Record<string, string> = {
+   149→  AVAILABLE: '#3CB87A',
+   150→  ON_HOLD: '#E09E3C',
+   151→  WILL_BE_AVAILABLE: '#E05050',
+   152→  PENDING: '#96A8BF',
+   153→}
+   154→
+   155→const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+   156→
+   157→/* ============================================================ */
+   158→/* Main Dashboard                                               */
+   159→/* ============================================================ */
+   160→
+   161→export function SalesDashboard({ user, activeTab, onTabChange }: {
+   162→  user: SessionUser
+   163→  activeTab: string
+   164→  onTabChange: (id: string) => void
+   165→}) {
+   166→  return (
+   167→    <div className="space-y-4">
+   168→      {activeTab === 'dashboard'   && <DashboardTab user={user} />}
+   169→      {activeTab === 'stock-check' && <StockCheckTab />}
+   170→      {activeTab === 'upload'      && <UploadTab user={user} onDone={() => onTabChange('list')} />}
+   171→      {activeTab === 'list'        && <MyChallansTab user={user} />}
+   172→      {activeTab === 'hold'        && <StockHoldTab />}
+   173→    </div>
+   174→  )
+   175→}
+   176→
+   177→/* ============================================================ */
+   178→/* Tab 1: Dashboard — monthly summary                           */
+   179→/* ============================================================ */
+   180→
+   181→function DashboardTab({ user }: { user: SessionUser }) {
+   182→  const now = new Date()
+   183→  const [month, setMonth] = useState(String(now.getMonth() + 1))
+   184→  const [year, setYear] = useState(String(now.getFullYear()))
+   185→
+   186→  const url = `/api/challans/dashboard?role=SALES&userId=${user.id}&month=${month}&year=${year}`
+   187→  const { data, loading, error, refresh } = useFetch<DashboardData>(url, [month, year])
+   188→
+   189→  return (
+   190→    <div className="space-y-4">
+   191→      <Card className="p-4">
+   192→        <SectionTitle
+   193→          icon="📊"
+   194→          title="Sales Dashboard"
+   195→          sub="Monthly performance summary"
+   196→          right={
+   197→            <div className="flex gap-2">
+   198→              <Select
+   199→                value={month}
+   200→                onChange={setMonth}
+   201→                options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))}
+   202→              />
+   203→              <Select
+   204→                value={year}
+   205→                onChange={setYear}
+   206→                options={[2024, 2025, 2026].map((y) => ({ value: String(y), label: String(y) }))}
+   207→              />
+   208→              <Btn size="sm" onClick={refresh}>↻</Btn>
+   209→            </div>
+   210→          }
+   211→        />
+   212→
+   213→        {loading ? (
+   214→          <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   215→        ) : error ? (
+   216→          <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+   217→        ) : !data ? null : (
+   218→          <>
+   219→            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+   220→              <StatCard label="Total Challans" value={data.total} accent="#E4AF4A" icon="🧾" />
+   221→              <StatCard label="Total Amount" value={fmtINR(data.totalAmount)} accent="#E4AF4A" icon="💰" />
+   222→              <StatCard label="Total Advance" value={fmtINR(data.totalAdvance)} accent="#3CB87A" icon="✅" />
+   223→              <StatCard label="Total Received" value={fmtINR(data.totalReceived)} accent="#3CB87A" icon="🏦" />
+   224→            </div>
+   225→          </>
+   226→        )}
+   227→      </Card>
+   228→
+   229→      {data && !loading && (
+   230→        <>
+   231→          {/* Monthly breakdown — last 12 months */}
+   232→          <Card className="p-4">
+   233→            <SectionTitle icon="📈" title="Last 12 Months" sub="Challan count per month" />
+   234→            <MonthlyBars monthly={data.monthly} />
+   235→          </Card>
+   236→
+   237→          {/* Status breakdown */}
+   238→          <Card className="p-4">
+   239→            <SectionTitle icon="🏷️" title="Status Breakdown" sub={`${MONTH_NAMES[Number(month) - 1]} ${year}`} />
+   240→            {Object.keys(data.byStatus).length === 0 ? (
+   241→              <EmptyState icon="🏷️" title="No challans this month" sub="Try another month or upload a new challan" />
+   242→            ) : (
+   243→              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+   244→                {Object.entries(data.byStatus).map(([status, count]) => (
+   245→                  <div key={status} className="rounded-lg border border-white/7 bg-[#0c1928]/60 px-3 py-2.5 flex items-center justify-between">
+   246→                    <Badge label={status.replace(/_/g, ' ')} color={STATUS_COLORS[status] || '#96A8BF'} />
+   247→                    <span className="font-serif text-lg font-bold text-[#EDE4D0]">{count}</span>
+   248→                  </div>
+   249→                ))}
+   250→              </div>
+   251→            )}
+   252→          </Card>
+   253→        </>
+   254→      )}
+   255→    </div>
+   256→  )
+   257→}
+   258→
+   259→function MonthlyBars({ monthly }: { monthly: DashboardData['monthly'] }) {
+   260→  const max = Math.max(1, ...monthly.map((m) => m.count))
+   261→  return (
+   262→    <div className="flex items-end gap-1.5 h-32 overflow-x-auto pb-1">
+   263→      {monthly.map((m) => {
+   264→        const h = Math.max(4, Math.round((m.count / max) * 100))
+   265→        return (
+   266→          <div key={m.month} className="flex flex-col items-center gap-1 min-w-[44px] flex-1">
+   267→            <div className="text-[10px] text-[#96A8BF] font-semibold">{m.count}</div>
+   268→            <div
+   269→              className="w-full rounded-t-md transition-all"
+   270→              style={{
+   271→                height: `${h}%`,
+   272→                background: m.count > 0
+   273→                  ? 'linear-gradient(to top, #C8922A, #E4AF4A)'
+   274→                  : 'rgba(150,168,191,0.15)',
+   275→              }}
+   276→              title={`${m.label}: ${m.count} challans · ${fmtINR(m.amount)}`}
+   277→            />
+   278→            <div className="text-[9px] text-[#4E6180] whitespace-nowrap">{m.label}</div>
+   279→          </div>
+   280→        )
+   281→      })}
+   282→    </div>
+   283→  )
+   284→}
+   285→
+   286→/* ============================================================ */
+   287→/* Tab 2: Check Stock — cascading dropdowns                     */
+   288→/* ============================================================ */
+   289→
+   290→function StockCheckTab() {
+   291→  const [category, setCategory] = useState('')
+   292→  const [itemName, setItemName] = useState('')
+   293→  const [model, setModel] = useState('')
+   294→  const [colour, setColour] = useState('')
+   295→
+   296→  const [itemNames, setItemNames] = useState<string[]>([])
+   297→  const [models, setModels] = useState<string[]>([])
+   298→  const [colours, setColours] = useState<string[]>([])
+   299→
+   300→  const [catLoading, setCatLoading] = useState(false)
+   301→  const [nameLoading, setNameLoading] = useState(false)
+   302→  const [modelLoading, setModelLoading] = useState(false)
+   303→  const [colourLoading, setColourLoading] = useState(false)
+   304→
+   305→  // Step 1: fetch categories on mount
+   306→  const { data: catData, loading: catInitLoading } = useFetch<{ categories: string[] }>('/api/stock-check')
+   307→  const categories = catData?.categories || []
+   308→
+   309→  // Step 2: when category changes, fetch item names
+   310→  useEffect(() => {
+   311→    if (!category) { setItemNames([]); return }
+   312→    setNameLoading(true)
+   313→    setItemName(''); setItemNames([])
+   314→    setModel(''); setModels([])
+   315→    setColour(''); setColours([])
+   316→    fetch(`/api/stock-check?category=${encodeURIComponent(category)}`)
+   317→      .then((r) => r.json())
+   318→      .then((d) => setItemNames(d.itemNames || []))
+   319→      .finally(() => setNameLoading(false))
+   320→  }, [category])
+   321→
+   322→  // Step 3: when itemName changes, fetch models
+   323→  useEffect(() => {
+   324→    if (!category || !itemName) { setModels([]); return }
+   325→    setModelLoading(true)
+   326→    setModel(''); setModels([])
+   327→    setColour(''); setColours([])
+   328→    fetch(`/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}`)
+   329→      .then((r) => r.json())
+   330→      .then((d) => setModels(d.models || []))
+   331→      .finally(() => setModelLoading(false))
+   332→  }, [category, itemName])
+   333→
+   334→  // Step 4: when model changes, fetch colours
+   335→  useEffect(() => {
+   336→    if (!category || !itemName || !model) { setColours([]); return }
+   337→    setColourLoading(true)
+   338→    setColour(''); setColours([])
+   339→    fetch(`/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}&model=${encodeURIComponent(model)}`)
+   340→      .then((r) => r.json())
+   341→      .then((d) => setColours(d.colours || []))
+   342→      .finally(() => setColourLoading(false))
+   343→  }, [category, itemName, model])
+   344→
+   345→  // Set catLoading for spinners
+   346→  useEffect(() => { setCatLoading(catInitLoading) }, [catInitLoading])
+   347→
+   348→  // Step 5: when all selected, fetch items
+   349→  const finalUrl = (category && itemName && model && colour)
+   350→    ? `/api/stock-check?category=${encodeURIComponent(category)}&itemName=${encodeURIComponent(itemName)}&model=${encodeURIComponent(model)}&colour=${encodeURIComponent(colour)}`
+   351→    : ''
+   352→  const { data: resultData, loading: resultLoading } = useFetch<{ items: StockCheckItem[] }>(finalUrl, [colour])
+   353→
+   354→  const result = resultData?.items || []
+   355→  const allReady = !!(category && itemName && model && colour)
+   356→
+   357→  const reset = () => {
+   358→    setCategory(''); setItemName(''); setModel(''); setColour('')
+   359→    setItemNames([]); setModels([]); setColours([])
+   360→  }
+   361→
+   362→  return (
+   363→    <div className="space-y-4">
+   364→      <Card className="p-4">
+   365→        <SectionTitle
+   366→          icon="📦"
+   367→          title="Check Stock"
+   368→          sub="Cascading lookup — find available stock before discussing with the client"
+   369→        />
+   370→
+   371→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+   372→          <Select
+   373→            label="Category"
+   374→            value={category}
+   375→            onChange={setCategory}
+   376→            required
+   377→            options={[
+   378→              { value: '', label: catLoading ? 'Loading…' : '— Select Category —' },
+   379→              ...categories.map((c) => ({ value: c, label: c })),
+   380→            ]}
+   381→          />
+   382→          <Select
+   383→            label="Item Name"
+   384→            value={itemName}
+   385→            onChange={setItemName}
+   386→            required
+   387→            options={[
+   388→              { value: '', label: !category ? '— Pick category first —' : nameLoading ? 'Loading…' : '— Select Item —' },
+   389→              ...itemNames.map((n) => ({ value: n, label: n })),
+   390→            ]}
+   391→          />
+   392→          <Select
+   393→            label="Model"
+   394→            value={model}
+   395→            onChange={setModel}
+   396→            required
+   397→            options={[
+   398→              { value: '', label: !itemName ? '— Pick item first —' : modelLoading ? 'Loading…' : '— Select Model —' },
+   399→              ...models.map((m) => ({ value: m, label: m })),
+   400→            ]}
+   401→          />
+   402→          <Select
+   403→            label="Colour"
+   404→            value={colour}
+   405→            onChange={setColour}
+   406→            required
+   407→            options={[
+   408→              { value: '', label: !model ? '— Pick model first —' : colourLoading ? 'Loading…' : '— Select Colour —' },
+   409→              ...colours.map((c) => ({ value: c, label: c })),
+   410→            ]}
+   411→          />
+   412→        </div>
+   413→
+   414→        {allReady && (
+   415→          <div className="flex justify-end mt-3">
+   416→            <Btn size="sm" onClick={reset}>↺ Reset</Btn>
+   417→          </div>
+   418→        )}
+   419→      </Card>
+   420→
+   421→      {/* Results */}
+   422→      {allReady && (
+   423→        <Card className="p-4">
+   424→          <SectionTitle
+   425→            icon="🔍"
+   426→            title="Stock Result"
+   427→            sub={`${category} → ${itemName} → ${model} → ${colour}`}
+   428→          />
+   429→          {resultLoading ? (
+   430→            <div className="text-center py-6 text-[#96A8BF] text-sm">Checking stock…</div>
+   431→          ) : result.length === 0 ? (
+   432→            <EmptyState icon="❓" title="No matching item" sub="Try a different combination" />
+   433→          ) : (
+   434→            <div className="space-y-3">
+   435→              {result.map((it) => {
+   436→                const out = it.availableStock <= 0
+   437→                return (
+   438→                  <div key={it.id} className="rounded-lg border border-white/7 bg-[#0c1928]/60 p-3.5">
+   439→                    <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+   440→                      <div>
+   441→                        <div className="font-serif text-sm font-bold text-[#EDE4D0]">{it.itemName}</div>
+   442→                        <div className="text-[11px] text-[#96A8BF] mt-0.5">
+   443→                          {it.category} · Model <span className="font-mono text-[#E4AF4A]">{it.model}</span>
+   444→                          {it.colour && <> · Colour <span className="text-[#EDE4D0]">{it.colour}</span></>}
+   445→                        </div>
+   446→                      </div>
+   447→                      <div className="flex gap-1.5">
+   448→                        {it.fastMoving && <Badge label="⚡ Fast Moving" color="#E4AF4A" />}
+   449→                        <Badge
+   450→                          label={
+   451→                            it.availableStock <= it.minStock ? 'LOW STOCK' :
+   452→                            it.availableStock <= 0 ? 'OUT OF STOCK' : 'IN STOCK'
+   453→                          }
+   454→                          color={
+   455→                            it.availableStock <= 0 ? '#E05050' :
+   456→                            it.availableStock <= it.minStock ? '#E09E3C' : '#3CB87A'
+   457→                          }
+   458→                        />
+   459→                      </div>
+   460→                    </div>
+   461→
+   462→                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 text-[12px]">
+   463→                      <StockStat label="Current Stock" value={it.currentStock} color="#EDE4D0" />
+   464→                      <StockStat label="Held Qty" value={it.heldQty} color="#E09E3C" />
+   465→                      <StockStat
+   466→                        label="Available Stock"
+   467→                        value={it.availableStock}
+   468→                        color="#E4AF4A"
+   469→                        highlight
+   470→                      />
+   471→                      <StockStat label="Min Stock" value={it.minStock} color="#96A8BF" />
+   472→                      <StockStat label="Unit" value={it.unit || 'pcs'} color="#96A8BF" />
+   473→                    </div>
+   474→
+   475→                    {out && (
+   476→                      <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[12px] text-[#E05050]">
+   477→                        ⚠ Will be available in <strong>25–30 days</strong>. Plan accordingly before committing to client.
+   478→                      </div>
+   479→                    )}
+   480→                  </div>
+   481→                )
+   482→              })}
+   483→            </div>
+   484→          )}
+   485→        </Card>
+   486→      )}
+   487→    </div>
+   488→  )
+   489→}
+   490→
+   491→function StockStat({ label, value, color, highlight }: { label: string; value: React.ReactNode; color: string; highlight?: boolean }) {
+   492→  return (
+   493→    <div
+   494→      className={`rounded-lg px-3 py-2 ${highlight ? 'border border-[#C8922A]/40 bg-[#C8922A]/8' : 'border border-white/7 bg-[#0c1928]/60'}`}
+   495→    >
+   496→      <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">{label}</div>
+   497→      <div className="font-serif text-base font-bold" style={{ color }}>{value}</div>
+   498→    </div>
+   499→  )
+   500→}
+   501→
+   502→/* ============================================================ */
+   503→/* Tab 3: Upload Challan — multi-section form                   */
+   504→/* ============================================================ */
+   505→
+   506→type ItemRow = {
+   507→  category: string
+   508→  itemName: string
+   509→  itemNumber: string
+   510→  model: string
+   511→  colour: string
+   512→  quantity: number
+   513→  unitPrice: number
+   514→}
+   515→
+   516→function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) {
+   517→  // Auto-extract state (PDF upload → VLM analysis → autofill A/B/C)
+   518→  const [extracting, setExtracting] = useState(false)
+   519→  const [extractErr, setExtractErr] = useState('')
+   520→  const [extractSuccess, setExtractSuccess] = useState('')
+   521→  const [extractedFileName, setExtractedFileName] = useState('')
+   522→  const fileInputRef = useRef<HTMLInputElement | null>(null)
+   523→
+   524→  // Section A: Client details
+   525→  const [challanNumber, setChallanNumber] = useState('')
+   526→  const [quotationNumber, setQuotationNumber] = useState('')
+   527→  const [clientName, setClientName] = useState('')
+   528→  const [clientCity, setClientCity] = useState('')
+   529→  const [clientMobile, setClientMobile] = useState('')
+   530→  const [billingName, setBillingName] = useState('')
+   531→  const [billingAddress, setBillingAddress] = useState('')
+   532→  const [shippingAddress, setShippingAddress] = useState('')
+   533→  const [gstNumber, setGstNumber] = useState('')
+   534→  const [expectedDate, setExpectedDate] = useState('')
+   535→
+   536→  // Section B: Financial details
+   537→  const [amountWithoutGst, setAmountWithoutGst] = useState('')
+   538→  const [gstPercentage, setGstPercentage] = useState('18')
+   539→  const [packingCharge, setPackingCharge] = useState('')
+   540→
+   541→  // Section C: Items
+   542→  const [items, setItems] = useState<ItemRow[]>([
+   543→    { category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 },
+   544→  ])
+   545→
+   546→  // Section D: PDF
+   547→  const [pdfFileName, setPdfFileName] = useState('')
+   548→
+   549→  // Submit flow
+   550→  const [showPaymentModal, setShowPaymentModal] = useState(false)
+   551→  const [paymentMode, setPaymentMode] = useState<'FULL' | 'PARTIAL' | null>(null)
+   552→  const [advanceInput, setAdvanceInput] = useState('')
+   553→  const [saving, setSaving] = useState(false)
+   554→  const [err, setErr] = useState('')
+   555→
+   556→  const [result, setResult] = useState<UploadResponse | null>(null)
+   557→
+   558→  // Auto-calculations
+   559→  const amtWithoutGstNum = Number(amountWithoutGst) || 0
+   560→  const gstNum = Number(gstPercentage) || 0
+   561→  const packingNum = Number(packingCharge) || 0
+   562→  const amountWithGst = useMemo(() => amtWithoutGstNum * (1 + gstNum / 100), [amtWithoutGstNum, gstNum])
+   563→  const amountTotal = useMemo(() => amountWithGst + packingNum, [amountWithGst, packingNum])
+   564→
+   565→  const updateItem = (idx: number, patch: Partial<ItemRow>) => {
+   566→    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+   567→  }
+   568→  const addItem = () => setItems((prev) => [...prev, { category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 }])
+   569→  const removeItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx))
+   570→
+   571→  // Sync billing name default to client name when empty
+   572→  useEffect(() => {
+   573→    if (!billingName && clientName) setBillingName(clientName)
+   574→  }, [clientName, billingName])
+   575→
+   576→  const validate = (): string | null => {
+   577→    if (!challanNumber.trim()) return 'Challan number is required'
+   578→    if (!clientName.trim()) return 'Client name is required'
+   579→    if (!clientCity.trim()) return 'Client city is required'
+   580→    const validItems = items.filter((i) => i.itemName.trim())
+   581→    if (validItems.length === 0) return 'Add at least one item with an item name'
+   582→    if (validItems.some((i) => i.quantity <= 0)) return 'All item quantities must be greater than 0'
+   583→    return null
+   584→  }
+   585→
+   586→  const openPaymentModal = () => {
+   587→    const v = validate()
+   588→    if (v) { setErr(v); return }
+   589→    setErr('')
+   590→    setPaymentMode(null)
+   591→    setAdvanceInput('')
+   592→    setShowPaymentModal(true)
+   593→  }
+   594→
+   595→  const confirmSubmit = async () => {
+   596→    if (!paymentMode) return
+   597→    const advance = paymentMode === 'FULL' ? amountTotal : Number(advanceInput) || 0
+   598→    if (paymentMode === 'PARTIAL' && advance <= 0) {
+   599→      setErr('Enter a valid advance amount')
+   600→      return
+   601→    }
+   602→    setSaving(true)
+   603→    setErr('')
+   604→    try {
+   605→      const res = await apiPost('/api/challans/upload', {
+   606→        challanNumber: challanNumber.trim(),
+   607→        quotationNumber: quotationNumber.trim() || undefined,
+   608→        clientName: clientName.trim(),
+   609→        clientCity: clientCity.trim(),
+   610→        clientMobile: clientMobile.trim() || undefined,
+   611→        billingName: billingName.trim() || clientName.trim(),
+   612→        billingAddress: billingAddress.trim() || undefined,
+   613→        shippingAddress: shippingAddress.trim() || undefined,
+   614→        gstNumber: gstNumber.trim() || undefined,
+   615→        expectedDeliveryDate: expectedDate || undefined,
+   616→        amountWithoutGst: amtWithoutGstNum,
+   617→        amountWithGst,
+   618→        gstPercentage: gstNum,
+   619→        amountTotal,
+   620→        packingCharge: packingNum,
+   621→        paymentMode,
+   622→        amountAdvance: advance,
+   623→        items: items
+   624→          .filter((i) => i.itemName.trim())
+   625→          .map((i) => ({
+   626→            category: i.category.trim() || undefined,
+   627→            itemName: i.itemName.trim(),
+   628→            itemNumber: i.itemNumber.trim() || undefined,
+   629→            model: i.model.trim() || undefined,
+   630→            colour: i.colour.trim() || undefined,
+   631→            quantity: i.quantity,
+   632→            unitPrice: i.unitPrice,
+   633→            totalPrice: i.quantity * i.unitPrice,
+   634→          })),
+   635→        pdfFileName: pdfFileName || undefined,
+   636→      }) as UploadResponse
+   637→      setResult(res)
+   638→      setShowPaymentModal(false)
+   639→    } catch (e: unknown) {
+   640→      setErr(e instanceof Error ? e.message : 'Upload failed')
+   641→    } finally {
+   642→      setSaving(false)
+   643→    }
+   644→  }
+   645→
+   646→  const resetForm = () => {
+   647→    setChallanNumber(''); setQuotationNumber(''); setClientName(''); setClientCity(''); setClientMobile('')
+   648→    setBillingName(''); setBillingAddress(''); setShippingAddress(''); setGstNumber(''); setExpectedDate('')
+   649→    setAmountWithoutGst(''); setGstPercentage('18'); setPackingCharge('')
+   650→    setItems([{ category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 }])
+   651→    setPdfFileName('')
+   652→    setResult(null); setErr(''); setPaymentMode(null); setAdvanceInput('')
+   653→    setExtractSuccess(''); setExtractErr(''); setExtractedFileName('')
+   654→  }
+   655→
+   656→  /* ---------- Auto-extract from PDF (VLM) ---------- */
+   657→  const handleExtract = async (file: File) => {
+   658→    setExtracting(true)
+   659→    setExtractErr('')
+   660→    setExtractSuccess('')
+   661→    try {
+   662→      const fd = new FormData()
+   663→      fd.append('file', file)
+   664→      const res = await fetch('/api/challans/extract', { method: 'POST', body: fd })
+   665→      const text = await res.text()
+   666→      const data = text ? JSON.parse(text) : null
+   667→      if (!res.ok) throw new Error(data?.error || `Extraction failed (${res.status})`)
+   668→      const d = data?.data
+   669→      if (!d) throw new Error('Empty extraction response')
+   670→
+   671→      // Section A: Client details
+   672→      if (d.challanNumber) setChallanNumber(d.challanNumber)
+   673→      if (d.quotationNumber) setQuotationNumber(d.quotationNumber)
+   674→      if (d.clientName) setClientName(d.clientName)
+   675→      if (d.clientCity) setClientCity(d.clientCity)
+   676→      if (d.clientMobile) setClientMobile(d.clientMobile)
+   677→      if (d.billingName) setBillingName(d.billingName)
+   678→      if (d.billingAddress) setBillingAddress(d.billingAddress)
+   679→      if (d.shippingAddress) setShippingAddress(d.shippingAddress)
+   680→      if (d.gstNumber) setGstNumber(d.gstNumber)
+   681→      if (d.expectedDeliveryDate) setExpectedDate(d.expectedDeliveryDate)
+   682→
+   683→      // Section B: Financial details
+   684→      if (typeof d.amountWithoutGst === 'number') setAmountWithoutGst(String(d.amountWithoutGst))
+   685→      if (typeof d.gstPercentage === 'number') setGstPercentage(String(d.gstPercentage))
+   686→      if (typeof d.packingCharge === 'number') setPackingCharge(String(d.packingCharge))
+   687→
+   688→      // Section C: Items
+   689→      if (Array.isArray(d.items) && d.items.length > 0) {
+   690→        const mapped: ItemRow[] = d.items.map((it: {
+   691→          category?: string | null
+   692→          itemName?: string | null
+   693→          itemNumber?: string | null
+   694→          model?: string | null
+   695→          colour?: string | null
+   696→          quantity?: number
+   697→          unitPrice?: number
+   698→          totalPrice?: number
+   699→        }) => ({
+   700→          category: it.category || '',
+   701→          itemName: it.itemName || it.model || '',
+   702→          itemNumber: it.itemNumber || '',
+   703→          model: it.model || '',
+   704→          colour: it.colour || '',
+   705→          quantity: Number(it.quantity) || 1,
+   706→          unitPrice: Number(it.unitPrice) || 0,
+   707→        }))
+   708→        setItems(mapped)
+   709→      }
+   710→
+   711→      // Section D: PDF filename
+   712→      if (d.pdfFileName) setPdfFileName(d.pdfFileName)
+   713→      setExtractedFileName(d.pdfFileName || file.name)
+   714→
+   715→      const itemCount = Array.isArray(d.items) ? d.items.length : 0
+   716→      setExtractSuccess(
+   717→        `✓ Challan analyzed! Auto-filled ${itemCount} item${itemCount === 1 ? '' : 's'} and all client/financial details from "${d.pdfFileName || file.name}". Review below and submit.`
+   718→      )
+   719→    } catch (e: unknown) {
+   720→      setExtractErr(e instanceof Error ? e.message : 'PDF analysis failed. You can still fill the form manually below.')
+   721→    } finally {
+   722→      setExtracting(false)
+   723→    }
+   724→  }
+   725→
+   726→  /* ---------- Success view ---------- */
+   727→  if (result) {
+   728→    return <UploadResult result={result} onDone={onDone} onUploadAnother={resetForm} />
+   729→  }
+   730→
+   731→  /* ---------- Form view ---------- */
+   732→  return (
+   733→    <div className="space-y-4">
+   734→      {/* ── Auto-fill from Challan PDF (AI-powered) ── */}
+   735→      <Card className="p-4 border-[#C8922A]/30 bg-gradient-to-br from-[#C8922A]/8 to-transparent">
+   736→        <SectionTitle
+   737→          icon="🤖"
+   738→          title="Auto-fill from Challan PDF"
+   739→          sub="Upload the customer challan — AI extracts all details below automatically"
+   740→          right={extractedFileName ? (
+   741→            <span className="text-[10px] text-[#3CB87A] font-mono truncate max-w-[180px]">📎 {extractedFileName}</span>
+   742→          ) : undefined}
+   743→        />
+   744→        <div className="space-y-3">
+   745→          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+   746→            <div className="flex-1">
+   747→              <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">Challan PDF (Laxree format)</span>
+   748→              <input
+   749→                ref={fileInputRef}
+   750→                type="file"
+   751→                accept="application/pdf"
+   752→                disabled={extracting}
+   753→                onChange={(e) => {
+   754→                  const f = e.target.files?.[0]
+   755→                  if (f) handleExtract(f)
+   756→                  e.target.value = ''
+   757→                }}
+   758→                className="w-full text-[12px] text-[#EDE4D0] file:mr-3 file:rounded-lg file:border-0 file:bg-[#C8922A] file:px-4 file:py-2 file:text-[#07101f] file:font-semibold hover:file:opacity-90 disabled:opacity-50"
+   759→              />
+   760→            </div>
+   761→            {extracting && (
+   762→              <div className="flex items-center gap-2 text-[12px] text-[#E4AF4A] bg-[#C8922A]/10 border border-[#C8922A]/25 rounded-lg px-3 py-2">
+   763→                <span className="inline-block h-3 w-3 rounded-full border-2 border-[#E4AF4A] border-t-transparent animate-spin" />
+   764→                Analyzing challan with AI… (~10–15s)
+   765→              </div>
+   766→            )}
+   767→          </div>
+   768→
+   769→          {extractSuccess && (
+   770→            <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2.5 text-[12px] text-[#3CB87A]">
+   771→              {extractSuccess}
+   772→            </div>
+   773→          )}
+   774→          {extractErr && (
+   775→            <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2.5 text-[12px] text-[#E05050]">
+   776→              ⚠ {extractErr}
+   777→            </div>
+   778→          )}
+   779→
+   780→          <div className="text-[10.5px] text-[#4E6180] leading-relaxed bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2">
+   781→            💡 <strong className="text-[#96A8BF]">How it works:</strong> The AI reads your PDF and fills Sections A (client), B (financials) and C (items) automatically. You can review &amp; edit any field before submitting. The existing manual entry fields below remain fully editable.
+   782→          </div>
+   783→        </div>
+   784→      </Card>
+   785→
+   786→      {/* Section A: Client Details */}
+   787→      <Card className="p-4">
+   788→        <SectionTitle icon="👤" title="A · Client Details" sub="Customer & billing information" />
+   789→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   790→          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0001" required />
+   791→          <Input label="Quotation Number" value={quotationNumber} onChange={setQuotationNumber} placeholder="Q-2026-0001" />
+   792→          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
+   793→          <Input label="Client City" value={clientCity} onChange={setClientCity} placeholder="Mumbai" required />
+   794→          <Input label="Client Mobile" value={clientMobile} onChange={setClientMobile} placeholder="+91…" />
+   795→          <Input label="Billing Name" value={billingName} onChange={setBillingName} placeholder="(defaults to client name)" />
+   796→          <Input label="GST Number" value={gstNumber} onChange={setGstNumber} placeholder="27ABCDE1234F1Z5" />
+   797→          <Input label="Expected Delivery Date" type="date" value={expectedDate} onChange={setExpectedDate} />
+   798→          <div className="md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+   799→            <Textarea label="Billing Address" value={billingAddress} onChange={setBillingAddress} placeholder="Street, city, state, PIN" rows={2} />
+   800→            <Textarea label="Shipping Address" value={shippingAddress} onChange={setShippingAddress} placeholder="Street, city, state, PIN" rows={2} />
+   801→          </div>
+   802→        </div>
+   803→      </Card>
+   804→
+   805→      {/* Section B: Financial Details */}
+   806→      <Card className="p-4">
+   807→        <SectionTitle icon="💰" title="B · Financial Details" sub="GST, packing & totals — auto-calculated" />
+   808→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   809→          <Input label="Amount Without GST (₹)" type="number" value={amountWithoutGst} onChange={setAmountWithoutGst} placeholder="0" step="0.01" />
+   810→          <Input label="GST Percentage (%)" type="number" value={gstPercentage} onChange={setGstPercentage} placeholder="18" step="0.01" />
+   811→          <Input label="Packing Charge (₹)" type="number" value={packingCharge} onChange={setPackingCharge} placeholder="0" step="0.01" />
+   812→          <ReadonlyField label="Amount With GST (auto)" value={fmtINR(amountWithGst)} />
+   813→          <ReadonlyField label="Amount Total (auto)" value={fmtINR(amountTotal)} accent />
+   814→          <div className="flex items-end">
+   815→            <div className="rounded-lg border border-[#4A9EE0]/25 bg-[#4A9EE0]/8 px-3 py-2 text-[11px] text-[#4A9EE0] w-full">
+   816→              🚚 Shipping charge will be decided by Coordinator
+   817→            </div>
+   818→          </div>
+   819→        </div>
+   820→      </Card>
+   821→
+   822→      {/* Section C: Items */}
+   823→      <Card className="p-4">
+   824→        <SectionTitle
+   825→          icon="📦"
+   826→          title="C · Items"
+   827→          sub="Add one row per line item — total price auto-calculated"
+   828→          right={<Btn size="sm" variant="gold" onClick={addItem}>+ Add Item</Btn>}
+   829→        />
+   830→        <div className="space-y-2">
+   831→          {items.map((it, idx) => {
+   832→            const total = (it.quantity || 0) * (it.unitPrice || 0)
+   833→            return (
+   834→              <div key={idx} className="rounded-lg border border-white/7 bg-[#0c1928]/40 p-2.5">
+   835→                <div className="grid grid-cols-12 gap-2 items-end">
+   836→                  <div className="col-span-12 md:col-span-2">
+   837→                    <Input label={idx === 0 ? 'Category' : undefined} value={it.category} onChange={(v) => updateItem(idx, { category: v })} placeholder="Linen" />
+   838→                  </div>
+   839→                  <div className="col-span-12 md:col-span-3">
+   840→                    <Input label={idx === 0 ? 'Item Name *' : undefined} value={it.itemName} onChange={(v) => updateItem(idx, { itemName: v })} placeholder="Bath Towel" required />
+   841→                  </div>
+   842→                  <div className="col-span-6 md:col-span-2">
+   843→                    <Input label={idx === 0 ? 'Item #' : undefined} value={it.itemNumber} onChange={(v) => updateItem(idx, { itemNumber: v })} placeholder="BT-001" />
+   844→                  </div>
+   845→                  <div className="col-span-6 md:col-span-2">
+   846→                    <Input label={idx === 0 ? 'Model' : undefined} value={it.model} onChange={(v) => updateItem(idx, { model: v })} placeholder="LR-BT-700" />
+   847→                  </div>
+   848→                  <div className="col-span-6 md:col-span-1">
+   849→                    <Input label={idx === 0 ? 'Colour' : undefined} value={it.colour} onChange={(v) => updateItem(idx, { colour: v })} placeholder="White" />
+   850→                  </div>
+   851→                  <div className="col-span-3 md:col-span-1">
+   852→                    <Input label={idx === 0 ? 'Qty' : undefined} type="number" value={it.quantity} onChange={(v) => updateItem(idx, { quantity: Number(v) || 0 })} placeholder="0" step="1" />
+   853→                  </div>
+   854→                  <div className="col-span-3 md:col-span-1">
+   855→                    <Input label={idx === 0 ? 'Price ₹' : undefined} type="number" value={it.unitPrice} onChange={(v) => updateItem(idx, { unitPrice: Number(v) || 0 })} placeholder="0" step="0.01" />
+   856→                  </div>
+   857→                </div>
+   858→                <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
+   859→                  <div className="text-[11px] text-[#96A8BF]">
+   860→                    Line total: <span className="font-serif text-[#E4AF4A] font-bold">{fmtINR(total)}</span>
+   861→                  </div>
+   862→                  {items.length > 1 && (
+   863→                    <Btn size="sm" variant="danger" onClick={() => removeItem(idx)}>✕ Remove</Btn>
+   864→                  )}
+   865→                </div>
+   866→              </div>
+   867→            )
+   868→          })}
+   869→        </div>
+   870→        {items.length === 0 && (
+   871→          <EmptyState icon="📦" title="No items yet" sub="Click + Add Item to add a line" />
+   872→        )}
+   873→      </Card>
+   874→
+   875→      {/* Section D: PDF Upload */}
+   876→      <Card className="p-4">
+   877→        <SectionTitle icon="📎" title="D · PDF Upload (optional)" sub="Attach the customer challan / PO PDF" />
+   878→        <label className="block">
+   879→          <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">PDF File</span>
+   880→          <input
+   881→            type="file"
+   882→            accept="application/pdf"
+   883→            onChange={(e) => setPdfFileName(e.target.files?.[0]?.name || '')}
+   884→            className="w-full text-[12px] text-[#EDE4D0] file:mr-3 file:rounded-lg file:border-0 file:bg-[#C8922A] file:px-3 file:py-1.5 file:text-[#07101f] file:font-semibold hover:file:opacity-90"
+   885→          />
+   886→        </label>
+   887→        {pdfFileName && (
+   888→          <div className="mt-2.5 rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2 text-[12px] text-[#3CB87A]">
+   889→            ✓ PDF attached: <span className="font-mono">{pdfFileName}</span>
+   890→          </div>
+   891→        )}
+   892→      </Card>
+   893→
+   894→      {err && (
+   895→        <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>
+   896→      )}
+   897→
+   898→      <div className="flex justify-end gap-2">
+   899→        <Btn onClick={onDone}>Cancel</Btn>
+   900→        <Btn variant="gold" onClick={openPaymentModal}>📤 Submit Challan</Btn>
+   901→      </div>
+   902→
+   903→      {/* Payment Modal */}
+   904→      <Modal open={showPaymentModal} onClose={() => !saving && setShowPaymentModal(false)} title="Confirm Payment" wide>
+   905→        <div className="space-y-4">
+   906→          <div className="rounded-lg border border-white/7 bg-[#0c1928]/60 p-3">
+   907→            <div className="text-[11px] text-[#96A8BF] mb-1">Challan Total</div>
+   908→            <div className="font-serif text-2xl font-bold text-[#E4AF4A]">{fmtINR(amountTotal)}</div>
+   909→            <div className="text-[11px] text-[#4E6180] mt-1">
+   910→              {challanNumber} · {clientName} ({clientCity})
+   911→            </div>
+   912→          </div>
+   913→
+   914→          <div className="text-[12px] text-[#96A8BF]">
+   915→            How much has the client paid? This will be sent to the Account team for verification.
+   916→          </div>
+   917→
+   918→          {!paymentMode && (
+   919→            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   920→              <button
+   921→                onClick={() => setPaymentMode('FULL')}
+   922→                className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-4 py-4 text-left hover:bg-[#3CB87A]/20 transition-colors"
+   923→              >
+   924→                <div className="font-serif text-base font-bold text-[#3CB87A]">✓ Full Amount Paid</div>
+   925→                <div className="text-[11px] text-[#96A8BF] mt-1">Mark advance = {fmtINR(amountTotal)}</div>
+   926→              </button>
+   927→              <button
+   928→                onClick={() => setPaymentMode('PARTIAL')}
+   929→                className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 px-4 py-4 text-left hover:bg-[#E09E3C]/20 transition-colors"
+   930→              >
+   931→                <div className="font-serif text-base font-bold text-[#E09E3C]">🔶 Partial Amount Paid</div>
+   932→                <div className="text-[11px] text-[#96A8BF] mt-1">Enter advance amount received</div>
+   933→              </button>
+   934→            </div>
+   935→          )}
+   936→
+   937→          {paymentMode === 'FULL' && (
+   938→            <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2.5 text-[12px] text-[#3CB87A]">
+   939→              ✓ Full payment mode — advance will be set to <strong>{fmtINR(amountTotal)}</strong>
+   940→            </div>
+   941→          )}
+   942→
+   943→          {paymentMode === 'PARTIAL' && (
+   944→            <div>
+   945→              <Input
+   946→                label="Advance Amount Received (₹)"
+   947→                type="number"
+   948→                value={advanceInput}
+   949→                onChange={setAdvanceInput}
+   950→                placeholder="0"
+   951→                step="0.01"
+   952→                required
+   953→              />
+   954→              <div className="text-[11px] text-[#4E6180] mt-1.5">
+   955→                Remaining after advance: <span className="text-[#E09E3C] font-semibold">{fmtINR(amountTotal - (Number(advanceInput) || 0))}</span>
+   956→              </div>
+   957→            </div>
+   958→          )}
+   959→
+   960→          {err && (
+   961→            <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>
+   962→          )}
+   963→
+   964→          <div className="flex justify-end gap-2 pt-2 border-t border-white/7">
+   965→            <Btn onClick={() => setShowPaymentModal(false)} disabled={saving}>Back</Btn>
+   966→            {paymentMode && (
+   967→              <Btn variant="gold" onClick={confirmSubmit} disabled={saving || (paymentMode === 'PARTIAL' && !advanceInput)}>
+   968→                {saving ? 'Uploading & Analyzing…' : `📤 Confirm & Upload (${paymentMode})`}
+   969→              </Btn>
+   970→            )}
+   971→          </div>
+   972→        </div>
+   973→      </Modal>
+   974→    </div>
+   975→  )
+   976→}
+   977→
+   978→function UploadResult({ result, onDone, onUploadAnother }: {
+   979→  result: UploadResponse
+   980→  onDone: () => void
+   981→  onUploadAnother: () => void
+   982→}) {
+   983→  const { challan, stockSummary } = result
+   984→  const items = challan.challanItems
+   985→
+   986→  return (
+   987→    <Card className="p-4">
+   988→      <div className="text-center mb-4">
+   989→        <div className="text-3xl mb-2">✅</div>
+   990→        <h3 className="font-serif text-lg font-bold text-[#3CB87A]">Challan Uploaded &amp; Analyzed!</h3>
+   991→        <p className="text-[12px] text-[#96A8BF] mt-1">
+   992→          System auto-analyzed {items.length} item(s) against master inventory.
+   993→        </p>
+   994→      </div>
+   995→
+   996→      {/* Stock summary */}
+   997→      <div className="grid grid-cols-3 gap-2 mb-4">
+   998→        <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2.5 text-center">
+   999→          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Available</div>
+  1000→          <div className="font-serif text-xl font-bold text-[#3CB87A]">{stockSummary.available}</div>
+  1001→        </div>
+  1002→        <div className="rounded-lg border border-[#E09E3C]/25 bg-[#E09E3C]/8 px-3 py-2.5 text-center">
+  1003→          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Partial</div>
+  1004→          <div className="font-serif text-xl font-bold text-[#E09E3C]">{stockSummary.onHold}</div>
+  1005→        </div>
+  1006→        <div className="rounded-lg border border-[#E05050]/25 bg-[#E05050]/8 px-3 py-2.5 text-center">
+  1007→          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">25–30 Days</div>
+  1008→          <div className="font-serif text-xl font-bold text-[#E05050]">{stockSummary.willBeAvailable}</div>
+  1009→        </div>
+  1010→      </div>
+  1011→
+  1012→      <div className="rounded-lg border border-[#C8922A]/25 bg-[#C8922A]/8 px-3 py-2 text-[12px] text-[#E4AF4A] mb-4">
+  1013→        📝 <strong>{stockSummary.available}</strong> item(s) available,{' '}
+  1014→        <strong>{stockSummary.onHold}</strong> partial,{' '}
+  1015→        <strong>{stockSummary.willBeAvailable}</strong> will be available in 25–30 days.
+  1016→      </div>
+  1017→
+  1018→      {/* Per-item stock status */}
+  1019→      <SectionTitle icon="📋" title="Per-Item Stock Analysis" sub={`Challan ${challan.challanNumber}`} />
+  1020→      <div className="rounded-lg border border-white/7 overflow-hidden">
+  1021→        <table className="w-full text-[12px]">
+  1022→          <thead>
+  1023→            <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
+  1024→              <th className="py-2 px-3">Item</th>
+  1025→              <th className="py-2 px-3">Model</th>
+  1026→              <th className="py-2 px-3 text-right">Qty</th>
+  1027→              <th className="py-2 px-3 text-right">Available</th>
+  1028→              <th className="py-2 px-3">Stock Status</th>
+  1029→            </tr>
+  1030→          </thead>
+  1031→          <tbody>
+  1032→            {items.map((ci) => (
+  1033→              <tr key={ci.id} className="border-b border-white/5">
+  1034→                <td className="py-2 px-3 text-[#EDE4D0]">
+  1035→                  {ci.itemName}
+  1036→                  {ci.category && <div className="text-[10px] text-[#4E6180]">{ci.category}</div>}
+  1037→                </td>
+  1038→                <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
+  1039→                <td className="py-2 px-3 text-right text-[#EDE4D0] font-semibold">{ci.quantity}</td>
+  1040→                <td className="py-2 px-3 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+  1041→                <td className="py-2 px-3">
+  1042→                  <Badge
+  1043→                    label={ci.stockStatus.replace(/_/g, ' ')}
+  1044→                    color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
+  1045→                  />
+  1046→                  {ci.stockRemark && (
+  1047→                    <div className="text-[10px] text-[#4E6180] mt-0.5">{ci.stockRemark}</div>
+  1048→                  )}
+  1049→                </td>
+  1050→              </tr>
+  1051→            ))}
+  1052→          </tbody>
+  1053→        </table>
+  1054→      </div>
+  1055→
+  1056→      <div className="flex justify-end gap-2 mt-4">
+  1057→        <Btn onClick={onUploadAnother}>📤 Upload Another</Btn>
+  1058→        <Btn variant="gold" onClick={onDone}>Go to My Challans →</Btn>
+  1059→      </div>
+  1060→    </Card>
+  1061→  )
+  1062→}
+  1063→
+  1064→/* ============================================================ */
+  1065→/* Tab 4: My Challans — list with expandable stock status       */
+  1066→/* ============================================================ */
+  1067→
+  1068→function MyChallansTab({ user }: { user: SessionUser }) {
+  1069→  const url = `/api/challans?role=SALES&userId=${user.id}`
+  1070→  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>(url)
+  1071→  const [expanded, setExpanded] = useState<string | null>(null)
+  1072→
+  1073→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+  1074→  if (error) return (
+  1075→    <Card className="p-4">
+  1076→      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{error}</div>
+  1077→    </Card>
+  1078→  )
+  1079→  const challans = data?.challans || []
+  1080→
+  1081→  return (
+  1082→    <Card className="p-4">
+  1083→      <SectionTitle
+  1084→        icon="🧾"
+  1085→        title="My Challans"
+  1086→        sub={`${challans.length} uploaded by you`}
+  1087→        right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+  1088→      />
+  1089→
+  1090→      {challans.length === 0 ? (
+  1091→        <EmptyState icon="🧾" title="No challans yet" sub="Upload your first challan to begin" />
+  1092→      ) : (
+  1093→        <div className="space-y-2">
+  1094→          {challans.map((c) => {
+  1095→            const isOpen = expanded === c.id
+  1096→            const stockCounts = c.challanItems.reduce(
+  1097→              (acc, ci) => {
+  1098→                if (ci.stockStatus === 'AVAILABLE') acc.available += 1
+  1099→                else if (ci.stockStatus === 'ON_HOLD') acc.partial += 1
+  1100→                else if (ci.stockStatus === 'WILL_BE_AVAILABLE') acc.willBe += 1
+  1101→                return acc
+  1102→              },
+  1103→              { available: 0, partial: 0, willBe: 0 },
+  1104→            )
+  1105→
+  1106→            const verifyBadge = c.accountRejected
+  1107→              ? <Badge label="REJECTED" color="#E05050" />
+  1108→              : c.accountVerified
+  1109→                ? <Badge label="VERIFIED" color="#3CB87A" />
+  1110→                : <Badge label="PENDING VERIFY" color="#E09E3C" />
+  1111→
+  1112→            return (
+  1113→              <div key={c.id} className="rounded-lg border border-white/7 bg-[#0c1928]/40 overflow-hidden">
+  1114→                <button
+  1115→                  onClick={() => setExpanded(isOpen ? null : c.id)}
+  1116→                  className="w-full text-left px-3.5 py-3 hover:bg-white/[0.02] transition-colors"
+  1117→                >
+  1118→                  <div className="flex flex-wrap items-center justify-between gap-2">
+  1119→                    <div className="flex items-center gap-2.5 min-w-0">
+  1120→                      <div className="font-mono text-[#E4AF4A] text-[13px] font-semibold">{c.challanNumber}</div>
+  1121→                      <div className="text-[#EDE4D0] text-[13px] truncate">{c.clientName}</div>
+  1122→                      <div className="text-[10px] text-[#4E6180]">{c.clientCity}</div>
+  1123→                    </div>
+  1124→                    <div className="flex items-center gap-2 text-[11px]">
+  1125→                      <span className="text-[#96A8BF] whitespace-nowrap">{fmtDate(c.createdAt)}</span>
+  1126→                      <span className="text-[#EDE4D0] font-semibold whitespace-nowrap">{fmtINR(c.amountTotal)}</span>
+  1127→                      <Badge label={c.paymentStatus} color={STATUS_COLORS[c.paymentStatus]} />
+  1128→                      {verifyBadge}
+  1129→                      <span className="text-[#4E6180] text-[14px] leading-none">{isOpen ? '▾' : '▸'}</span>
+  1130→                    </div>
+  1131→                  </div>
+  1132→                  <div className="flex flex-wrap gap-1.5 mt-2 text-[10px]">
+  1133→                    <span className="text-[#4E6180]">Stock:</span>
+  1134→                    <span className="text-[#3CB87A]">{stockCounts.available} available</span>
+  1135→                    <span className="text-[#E09E3C]">· {stockCounts.partial} partial</span>
+  1136→                    <span className="text-[#E05050]">· {stockCounts.willBe} 25–30 days</span>
+  1137→                    <span className="text-[#4E6180]">· {c.challanItems.length} items total</span>
+  1138→                  </div>
+  1139→                </button>
+  1140→
+  1141→                {isOpen && (
+  1142→                  <div className="border-t border-white/7 px-3.5 py-3 space-y-3">
+  1143→                    {/* Client + payment details */}
+  1144→                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+  1145→                      <DetailPair label="Quotation" value={c.quotationNumber || '—'} />
+  1146→                      <DetailPair label="Mobile" value={c.clientMobile || '—'} />
+  1147→                      <DetailPair label="Expected Delivery" value={fmtDate(c.expectedDeliveryDate)} />
+  1148→                      <DetailPair label="GST Number" value={c.gstNumber || '—'} />
+  1149→                      <DetailPair label="Amount (excl GST)" value={fmtINR(c.amountWithoutGst)} />
+  1150→                      <DetailPair label="Amount (with GST)" value={fmtINR(c.amountWithGst)} />
+  1151→                      <DetailPair label="Packing" value={fmtINR(c.packingCharge)} />
+  1152→                      <DetailPair label="Advance" value={fmtINR(c.amountAdvance)} accent="#3CB87A" />
+  1153→                    </div>
+  1154→
+  1155→                    {c.billingAddress && (
+  1156→                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+  1157→                        <div className="rounded border border-white/7 bg-[#07101f]/60 px-2.5 py-1.5">
+  1158→                          <div className="text-[10px] uppercase text-[#4E6180] mb-0.5">Billing</div>
+  1159→                          <div className="text-[#96A8BF]">{c.billingName || c.clientName}<br />{c.billingAddress}</div>
+  1160→                        </div>
+  1161→                        <div className="rounded border border-white/7 bg-[#07101f]/60 px-2.5 py-1.5">
+  1162→                          <div className="text-[10px] uppercase text-[#4E6180] mb-0.5">Shipping</div>
+  1163→                          <div className="text-[#96A8BF]">{c.shippingAddress || 'Same as billing'}</div>
+  1164→                        </div>
+  1165→                      </div>
+  1166→                    )}
+  1167→
+  1168→                    {/* Per-item stock status */}
+  1169→                    <div className="rounded-lg border border-white/7 overflow-hidden">
+  1170→                      <table className="w-full text-[12px]">
+  1171→                        <thead>
+  1172→                          <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
+  1173→                            <th className="py-2 px-2.5">Item</th>
+  1174→                            <th className="py-2 px-2.5">Model</th>
+  1175→                            <th className="py-2 px-2.5 text-right">Qty</th>
+  1176→                            <th className="py-2 px-2.5 text-right">Avail.</th>
+  1177→                            <th className="py-2 px-2.5">Stock Status</th>
+  1178→                          </tr>
+  1179→                        </thead>
+  1180→                        <tbody>
+  1181→                          {c.challanItems.map((ci) => (
+  1182→                            <tr key={ci.id} className="border-b border-white/5">
+  1183→                              <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
+  1184→                              <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
+  1185→                              <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
+  1186→                              <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+  1187→                              <td className="py-1.5 px-2.5">
+  1188→                                <Badge
+  1189→                                  label={ci.stockStatus.replace(/_/g, ' ')}
+  1190→                                  color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
+  1191→                                />
+  1192→                              </td>
+  1193→                            </tr>
+  1194→                          ))}
+  1195→                        </tbody>
+  1196→                      </table>
+  1197→                    </div>
+  1198→
+  1199→                    {c.accountRejected && c.accountRejectReason && (
+  1200→                      <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[12px] text-[#E05050]">
+  1201→                        ✕ Account rejected: {c.accountRejectReason}
+  1202→                      </div>
+  1203→                    )}
+  1204→
+  1205→                    {c.pdfFileName && (
+  1206→                      <div className="text-[11px] text-[#96A8BF]">📎 PDF: <span className="font-mono text-[#E4AF4A]">{c.pdfFileName}</span></div>
+  1207→                    )}
+  1208→                  </div>
+  1209→                )}
+  1210→              </div>
+  1211→            )
+  1212→          })}
+  1213→        </div>
+  1214→      )}
+  1215→    </Card>
+  1216→  )
+  1217→}
+  1218→
+  1219→function DetailPair({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
+  1220→  return (
+  1221→    <div>
+  1222→      <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">{label}</div>
+  1223→      <div className="text-[12px]" style={{ color: accent || '#EDE4D0' }}>{value}</div>
+  1224→    </div>
+  1225→  )
+  1226→}
+  1227→
+  1228→/* ============================================================ */
+  1229→/* Tab 5: Stock Hold — existing functionality                   */
+  1230→/* ============================================================ */
+  1231→
+  1232→function StockHoldTab() {
+  1233→  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
+  1234→  const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
+  1235→  const { data: holdsData, loading: holdsLoading, refresh: refreshHolds } = useFetch<{ holds: StockHold[] }>('/api/stock-hold?status=ACTIVE')
+  1236→
+  1237→  const [date, setDate] = useState('')
+  1238→  const [category, setCategory] = useState('')
+  1239→  const [itemId, setItemId] = useState('')
+  1240→  const [holdQty, setHoldQty] = useState('')
+  1241→  const [clientName, setClientName] = useState('')
+  1242→  const [advanceAmount, setAdvanceAmount] = useState('')
+  1243→  const [remarks, setRemarks] = useState('')
+  1244→  const [saving, setSaving] = useState(false)
+  1245→  const [releasing, setReleasing] = useState<string | null>(null)
+  1246→  const [err, setErr] = useState('')
+  1247→  const [ok, setOk] = useState('')
+  1248→
+  1249→  const items = itemsData?.items || []
+  1250→  const filteredItems = useMemo(
+  1251→    () => items.filter((i) => !category || i.category === category),
+  1252→    [items, category],
+  1253→  )
+  1254→  const selectedItem = useMemo(() => items.find((i) => i.id === itemId) || null, [items, itemId])
+  1255→  const regRow = useMemo(() => regData?.rows.find((r) => r.id === itemId) || null, [regData, itemId])
+  1256→  const availableAfterHold = regRow?.available ?? null
+  1257→
+  1258→  const holds = holdsData?.holds || []
+  1259→  const summary = useMemo(() => ({
+  1260→    total: holds.length,
+  1261→    totalQty: holds.reduce((s, h) => s + h.holdQty, 0),
+  1262→    totalAdvance: holds.reduce((s, h) => s + h.advanceAmount, 0),
+  1263→  }), [holds])
+  1264→
+  1265→  const qtyNum = Number(holdQty) || 0
+  1266→  const qtyValid = qtyNum > 0 && (availableAfterHold === null || qtyNum <= availableAfterHold)
+  1267→
+  1268→  const reset = () => {
+  1269→    setDate(''); setCategory(''); setItemId(''); setHoldQty(''); setClientName('')
+  1270→    setAdvanceAmount(''); setRemarks('')
+  1271→  }
+  1272→
+  1273→  const submit = async () => {
+  1274→    setErr(''); setOk('')
+  1275→    if (!itemId) { setErr('Select an item'); return }
+  1276→    if (!clientName.trim()) { setErr('Client name is required'); return }
+  1277→    if (qtyNum <= 0) { setErr('Hold quantity must be greater than 0'); return }
+  1278→    if (availableAfterHold !== null && qtyNum > availableAfterHold) {
+  1279→      setErr(`Cannot hold ${qtyNum}. Only ${availableAfterHold} available (after existing holds).`); return
+  1280→    }
+  1281→    setSaving(true)
+  1282→    try {
+  1283→      const res = await apiPost('/api/stock-hold', {
+  1284→        itemId,
+  1285→        holdQty: qtyNum,
+  1286→        clientName: clientName.trim(),
+  1287→        advanceAmount: Number(advanceAmount) || 0,
+  1288→        remarks: remarks || undefined,
+  1289→      })
+  1290→      setOk(res.message || `Held ${qtyNum} unit(s) for ${clientName}`)
+  1291→      reset()
+  1292→      refreshReg(); refreshHolds()
+  1293→    } catch (e: unknown) {
+  1294→      setErr(e instanceof Error ? e.message : 'Failed to place hold')
+  1295→    } finally { setSaving(false) }
+  1296→  }
+  1297→
+  1298→  const release = async (id: string) => {
+  1299→    setErr(''); setOk('')
+  1300→    setReleasing(id)
+  1301→    try {
+  1302→      const res = await apiPatch('/api/stock-hold', { id, status: 'RELEASED' })
+  1303→      setOk(res.message || 'Hold released — stock returned to available pool')
+  1304→      refreshReg(); refreshHolds()
+  1305→    } catch (e: unknown) {
+  1306→      setErr(e instanceof Error ? e.message : 'Failed to release hold')
+  1307→    } finally { setReleasing(null) }
+  1308→  }
+  1309→
+  1310→  return (
+  1311→    <div className="space-y-4">
+  1312→      {/* Summary cards */}
+  1313→      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  1314→        <StatCard label="Active Holds" value={summary.total} accent="#E4AF4A" icon="🔒" />
+  1315→        <StatCard label="Total Held Qty" value={summary.totalQty} accent="#E09E3C" icon="📦" />
+  1316→        <StatCard label="Total Advance" value={fmtINR(summary.totalAdvance)} accent="#3CB87A" icon="💰" />
+  1317→      </div>
+  1318→
+  1319→      <Card className="p-4">
+  1320→        <SectionTitle icon="🔒" title="Place Stock Hold" sub="Reserve stock against advance payment — held units excluded from outward availability" />
+  1321→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+  1322→          <Input label="Date" type="date" value={date} onChange={setDate} />
+  1323→          <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
+  1324→            options={[{ value: '', label: '— All Categories —' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]} />
+  1325→          <Select label="Item" value={itemId} onChange={setItemId} required
+  1326→            options={[{ value: '', label: '— Select Item —' }, ...filteredItems.map((it) => ({
+  1327→              value: it.id,
+  1328→              label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
+  1329→            }))]} />
+  1330→          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
+  1331→          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
+  1332→          <div>
+  1333→            <Input label="Hold Quantity" type="number" value={holdQty} onChange={setHoldQty} placeholder="0" required step="1" />
+  1334→            {itemId && (
+  1335→              <div className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${
+  1336→                availableAfterHold === null ? 'text-[#96A8BF]' :
+  1337→                availableAfterHold <= 0 ? 'text-[#E05050]' :
+  1338→                availableAfterHold <= (regRow?.minStock || 0) ? 'text-[#E09E3C]' :
+  1339→                'text-[#3CB87A]'
+  1340→              }`}>
+  1341→                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+  1342→                Available (after holds): <span className="font-semibold">{availableAfterHold ?? '…'}</span>
+  1343→                {regRow && <>
+  1344→                  <span className="text-[#4E6180]">· balance: {regRow.balance}</span>
+  1345→                  {regRow.onHold > 0 && <span className="text-[#E09E3C]">· already held: {regRow.onHold}</span>}
+  1346→                </>}
+  1347→                {holdQty && !qtyValid && availableAfterHold !== null && (
+  1348→                  <span className="ml-1 text-[#E05050]">· exceeds available</span>
+  1349→                )}
+  1350→              </div>
+  1351→            )}
+  1352→          </div>
+  1353→          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
+  1354→          <Input label="Advance Amount (₹)" type="number" value={advanceAmount} onChange={setAdvanceAmount} placeholder="0" step="0.01" />
+  1355→          <div className="md:col-span-2 lg:col-span-3">
+  1356→            <Textarea label="Remarks" value={remarks} onChange={setRemarks} placeholder="Optional — lead time, expected conversion date, etc." rows={2} />
+  1357→          </div>
+  1358→        </div>
+  1359→
+  1360→        {err && <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+  1361→        {ok && <div className="mt-3 rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">✓ {ok}</div>}
+  1362→
+  1363→        <div className="flex justify-end gap-2 mt-4">
+  1364→          <Btn onClick={reset} disabled={saving}>Clear</Btn>
+  1365→          <Btn variant="gold" onClick={submit} disabled={saving || !itemId || !qtyValid}>
+  1366→            {saving ? 'Placing Hold…' : '🔒 Place Hold'}
+  1367→          </Btn>
+  1368→        </div>
+  1369→      </Card>
+  1370→
+  1371→      <Card className="p-4">
+  1372→        <SectionTitle icon="📋" title="Active Stock Holds" sub={`${holds.length} active reservation(s)`} right={
+  1373→          <Btn size="sm" onClick={refreshHolds}>↻ Refresh</Btn>
+  1374→        } />
+  1375→        {holdsLoading ? <div className="text-center py-6 text-[#96A8BF] text-sm">Loading…</div> :
+  1376→         holds.length === 0 ? <EmptyState icon="🔒" title="No active holds" sub="Place a hold above to reserve stock" /> : (
+  1377→          <div className="overflow-x-auto -mx-4 px-4">
+  1378→            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-white/7">
+  1379→              <table className="w-full text-[12px]">
+  1380→                <thead className="sticky top-0 bg-[#111f32] z-10">
+  1381→                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+  1382→                    <th className="py-2 px-3">Date</th>
+  1383→                    <th className="py-2 px-3">Item</th>
+  1384→                    <th className="py-2 px-3">Model</th>
+  1385→                    <th className="py-2 px-3">Colour</th>
+  1386→                    <th className="py-2 px-3 text-right">Hold Qty</th>
+  1387→                    <th className="py-2 px-3">Client</th>
+  1388→                    <th className="py-2 px-3 text-right">Advance ₹</th>
+  1389→                    <th className="py-2 px-3 text-right">Available</th>
+  1390→                    <th className="py-2 px-3">Status</th>
+  1391→                    <th className="py-2 px-3 text-right">Actions</th>
+  1392→                  </tr>
+  1393→                </thead>
+  1394→                <tbody>
+  1395→                  {holds.map((h) => {
+  1396→                    const itemBalance = h.item?.currentStock ?? 0
+  1397→                    const availableNow = itemBalance - h.holdQty
+  1398→                    return (
+  1399→                      <tr key={h.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+  1400→                        <td className="py-2 px-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(h.date)}</td>
+  1401→                        <td className="py-2 px-3 text-[#EDE4D0]">{h.itemName}</td>
+  1402→                        <td className="py-2 px-3 text-[#96A8BF] font-mono">{h.model || '—'}</td>
+  1403→                        <td className="py-2 px-3 text-[#96A8BF]">{h.colour || '—'}</td>
+  1404→                        <td className="py-2 px-3 text-right text-[#E09E3C] font-semibold">{h.holdQty}</td>
+  1405→                        <td className="py-2 px-3 text-[#EDE4D0]">{h.clientName}</td>
+  1406→                        <td className="py-2 px-3 text-right text-[#3CB87A]">{fmtINR(h.advanceAmount)}</td>
+  1407→                        <td className="py-2 px-3 text-right text-[#96A8BF]">{availableNow}</td>
+  1408→                        <td className="py-2 px-3"><Badge label={h.status} color={HOLD_STATUS_COLOR[h.status]} /></td>
+  1409→                        <td className="py-2 px-3 text-right">
+  1410→                          {h.status === 'ACTIVE' ? (
+  1411→                            <Btn size="sm" variant="danger" disabled={releasing === h.id} onClick={() => release(h.id)}>
+  1412→                              {releasing === h.id ? 'Releasing…' : 'Release'}
+  1413→                            </Btn>
+  1414→                          ) : <span className="text-[#4E6180] text-[11px]">—</span>}
+  1415→                        </td>
+  1416→                      </tr>
+  1417→                    )
+  1418→                  })}
+  1419→                </tbody>
+  1420→              </table>
+  1421→            </div>
+  1422→          </div>
+  1423→        )}
+  1424→      </Card>
+  1425→    </div>
+  1426→  )
+  1427→}
+  1428→
+  1429→/* ============================================================ */
+  1430→/* Shared read-only display field                               */
+  1431→/* ============================================================ */
+  1432→
+  1433→function ReadonlyField({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  1434→  return (
+  1435→    <label className="block">
+  1436→      <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">{label}</span>
+  1437→      <div
+  1438→        className={`w-full rounded-lg border px-3 py-2 text-[13px] font-mono ${
+  1439→          accent
+  1440→            ? 'border-[#C8922A]/40 bg-[#C8922A]/8 text-[#E4AF4A] font-bold'
+  1441→            : 'border-white/10 bg-[#0c1928]/60 text-[#EDE4D0]'
+  1442→        }`}
+  1443→      >
+  1444→        {value}
+  1445→      </div>
+  1446→    </label>
+  1447→  )
+  1448→}
+  1449→

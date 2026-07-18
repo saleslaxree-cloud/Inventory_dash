@@ -1,0 +1,722 @@
+     1→'use client'
+     2→import { useMemo, useState } from 'react'
+     3→import { apiPost, useFetch } from '../use-fetch'
+     4→import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, StatCard, Textarea } from '../ui'
+     5→import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
+     6→
+     7→/* ================================================================== */
+     8→/* Types — full challan shape returned by /api/challans               */
+     9→/* ================================================================== */
+    10→
+    11→type ChallanItem = {
+    12→  id: string
+    13→  category: string | null
+    14→  itemName: string
+    15→  itemNumber: string | null
+    16→  model: string | null
+    17→  colour: string | null
+    18→  quantity: number
+    19→  unitPrice: number
+    20→  totalPrice: number
+    21→  status: string
+    22→  stockStatus: string
+    23→}
+    24→
+    25→type Challan = {
+    26→  id: string
+    27→  challanNumber: string
+    28→  quotationNumber: string | null
+    29→  clientName: string
+    30→  clientCity: string
+    31→  clientMobile: string | null
+    32→  expectedDeliveryDate: string | null
+    33→  // Billing & shipping
+    34→  billingName: string | null
+    35→  billingAddress: string | null
+    36→  shippingAddress: string | null
+    37→  gstNumber: string | null
+    38→  // Financial breakdown
+    39→  amountWithoutGst: number
+    40→  amountWithGst: number
+    41→  gstPercentage: number
+    42→  amountTotal: number
+    43→  amountAdvance: number
+    44→  amountReceived: number
+    45→  packingCharge: number
+    46→  paymentType: string
+    47→  paymentStatus: string
+    48→  paymentMode: string | null
+    49→  // Account verification
+    50→  accountVerified: boolean
+    51→  accountVerifiedAt: string | null
+    52→  accountVerifiedBy: { name: string; role: string } | null
+    53→  accountRejected: boolean
+    54→  accountRejectReason: string | null
+    55→  // E-way / invoice bills
+    56→  ewayBillNo: string | null
+    57→  ewayBillFile: string | null
+    58→  invoiceNo: string | null
+    59→  invoiceFile: string | null
+    60→  billsUploadedAt: string | null
+    61→  billsUploadedBy: { name: string; role: string } | null
+    62→  // Meta
+    63→  status: string
+    64→  createdAt: string
+    65→  uploadedBy: { name: string; role: string }
+    66→  challanItems: ChallanItem[]
+    67→}
+    68→
+    69→const ACCOUNT_ACCENT = '#3CB87A'
+    70→
+    71→/* ================================================================== */
+    72→/* Main dashboard                                                     */
+    73→/* ================================================================== */
+    74→
+    75→export function AccountDashboard({ user, activeTab }: {
+    76→  user: SessionUser
+    77→  activeTab: string
+    78→  onTabChange: (id: string) => void
+    79→}) {
+    80→  return (
+    81→    <div className="space-y-4">
+    82→      {activeTab === 'dashboard' && <DashboardTab user={user} />}
+    83→      {activeTab === 'pending'   && <PendingTab user={user} />}
+    84→      {activeTab === 'partial'   && <PartialTab />}
+    85→      {activeTab === 'fullpaid'  && <FullPaidTab />}
+    86→      {activeTab === 'bills'     && <BillsTab user={user} />}
+    87→    </div>
+    88→  )
+    89→}
+    90→
+    91→/* ================================================================== */
+    92→/* 1. Dashboard Tab — overview with StatCards + attention list         */
+    93→/* ================================================================== */
+    94→
+    95→function DashboardTab({ user }: { user: SessionUser }) {
+    96→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
+    97→
+    98→  const stats = useMemo(() => {
+    99→    const all = data?.challans || []
+   100→    const pending    = all.filter((c) => !c.accountVerified && !c.accountRejected && c.status === 'UPLOADED')
+   101→    const partial    = all.filter((c) => c.paymentStatus === 'PARTIAL' && c.accountVerified)
+   102→    const fullPaid   = all.filter((c) => c.paymentStatus === 'PAID' && c.accountVerified)
+   103→    const totalAmt   = all.reduce((s, c) => s + (c.amountTotal || 0), 0)
+   104→    const totalRecv  = all.reduce((s, c) => s + (c.amountReceived || 0), 0)
+   105→    return { all, pending, partial, fullPaid, totalAmt, totalRecv }
+   106→  }, [data])
+   107→
+   108→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading dashboard…</div>
+   109→  if (!data) return null
+   110→
+   111→  return (
+   112→    <div className="space-y-4">
+   113→      {/* Welcome banner */}
+   114→      <Card className="p-4">
+   115→        <SectionTitle icon="👋" title={`Welcome, ${user.name}`} sub="Account Team — verify payments, generate e-way & item bills" right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>} />
+   116→      </Card>
+   117→
+   118→      {/* StatCards */}
+   119→      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+   120→        <StatCard label="Total Challans"     value={stats.all.length}                       sub="All time"          accent={ACCOUNT_ACCENT} icon="📦" />
+   121→        <StatCard label="Pending Approval"   value={stats.pending.length}                   sub="Awaiting verify"   accent="#E09E3C"        icon="⏳" />
+   122→        <StatCard label="Partial Paid"       value={stats.partial.length}                   sub="Balance due"       accent="#E09E3C"        icon="🔶" />
+   123→        <StatCard label="Full Paid"          value={stats.fullPaid.length}                  sub="Completed"         accent={ACCOUNT_ACCENT} icon="✅" />
+   124→        <StatCard label="Total Amount"       value={fmtINR(stats.totalAmt)}                 sub="Invoiced value"    accent="#E4AF4A"        icon="💰" />
+   125→        <StatCard label="Total Received"     value={fmtINR(stats.totalRecv)}                sub="Bank receipts"     accent={ACCOUNT_ACCENT} icon="🏦" />
+   126→      </div>
+   127→    </div>
+   128→  )
+   129→}
+   130→
+   131→/* ================================================================== */
+   132→/* 2. Pending Approval Tab — full details + approve / reject          */
+   133→/* ================================================================== */
+   134→
+   135→function PendingTab({ user }: { user: SessionUser }) {
+   136→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans?status=UPLOADED')
+   137→
+   138→  const [approveSel, setApproveSel] = useState<Challan | null>(null)
+   139→  const [rejectSel, setRejectSel]   = useState<Challan | null>(null)
+   140→  const [received, setReceived]     = useState('')
+   141→  const [rejectReason, setRejectReason] = useState('')
+   142→  const [saving, setSaving]         = useState(false)
+   143→  const [err, setErr]               = useState('')
+   144→
+   145→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading pending approvals…</div>
+   146→  if (!data) return null
+   147→
+   148→  // Pending = status UPLOADED + not verified + not rejected
+   149→  const pending = data.challans.filter((c) => !c.accountVerified && !c.accountRejected)
+   150→
+   151→  const openApprove = (c: Challan) => {
+   152→    setApproveSel(c)
+   153→    setReceived(String(c.amountAdvance || 0))
+   154→    setErr('')
+   155→  }
+   156→
+   157→  const submitApprove = async () => {
+   158→    if (!approveSel) return
+   159→    const amt = Number(received)
+   160→    if (!amt || amt <= 0) { setErr('Enter a valid amount received in bank'); return }
+   161→    setSaving(true); setErr('')
+   162→    try {
+   163→      await apiPost(`/api/challans/${approveSel.id}/verify-payment`, { verified: true, receivedAmount: amt })
+   164→      setApproveSel(null); setReceived('')
+   165→      refresh()
+   166→    } catch (e: unknown) {
+   167→      setErr(e instanceof Error ? e.message : 'Failed to approve')
+   168→    } finally { setSaving(false) }
+   169→  }
+   170→
+   171→  const submitReject = async () => {
+   172→    if (!rejectSel) return
+   173→    if (!rejectReason.trim()) { setErr('Reject reason is required'); return }
+   174→    setSaving(true); setErr('')
+   175→    try {
+   176→      await apiPost(`/api/challans/${rejectSel.id}/verify-payment`, { verified: false, rejectReason: rejectReason.trim() })
+   177→      setRejectSel(null); setRejectReason('')
+   178→      refresh()
+   179→    } catch (e: unknown) {
+   180→      setErr(e instanceof Error ? e.message : 'Failed to reject')
+   181→    } finally { setSaving(false) }
+   182→  }
+   183→
+   184→  return (
+   185→    <div className="space-y-4">
+   186→      <Card className="p-4">
+   187→        <SectionTitle
+   188→          icon="⏳"
+   189→          title="Pending Payment Approval"
+   190→          sub={`${pending.length} challan(s) uploaded by Sales — verify bank receipt & approve`}
+   191→          right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+   192→        />
+   193→        {pending.length === 0 ? (
+   194→          <EmptyState icon="✅" title="Nothing pending" sub="All uploaded challans have been verified" />
+   195→        ) : (
+   196→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+   197→            {pending.map((c) => (
+   198→              <PendingChallanCard
+   199→                key={c.id}
+   200→                challan={c}
+   201→                approverName={user.name}
+   202→                onApprove={() => openApprove(c)}
+   203→                onReject={() => { setRejectSel(c); setRejectReason(''); setErr('') }}
+   204→              />
+   205→            ))}
+   206→          </div>
+   207→        )}
+   208→      </Card>
+   209→
+   210→      {/* Approve modal */}
+   211→      <Modal open={!!approveSel} onClose={() => setApproveSel(null)} title="Approve Payment" wide>
+   212→        {approveSel && (
+   213→          <div className="space-y-4">
+   214→            <ChallanFullDetail challan={approveSel} />
+   215→
+   216→            <div className="rounded-lg border border-[#3CB87A]/20 bg-[#3CB87A]/5 p-3">
+   217→              <div className="grid grid-cols-3 gap-2 text-[11px]">
+   218→                <div><div className="text-[#4E6180]">Total</div><div className="text-[#EDE4D0] font-semibold">{fmtINR(approveSel.amountTotal)}</div></div>
+   219→                <div><div className="text-[#4E6180]">Advance</div><div className="text-[#3CB87A] font-semibold">{fmtINR(approveSel.amountAdvance)}</div></div>
+   220→                <div><div className="text-[#4E6180]">Remaining</div><div className="text-[#E09E3C] font-semibold">{fmtINR(approveSel.amountTotal - Number(received || approveSel.amountAdvance))}</div></div>
+   221→              </div>
+   222→            </div>
+   223→
+   224→            <Input label="Amount Received in Bank (₹)" type="number" value={received} onChange={setReceived} required />
+   225→
+   226→            {Number(received) < approveSel.amountTotal && (
+   227→              <div className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 px-3 py-2 text-[11px] text-[#E09E3C]">
+   228→                ⚠ Partial payment — remaining {fmtINR(approveSel.amountTotal - Number(received))} will be flagged as PARTIAL & sent to Coordinator for follow-up.
+   229→              </div>
+   230→            )}
+   231→            {Number(received) >= approveSel.amountTotal && (
+   232→              <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-[11px] text-[#3CB87A]">
+   233→                ✓ Full payment received — challan will be marked PAID & sent to Coordinator.
+   234→              </div>
+   235→            )}
+   236→
+   237→            {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+   238→
+   239→            <div className="flex justify-end gap-2">
+   240→              <Btn onClick={() => setApproveSel(null)}>Cancel</Btn>
+   241→              <Btn variant="success" onClick={submitApprove} disabled={saving}>
+   242→                {saving ? 'Approving…' : '✓ Approve & Send to Coordinator'}
+   243→              </Btn>
+   244→            </div>
+   245→          </div>
+   246→        )}
+   247→      </Modal>
+   248→
+   249→      {/* Reject modal */}
+   250→      <Modal open={!!rejectSel} onClose={() => setRejectSel(null)} title="Reject Payment">
+   251→        {rejectSel && (
+   252→          <div className="space-y-4">
+   253→            <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+   254→              <div className="font-mono text-[#E4AF4A] text-[13px] font-semibold">{rejectSel.challanNumber}</div>
+   255→              <div className="text-[13px] text-[#EDE4D0]">{rejectSel.clientName}</div>
+   256→              <div className="text-[11px] text-[#96A8BF]">Total {fmtINR(rejectSel.amountTotal)} · Advance {fmtINR(rejectSel.amountAdvance)}</div>
+   257→            </div>
+   258→            <Textarea label="Reject Reason" value={rejectReason} onChange={setRejectReason} placeholder="e.g. Payment not received in bank / amount mismatch…" required rows={4} />
+   259→            <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[11px] text-[#E05050]">
+   260→              ⚠ Challan will be sent back to Sales ({rejectSel.uploadedBy?.name || 'Sales'}) with the reason above.
+   261→            </div>
+   262→            {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+   263→            <div className="flex justify-end gap-2">
+   264→              <Btn onClick={() => setRejectSel(null)}>Cancel</Btn>
+   265→              <Btn variant="danger" onClick={submitReject} disabled={saving}>
+   266→                {saving ? 'Rejecting…' : '✕ Reject & Send Back to Sales'}
+   267→              </Btn>
+   268→            </div>
+   269→          </div>
+   270→        )}
+   271→      </Modal>
+   272→    </div>
+   273→  )
+   274→}
+   275→
+   276→/* Full detail card used in Pending + reused where useful */
+   277→function PendingChallanCard({ challan: c, approverName, onApprove, onReject }: {
+   278→  challan: Challan
+   279→  approverName: string
+   280→  onApprove: () => void
+   281→  onReject: () => void
+   282→}) {
+   283→  return (
+   284→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-4">
+   285→      {/* Header */}
+   286→      <div className="flex items-start justify-between gap-2 mb-3">
+   287→        <div className="min-w-0">
+   288→          <div className="flex items-center gap-2 flex-wrap">
+   289→            <span className="font-mono text-[14px] font-bold text-[#E4AF4A]">{c.challanNumber}</span>
+   290→            {c.quotationNumber && <span className="text-[10px] text-[#96A8BF]">Quote: {c.quotationNumber}</span>}
+   291→          </div>
+   292→          <div className="text-[13px] text-[#EDE4D0] font-medium mt-0.5">{c.clientName}</div>
+   293→          <div className="text-[11px] text-[#96A8BF]">{c.clientCity} · Uploaded by {c.uploadedBy?.name || '—'}</div>
+   294→        </div>
+   295→        <Badge label={c.paymentMode || c.paymentType} color={STATUS_COLORS[c.paymentMode || c.paymentType] || STATUS_COLORS[c.paymentStatus]} />
+   296→      </div>
+   297→
+   298→      {/* Billing + shipping */}
+   299→      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] mb-3">
+   300→        <DetailRow label="Billing Name"    value={c.billingName || c.clientName} />
+   301→        <DetailRow label="GST Number"      value={c.gstNumber || '—'} />
+   302→        <DetailRow label="Billing Address" value={c.billingAddress || '—'} />
+   303→        <DetailRow label="Shipping Address" value={c.shippingAddress || '—'} />
+   304→        <DetailRow label="Expected Delivery" value={fmtDate(c.expectedDeliveryDate)} />
+   305→        <DetailRow label="Mobile"           value={c.clientMobile || '—'} />
+   306→      </div>
+   307→
+   308→      {/* Financial breakdown */}
+   309→      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3 mb-3">
+   310→        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+   311→          <Money label="Amount (no GST)"  value={c.amountWithoutGst} />
+   312→          <Money label={`GST @ ${c.gstPercentage}%`} value={c.amountWithGst - c.amountWithoutGst} />
+   313→          <Money label="Amount + GST"     value={c.amountWithGst} />
+   314→          <Money label="Packing Charge"   value={c.packingCharge} />
+   315→          <Money label="Total Amount"     value={c.amountTotal} accent={ACCOUNT_ACCENT} />
+   316→          <Money label="Advance Paid"     value={c.amountAdvance} accent={ACCOUNT_ACCENT} />
+   317→          <Money label="Remaining"        value={c.amountTotal - c.amountAdvance} accent="#E09E3C" />
+   318→          <Money label="Payment Mode"     valueStr={c.paymentMode || '—'} />
+   319→        </div>
+   320→      </div>
+   321→
+   322→      {/* Items */}
+   323→      <div className="mb-3">
+   324→        <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-1.5">Items ({c.challanItems.length})</div>
+   325→        <div className="rounded-lg border border-white/7 overflow-x-auto">
+   326→          <table className="w-full text-[11px]">
+   327→            <thead className="bg-white/[0.03] text-[#96A8BF]">
+   328→              <tr>
+   329→                <th className="text-left px-2 py-1.5 font-medium">Item</th>
+   330→                <th className="text-left px-2 py-1.5 font-medium">Model</th>
+   331→                <th className="text-right px-2 py-1.5 font-medium">Qty</th>
+   332→                <th className="text-right px-2 py-1.5 font-medium">Unit Price</th>
+   333→                <th className="text-right px-2 py-1.5 font-medium">Total</th>
+   334→              </tr>
+   335→            </thead>
+   336→            <tbody className="text-[#EDE4D0]">
+   337→              {c.challanItems.map((it) => (
+   338→                <tr key={it.id} className="border-t border-white/5">
+   339→                  <td className="px-2 py-1.5">{it.itemName}{it.itemNumber && <span className="text-[#4E6180]"> · #{it.itemNumber}</span>}</td>
+   340→                  <td className="px-2 py-1.5 text-[#96A8BF]">{it.model || '—'}</td>
+   341→                  <td className="px-2 py-1.5 text-right">{it.quantity}</td>
+   342→                  <td className="px-2 py-1.5 text-right">{fmtINR(it.unitPrice)}</td>
+   343→                  <td className="px-2 py-1.5 text-right font-semibold">{fmtINR(it.totalPrice)}</td>
+   344→                </tr>
+   345→              ))}
+   346→            </tbody>
+   347→          </table>
+   348→        </div>
+   349→      </div>
+   350→
+   351→      {/* Actions */}
+   352→      <div className="flex gap-2">
+   353→        <Btn variant="success" size="sm" className="flex-1" onClick={onApprove}>✓ Approve Payment</Btn>
+   354→        <Btn variant="danger"  size="sm" onClick={onReject}>✕ Reject</Btn>
+   355→      </div>
+   356→      <div className="text-[10px] text-[#4E6180] mt-2">
+   357→        On approve: sent to Coordinator by <span className="text-[#96A8BF]">{approverName}</span> at <span className="text-[#96A8BF]">{new Date().toLocaleString('en-IN')}</span>
+   358→      </div>
+   359→    </div>
+   360→  )
+   361→}
+   362→
+   363→/* Full-detail block used inside approve modal */
+   364→function ChallanFullDetail({ challan: c }: { challan: Challan }) {
+   365→  return (
+   366→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+   367→      <div className="font-mono text-[#E4AF4A] text-[13px] font-semibold mb-2">{c.challanNumber} {c.quotationNumber && <span className="text-[#96A8BF] text-[11px]">· Quote: {c.quotationNumber}</span>}</div>
+   368→      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+   369→        <DetailRow label="Client Name"      value={c.clientName} />
+   370→        <DetailRow label="Billing Name"     value={c.billingName || c.clientName} />
+   371→        <DetailRow label="Client City"      value={c.clientCity} />
+   372→        <DetailRow label="GST Number"       value={c.gstNumber || '—'} />
+   373→        <DetailRow label="Billing Address"  value={c.billingAddress || '—'} />
+   374→        <DetailRow label="Shipping Address" value={c.shippingAddress || '—'} />
+   375→        <DetailRow label="Expected Delivery" value={fmtDate(c.expectedDeliveryDate)} />
+   376→        <DetailRow label="Uploaded By"      value={c.uploadedBy?.name || '—'} />
+   377→      </div>
+   378→    </div>
+   379→  )
+   380→}
+   381→
+   382→/* ================================================================== */
+   383→/* 3. Partial Paid Tab — outstanding balances + WhatsApp follow-up    */
+   384→/* ================================================================== */
+   385→
+   386→function PartialTab() {
+   387→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
+   388→
+   389→  const partials = useMemo(() => {
+   390→    const all = data?.challans || []
+   391→    return all
+   392→      .filter((c) => c.paymentStatus === 'PARTIAL' && c.accountVerified)
+   393→      .map((c) => {
+   394→        const verifiedAt = c.accountVerifiedAt ? new Date(c.accountVerifiedAt) : null
+   395→        const daysSince = verifiedAt ? Math.floor((Date.now() - verifiedAt.getTime()) / (1000 * 60 * 60 * 24)) : 0
+   396→        return { challan: c, daysSince }
+   397→      })
+   398→      .sort((a, b) => b.daysSince - a.daysSince)
+   399→  }, [data])
+   400→
+   401→  const totalRemaining = partials.reduce((s, p) => s + (p.challan.amountTotal - p.challan.amountReceived), 0)
+   402→  const totalReceived  = partials.reduce((s, p) => s + p.challan.amountReceived, 0)
+   403→
+   404→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading partial payments…</div>
+   405→  if (!data) return null
+   406→
+   407→  return (
+   408→    <div className="space-y-4">
+   409→      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+   410→        <StatCard label="Partial Challans" value={partials.length}       sub="Awaiting balance"   accent="#E09E3C" icon="🔶" />
+   411→        <StatCard label="Total Received"   value={fmtINR(totalReceived)} sub="From partials"      accent={ACCOUNT_ACCENT} icon="🏦" />
+   412→        <StatCard label="Total Remaining"  value={fmtINR(totalRemaining)} sub="Outstanding"       accent="#E05050" icon="⏳" />
+   413→        <StatCard label="Avg Aging"        value={partials.length ? Math.round(partials.reduce((s,p)=>s+p.daysSince,0)/partials.length) + 'd' : '0d'} sub="Since verification" accent="#E09E3C" icon="📅" />
+   414→      </div>
+   415→
+   416→      <Card className="p-4">
+   417→        <SectionTitle
+   418→          icon="🔶"
+   419→          title="Partial Paid Challans"
+   420→          sub="Verified challans with outstanding balance — follow up via WhatsApp"
+   421→          right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+   422→        />
+   423→        {partials.length === 0 ? (
+   424→          <EmptyState icon="✅" title="No partial payments" sub="All verified challans are fully paid" />
+   425→        ) : (
+   426→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+   427→            {partials.map(({ challan: c, daysSince }) => (
+   428→              <PartialCard key={c.id} challan={c} daysSince={daysSince} />
+   429→            ))}
+   430→          </div>
+   431→        )}
+   432→      </Card>
+   433→    </div>
+   434→  )
+   435→}
+   436→
+   437→function PartialCard({ challan: c, daysSince }: { challan: Challan; daysSince: number }) {
+   438→  const remaining = c.amountTotal - c.amountReceived
+   439→
+   440→  const waLink = () => {
+   441→    const phone = (c.clientMobile || '').replace(/\D/g, '')
+   442→    const msg = `Dear ${c.billingName || c.clientName},
+   443→
+   444→This is a gentle reminder from Laxree regarding the pending payment for challan ${c.challanNumber}.
+   445→
+   446→Payment Summary:
+   447→• Total Amount: ${fmtINR(c.amountTotal)}
+   448→• Received: ${fmtINR(c.amountReceived)}
+   449→• Remaining Balance: ${fmtINR(remaining)}
+   450→
+   451→Kindly arrange the balance payment at your earliest convenience. For any queries, please reply to this message.
+   452→
+   453→Thank you for your business!`
+   454→    return phone
+   455→      ? `https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${encodeURIComponent(msg)}`
+   456→      : `https://wa.me/?text=${encodeURIComponent(msg)}`
+   457→  }
+   458→
+   459→  const agingColor = daysSince > 14 ? '#E05050' : daysSince > 7 ? '#E09E3C' : ACCOUNT_ACCENT
+   460→
+   461→  return (
+   462→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+   463→      <div className="flex items-start justify-between gap-2 mb-2">
+   464→        <div className="min-w-0">
+   465→          <div className="font-mono text-[13px] font-semibold text-[#E4AF4A]">{c.challanNumber}</div>
+   466→          <div className="text-[13px] text-[#EDE4D0] truncate">{c.clientName} · {c.clientCity}</div>
+   467→          <div className="text-[10px] text-[#96A8BF]">
+   468→            Verified by {c.accountVerifiedBy?.name || 'Account'} · {fmtDate(c.accountVerifiedAt)}
+   469→          </div>
+   470→        </div>
+   471→        <span
+   472→          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+   473→          style={{ background: `${agingColor}22`, color: agingColor, border: `1px solid ${agingColor}33` }}
+   474→        >
+   475→          {daysSince}d aging
+   476→        </span>
+   477→      </div>
+   478→
+   479→      <div className="grid grid-cols-3 gap-2 text-[11px] mb-3">
+   480→        <div><div className="text-[#4E6180]">Total</div><div className="text-[#EDE4D0] font-semibold">{fmtINR(c.amountTotal)}</div></div>
+   481→        <div><div className="text-[#4E6180]">Received</div><div className="text-[#3CB87A] font-semibold">{fmtINR(c.amountReceived)}</div></div>
+   482→        <div><div className="text-[#4E6180]">Remaining</div><div className="text-[#E05050] font-bold text-[13px]">{fmtINR(remaining)}</div></div>
+   483→      </div>
+   484→
+   485→      <div className="flex gap-2">
+   486→        <Btn
+   487→          variant="gold"
+   488→          size="sm"
+   489→          className="flex-1"
+   490→          onClick={() => window.open(waLink(), '_blank', 'noopener,noreferrer')}
+   491→        >
+   492→          📱 Follow Up (WhatsApp)
+   493→        </Btn>
+   494→        {!c.clientMobile && <span className="text-[10px] text-[#E09E3C] self-center">No mobile</span>}
+   495→      </div>
+   496→    </div>
+   497→  )
+   498→}
+   499→
+   500→/* ================================================================== */
+   501→/* 4. Full Paid Tab — completed payments                              */
+   502→/* ================================================================== */
+   503→
+   504→function FullPaidTab() {
+   505→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
+   506→
+   507→  const fullPaid = useMemo(() => {
+   508→    const all = data?.challans || []
+   509→    return all
+   510→      .filter((c) => c.paymentStatus === 'PAID' && c.accountVerified)
+   511→      .sort((a, b) => (b.accountVerifiedAt || '').localeCompare(a.accountVerifiedAt || ''))
+   512→  }, [data])
+   513→
+   514→  const totalReceived = fullPaid.reduce((s, c) => s + c.amountReceived, 0)
+   515→
+   516→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading completed payments…</div>
+   517→  if (!data) return null
+   518→
+   519→  return (
+   520→    <div className="space-y-4">
+   521→      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+   522→        <StatCard label="Full Paid Challans" value={fullPaid.length}        sub="Completed"      accent={ACCOUNT_ACCENT} icon="✅" />
+   523→        <StatCard label="Total Received"     value={fmtINR(totalReceived)}  sub="All settled"    accent={ACCOUNT_ACCENT} icon="💰" />
+   524→        <StatCard label="Bills Uploaded"     value={fullPaid.filter((c) => !!c.ewayBillNo && !!c.invoiceNo).length} sub="E-Way + Invoice" accent="#E4AF4A" icon="🧾" />
+   525→      </div>
+   526→
+   527→      <Card className="p-4">
+   528→        <SectionTitle
+   529→          icon="✅"
+   530→          title="Full Paid Challans"
+   531→          sub="Completed payments — bank receipt verified"
+   532→          right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+   533→        />
+   534→        {fullPaid.length === 0 ? (
+   535→          <EmptyState icon="✅" title="No completed payments yet" sub="Verified & fully paid challans will appear here" />
+   536→        ) : (
+   537→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+   538→            {fullPaid.map((c) => <FullPaidCard key={c.id} challan={c} />)}
+   539→          </div>
+   540→        )}
+   541→      </Card>
+   542→    </div>
+   543→  )
+   544→}
+   545→
+   546→function FullPaidCard({ challan: c }: { challan: Challan }) {
+   547→  const hasEway   = !!c.ewayBillNo || !!c.ewayBillFile
+   548→  const hasInvoice = !!c.invoiceNo || !!c.invoiceFile
+   549→
+   550→  return (
+   551→    <div className="rounded-lg border border-[#3CB87A]/15 bg-[#3CB87A]/[0.03] p-3">
+   552→      <div className="flex items-start justify-between gap-2 mb-2">
+   553→        <div className="min-w-0">
+   554→          <div className="font-mono text-[13px] font-semibold text-[#E4AF4A]">{c.challanNumber}</div>
+   555→          <div className="text-[13px] text-[#EDE4D0] truncate">{c.clientName} · {c.clientCity}</div>
+   556→          <div className="text-[10px] text-[#96A8BF]">
+   557→            Approved by {c.accountVerifiedBy?.name || 'Account'} at {fmtDate(c.accountVerifiedAt)} {c.accountVerifiedAt && new Date(c.accountVerifiedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+   558→          </div>
+   559→        </div>
+   560→        <Badge label="PAID" color={STATUS_COLORS.PAID} />
+   561→      </div>
+   562→
+   563→      <div className="grid grid-cols-2 gap-2 text-[11px] mb-3">
+   564→        <div><div className="text-[#4E6180]">Total Amount</div><div className="text-[#EDE4D0] font-semibold">{fmtINR(c.amountTotal)}</div></div>
+   565→        <div><div className="text-[#4E6180]">Received</div><div className="text-[#3CB87A] font-semibold">{fmtINR(c.amountReceived)}</div></div>
+   566→        <div><div className="text-[#4E6180]">Billing Name</div><div className="text-[#EDE4D0] truncate">{c.billingName || c.clientName}</div></div>
+   567→        <div><div className="text-[#4E6180]">GST Number</div><div className="text-[#EDE4D0] truncate">{c.gstNumber || '—'}</div></div>
+   568→      </div>
+   569→
+   570→      <div className="flex items-center gap-1.5">
+   571→        <Badge label={hasEway ? 'E-Way ✓' : 'E-Way ✗'}    color={hasEway ? ACCOUNT_ACCENT : '#4E6180'} />
+   572→        <Badge label={hasInvoice ? 'Invoice ✓' : 'Invoice ✗'} color={hasInvoice ? ACCOUNT_ACCENT : '#4E6180'} />
+   573→      </div>
+   574→    </div>
+   575→  )
+   576→}
+   577→
+   578→/* ================================================================== */
+   579→/* 5. E-Way / Item Bill Tab — upload bills per verified challan        */
+   580→/* ================================================================== */
+   581→
+   582→function BillsTab({ user }: { user: SessionUser }) {
+   583→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans?accountVerified=true')
+   584→
+   585→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading verified challans…</div>
+   586→  if (!data) return null
+   587→
+   588→  const verified = data.challans
+   589→
+   590→  return (
+   591→    <Card className="p-4">
+   592→      <SectionTitle
+   593→        icon="🧾"
+   594→        title="E-Way Bills & Item Bills"
+   595→        sub={`${verified.length} verified challan(s) — generate / upload bills`}
+   596→        right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
+   597→      />
+   598→      {verified.length === 0 ? (
+   599→        <EmptyState icon="🧾" title="No verified challans" sub="Approve a payment first to enable bill upload" />
+   600→      ) : (
+   601→        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+   602→          {verified.map((c) => (
+   603→            <BillsCard key={c.id} challan={c} user={user} onSaved={refresh} />
+   604→          ))}
+   605→        </div>
+   606→      )}
+   607→    </Card>
+   608→  )
+   609→}
+   610→
+   611→function BillsCard({ challan: c, user, onSaved }: { challan: Challan; user: SessionUser; onSaved: () => void }) {
+   612→  const [ewayNo, setEwayNo]       = useState(c.ewayBillNo || '')
+   613→  const [ewayFile, setEwayFile]   = useState(c.ewayBillFile || '')
+   614→  const [invNo, setInvNo]         = useState(c.invoiceNo || '')
+   615→  const [invFile, setInvFile]     = useState(c.invoiceFile || '')
+   616→  const [saving, setSaving]       = useState(false)
+   617→  const [err, setErr]             = useState('')
+   618→  const [ok, setOk]               = useState('')
+   619→
+   620→  const hasEway    = !!c.ewayBillNo || !!c.ewayBillFile
+   621→  const hasInvoice = !!c.invoiceNo || !!c.invoiceFile
+   622→
+   623→  const save = async () => {
+   624→    setErr(''); setOk('')
+   625→    if (!ewayNo && !ewayFile && !invNo && !invFile) {
+   626→      setErr('Enter at least one bill number or filename')
+   627→      return
+   628→    }
+   629→    setSaving(true)
+   630→    try {
+   631→      await apiPost(`/api/challans/${c.id}/bills`, {
+   632→        ewayBillNo: ewayNo || undefined,
+   633→        ewayBillFile: ewayFile || undefined,
+   634→        invoiceNo: invNo || undefined,
+   635→        invoiceFile: invFile || undefined,
+   636→      })
+   637→      setOk('Bills uploaded successfully')
+   638→      onSaved()
+   639→    } catch (e: unknown) {
+   640→      setErr(e instanceof Error ? e.message : 'Failed to upload')
+   641→    } finally { setSaving(false) }
+   642→  }
+   643→
+   644→  return (
+   645→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
+   646→      {/* Header */}
+   647→      <div className="flex items-start justify-between gap-2 mb-3">
+   648→        <div className="min-w-0">
+   649→          <div className="font-mono text-[13px] font-semibold text-[#E4AF4A]">{c.challanNumber}</div>
+   650→          <div className="text-[13px] text-[#EDE4D0] truncate">{c.clientName} · {c.clientCity}</div>
+   651→          <div className="text-[10px] text-[#96A8BF]">
+   652→            Total {fmtINR(c.amountTotal)} · Paid {fmtINR(c.amountReceived)} · {c.paymentStatus}
+   653→          </div>
+   654→        </div>
+   655→        <div className="flex flex-col items-end gap-1">
+   656→          <Badge label={hasEway ? 'E-Way ✓' : 'E-Way ✗'}    color={hasEway ? ACCOUNT_ACCENT : '#4E6180'} />
+   657→          <Badge label={hasInvoice ? 'Invoice ✓' : 'Invoice ✗'} color={hasInvoice ? ACCOUNT_ACCENT : '#4E6180'} />
+   658→        </div>
+   659→      </div>
+   660→
+   661→      {/* E-Way section */}
+   662→      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3 mb-2">
+   663→        <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🚚 E-Way Bill</div>
+   664→        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+   665→          <Input label="E-Way Bill Number" value={ewayNo} onChange={setEwayNo} placeholder="EWB-000000000" />
+   666→          <Input label="E-Way Bill File (filename)" value={ewayFile} onChange={setEwayFile} placeholder="eway-bill.pdf" />
+   667→        </div>
+   668→      </div>
+   669→
+   670→      {/* Invoice section */}
+   671→      <div className="rounded-lg border border-white/7 bg-[#0c1928] p-3 mb-3">
+   672→        <div className="text-[10px] uppercase tracking-wider text-[#E4AF4A] font-semibold mb-2">🧾 Item Bill / Invoice</div>
+   673→        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+   674→          <Input label="Invoice Number" value={invNo} onChange={setInvNo} placeholder="INV-2026-0001" />
+   675→          <Input label="Invoice File (filename)" value={invFile} onChange={setInvFile} placeholder="invoice.pdf" />
+   676→        </div>
+   677→      </div>
+   678→
+   679→      {/* Footer info */}
+   680→      {c.billsUploadedAt && c.billsUploadedBy && (
+   681→        <div className="text-[10px] text-[#4E6180] mb-2">
+   682→          Last uploaded by <span className="text-[#96A8BF]">{c.billsUploadedBy.name}</span> at <span className="text-[#96A8BF]">{fmtDate(c.billsUploadedAt)} {new Date(c.billsUploadedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+   683→        </div>
+   684→      )}
+   685→
+   686→      {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050] mb-2">{err}</div>}
+   687→      {ok && <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A] mb-2">✓ {ok}</div>}
+   688→
+   689→      <Btn variant="success" size="sm" className="w-full" onClick={save} disabled={saving}>
+   690→        {saving ? 'Uploading…' : '📤 Upload Bills'}
+   691→      </Btn>
+   692→      <div className="text-[10px] text-[#4E6180] mt-2 text-center">
+   693→        Will be recorded as uploaded by <span className="text-[#96A8BF]">{user.name}</span>
+   694→      </div>
+   695→    </div>
+   696→  )
+   697→}
+   698→
+   699→/* ================================================================== */
+   700→/* Small shared helpers                                               */
+   701→/* ================================================================== */
+   702→
+   703→function DetailRow({ label, value }: { label: string; value: string }) {
+   704→  return (
+   705→    <div className="min-w-0">
+   706→      <div className="text-[10px] uppercase text-[#4E6180] tracking-wide">{label}</div>
+   707→      <div className="text-[12px] text-[#EDE4D0] break-words">{value}</div>
+   708→    </div>
+   709→  )
+   710→}
+   711→
+   712→function Money({ label, value, valueStr, accent }: { label: string; value?: number; valueStr?: string; accent?: string }) {
+   713→  return (
+   714→    <div>
+   715→      <div className="text-[#4E6180] text-[10px] uppercase tracking-wide">{label}</div>
+   716→      <div className="font-semibold" style={{ color: accent || '#EDE4D0' }}>
+   717→        {valueStr !== undefined ? valueStr : fmtINR(value || 0)}
+   718→      </div>
+   719→    </div>
+   720→  )
+   721→}
+   722→

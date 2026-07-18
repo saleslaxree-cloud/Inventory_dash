@@ -1,0 +1,973 @@
+     1→---
+     2→Task ID: v4-audit
+     3→Agent: main (Z.ai Code)
+     4→Task: Full system audit & upgrade — remove old person names, use department names, add Admin credential, password change, fix bugs, clean cache/unused code, make all data real & working.
+     5→
+     6→Work Log:
+     7→- Cleaned cache: .next, node_modules/.cache, temp screenshots, old HTML preview file
+     8→- Audited codebase: found 5 bugs (broken POST in Account MessagesTab, EditItem creates-new instead of update, Support date bug, PHOTOS_VIDEOS missing from workflow stages, negative pending in analytics)
+     9→- Updated Prisma schema: added ADMIN role, forcePasswordChange field, data default "{}" for WorkflowStage
+    10→- Reset database + re-seeded with 7 users (department names; Owner = "Ashish Agarwal")
+    11→- Updated auth API: login returns forcePasswordChange, added PATCH /api/auth/me for password change
+    12→- Added /api/users/[id]/reset-password (Admin resets user password, forces change)
+    13→- Added /api/items/[id] PATCH (real item editing with inward/outward tracking) + DELETE (soft delete)
+    14→- Added /api/users PATCH (Admin toggles user active status)
+    15→- Fixed Account MessagesTab: removed broken apiPost call, proper PATCH for mark-read
+    16→- Fixed IT Manager EditItemForm: uses PATCH /api/items/[id] instead of creating new
+    17→- Fixed Support pending dispatch: fmtDate(c) → fmtDate(c.expectedDeliveryDate)
+    18→- Fixed analytics: Math.max(0, totalPending) prevents negative
+    19→- Fixed Coordinator PhotosTab: only marks PHOTOS_VIDEOS done (DISPATCH handled by Support)
+    20→- Added PHOTOS_VIDEOS stage to initial workflow creation in challan upload
+    21→- Built AdminDashboard: System Overview (KPIs, users by role, challans by status), User Management (reset password, toggle active), All Challans, All Items (read-only), All Messages
+    22→- Built PasswordChangeModal: forced on first login (forcePasswordChange=true), can't be dismissed until changed
+    23→- Updated AppShell: added password change button (🔑) in sidebar, force-change badge in topbar
+    24→- Updated LoginScreen: 7 roles including Admin, shows default credentials + first-login warning
+    25→- Updated page.tsx: ADMIN role routing, onPasswordChanged handler to refresh session
+    26→- Verified with Agent Browser: Admin login + force password change + Admin dashboard (7 users, 6 pending pw, 35 items, ₹2,85,000 revenue); Owner login + password change + Owner dashboard (Ashish Agarwal in sidebar, analytics data loading); User Management tab showing all department-named users
+    27→
+    28→Stage Summary:
+    29→- 7 roles operational: Admin, Owner (Ashish Agarwal), Sales/Account/Coordinator/Support/IT (department names)
+    30→- Password: Admin=admin123 (now admin456), Owner=laxree123 (now owner123), others=laxree123 (force change on login)
+    31→- All bugs fixed, lint clean, no runtime errors
+    32→- All data real & working: 35 items, 1059 stock, 1 challan, analytics flowing
+    33→- Admin can reset any user's password + enable/disable accounts
+    34→- Force password change on first login for all accounts
+    35→
+    36→---
+    37→Task ID: v5-login-fix
+    38→Agent: main (Z.ai Code)
+    39→Task: Fix login flow — remove forced password change on login. Admin sets passwords, users login directly. Admin can change any user's password.
+    40→
+    41→Work Log:
+    42→- Identified issue: seed had forcePasswordChange=true for all users, causing PasswordChangeModal to auto-open on login (open={pwModal || forcePw})
+    43→- Updated prisma/seed.ts: set forcePasswordChange=false for all 7 users; upsert now force-updates password/name/role/phone/active on existing records
+    44→- Updated src/components/laxree/app-shell.tsx: removed forcePw variable and forced modal trigger; PasswordChangeModal now only opens when user clicks 🔑 button; removed "Change Password" badge from topbar
+    45→- Updated src/components/laxree/login-screen.tsx: replaced "⚠ First login requires password change" warning with "✓ Login directly — Admin can change passwords anytime"
+    46→- Updated src/components/laxree/password-change-modal.tsx: changed warning text from "must change before continuing" to "keep your account secure" (now optional, not forced)
+    47→- Updated src/app/api/users/[id]/reset-password/route.ts: set forcePasswordChange=false when admin resets password (user can login directly with new password)
+    48→- Updated src/components/laxree/dashboards/admin.tsx: removed "Pending Pw Change" stat card (replaced with "Low Stock"); removed "Pw Status" column; merged into single "Status" column; renamed "🔑 Reset" button to "🔑 Change Pw"; updated modal title to "Change Password"; updated success message to "User can login with new password"
+    49→- Reset database: deleted db/custom.db (correct location, not prisma/dev.db), ran db:push + seed
+    50→- Restarted dev server (needed to clear cached PrismaClient connection to old database)
+    51→- Verified with Agent Browser:
+    52→  * Owner login (owner@laxree.com / laxree123) → goes directly to Owner dashboard, no password modal
+    53→  * Admin login (admin@laxree.com / admin123) → goes directly to Admin dashboard, no password modal
+    54→  * Admin → User Management → "🔑 Change Pw" on Account user → set "newpass123" → success
+    55→  * Verified old password (laxree123) now fails for Account user, new password (newpass123) works with forcePasswordChange=false
+    56→  * Owner dashboard shows real data: 35 items, ₹2,85,000 revenue, 1 challan
+    57→  * No console errors, no forced password change anywhere
+    58→
+    59→Stage Summary:
+    60→- Login now works directly — no forced password change on first login or after admin reset
+    61→- Admin can change any user's password from User Management (🔑 Change Pw button)
+    62→- Users can change their own password via 🔑 button in sidebar (optional, not forced)
+    63→- All 7 users have forcePasswordChange=false; passwords: admin=admin123, owner/others=laxree123
+    64→- Database reset with fresh seed; dev server restarted to pick up new DB
+    65→- All data real & working (35 items, 1 challan, analytics flowing)
+    66→
+    67→---
+    68→Task ID: audit-html-extract
+    69→Agent: general-purpose
+    70→Task: Extract all business logic, fields, data structures from original HTML file `/home/z/my-project/upload/LaxRee_Inventory_2026-06-18 (1) (3).html`
+    71→
+    72→Work Log:
+    73→- Read existing worklog.md to learn that v4-audit + v5-login-fix agents already built a multi-role Next.js app (Admin, Owner=Ashish Agarwal, Sales, Account, Coordinator, Support, IT) with Prisma + 35 seeded items.
+    74→- Confirmed file is 18,079 lines / 1.1MB, single-page HTML inventory system (no Next.js, no auth, no roles).
+    75→- Read head + body markup (lines 1-935) to map sidebar nav (Dashboard, Inward, Outward, Stock Hold, Stock Register, Product History, Activity Log, Forecast, Analytics), topbar (Google Drive Sync, Quick stats, Export Excel/PDF/HTML, Clock).
+    76→- Parsed JS `const CAT_ITEMS` (line 15805) — 8 master categories with all items.
+    77→- Parsed JS `const ITEM_MODELS` (line 15862) — full model/SKU list per item.
+    78→- Parsed JS `const EMBEDDED_DATA` (line 15915) via Python json.loads — 293 SKU variants, 358 inward log entries, 122 outward log entries, 0 holds, next UID=516.
+    79→- Extracted all unique client/hotel names from outward log (35+ hotels), all challan numbers, all dates.
+    80→- Read Inward Entry form (line 1337) — 11 fields; Outward Entry form (line 1485) — 13 fields + Available Balance bar + Hold info chip; Stock Hold form (line 1618) — 9 fields including advance amount.
+    81→- Read Forecast engine (line 16862) — 90-day window, status thresholds (<30 critical, 30-90 watch, >90 safe, nodata), reorder level = avgPerDay × 30.
+    82→- Read Analytics panel (line 15538) — 4 KPIs, 4 Chart.js charts (Inward vs Outward weekly bars, Category doughnut, Top 10 dispatched horizontal bars, Stock health doughnut), Top Clients bar list, Monthly summary table.
+    83→- Read export functions (lines 17056-17640) — CSV, HTML-with-data, Print/PDF report, 3-sheet Excel with formulas (Inward Log, Outward Log, Balance Stock).
+    84→- Read Persistence/merge strategy (line 15917) — localStorage (`lx5_*` keys) layered on EMBEDDED_DATA seed, merged by uid.
+    85→- Searched for keywords: purchase request, PR, dispatch checklist, coordinator, transporter, vehicle, driver, lead time, google review, feedback, e-way bill, packing, QC, IT manager, owner dashboard — NONE exist in HTML (all are part of new spec the previous agents invented/added).
+    86→- Extracted base64 logo image (circular gold-bordered brand mark) used in both page-loader and sidebar.
+    87→- Counted totals: 8 categories, ~95 unique item types, ~290 model/SKU codes, 91 unique colour/variant strings, 37,797 total inward qty, 2,829 total dispatched qty, 34,968 total balance qty, 107 low/out-of-stock SKUs.
+    88→
+    89→Stage Summary:
+    90→
+    91→### 1. BRANDING / THEME / LOGO
+    92→- Title: "LaxRee Hotel — Inventory Management System v2"
+    93→- Brand name: **LaxRee Hotel**  ·  Tagline: **"Hotel Supplies Redefined"**
+    94→- Footer version string: "v2.0 · IndexedDB + localStorage" (misnomer — actually localStorage only)
+    95→- Theme: **"Deep Navy + Gold — Luxury Hotel"**
+    96→- Color palette (CSS variables in :root):
+    97→  - Navy: `--navy:#07101f`, `--navy2:#0c1928`, `--navy3:#111f32`, `--navy4:#192b42`, `--navy5:#1e3350`
+    98→  - Gold: `--gold:#C8922A`, `--gold2:#E4AF4A`, `--gold3:#F5D27A`, `--gold4:#fcefc9`
+    99→  - Text: `--text:#EDE4D0`, `--text2:#96A8BF`, `--text3:#4E6180`
+   100→  - Status: success `#3CB87A`, danger `#E05050`, warn `#E09E3C`, info `#4A9EE0`, purple `#9B6ED4`
+   101→- Fonts: **Cormorant Garamond** (serif, for brand name) + **DM Sans** (sans-serif, body/UI)
+   102→- Logo: embedded base64 PNG (circular, gold-bordered, photo-style brand mark) shown in sidebar (74×74px) and full-screen page loader (90×90px, pulsing gold glow animation)
+   103→- Topbar clock shows live date/time (Thursday, 18 June 2026 — file generated date)
+   104→
+   105→### 2. NAVIGATION / TABS (single-role — no auth, no user roles)
+   106→Sidebar sections:
+   107→- **Overview**: Dashboard 📊
+   108→- **Transactions**: Inward Entry 📥, Outward Entry 📤, Stock Hold 🔒 (with badge count)
+   109→- **Records**: Stock Register 📦, Product History 🔍, Activity Log 📋
+   110→- **Analytics**: Forecast 📈, Analytics 📊
+   111→
+   112→### 3. MASTER DATA — Categories & Items
+   113→8 categories defined in `CAT_ITEMS`:
+   114→
+   115→**Room Amenities** (33 items): MiniBar, Tea Kettle, Tea Kettle Tray, Safe Box, Wooden Hanger, Cloth Brush, Shoe Horn, RFID Lock, DND Set, Energy Saver Switch, Gateway Wifi, Key Card, Key Tag, Room Telephone, FM Radio, Room Dustbin, Desktop Accessories - Tissue Box, Desktop Accessories - Remote Holder, Desktop Accessories - Notepad Holder, Desktop Accessories - Accessory Tray, Desktop Accessories - Coaster, Desktop Accessories - Compedium, Spring Mattress, Rollaway Bed, Bed Base, Iron Holder, Steam Iron, Ironing Board, Coat Stand, Baby Cot, Luggage Rack, Emergency Torch, Coffee Mug, Ash Tray
+   116→
+   117→**Bathroom Amenities** (13 items): Hair Dryer, Magnifying Mirror, In-Room Soap Dispenser, Weighing Scale, Paper Dispenser, Hand Dryer, Shower Curtain, Shower Mat, Towel Rack, Towel Rod, Clothesline, Accessory Tray, Handicap Grab Bar
+   118→
+   119→**Lobby Items** (14 items): Housekeeping Trolley, Linen Trolley, Luggage Trolley, Multi Utility Goods Card, Lobby Dustbin, Lobby Soap Dispenser, Que Manager, Floor Signage, Digital Signage, Shoe Polisher, Newspaper Stand, Umbrella Stand, Umbrella Cover Stand, Golf Umbrella
+   120→
+   121→**Banquet Furniture** (11 items): Banquet Chair, Round Table, Rectangle Table, Conference Table, Cocktail Table, Buffet Table, Podium, White Board, Stage, Chair Trolley, Table Trolley
+   122→
+   123→**Linen** (12 items): Bedsheet (Single/Double/King), Duvet, Duvet Cover (Single/Double/King), Pillow, Pillow Cover, Bed Runner, Blanket, Mattress Protector
+   124→
+   125→**Bath Linen** (6 items): Bath Towel, Hand Towel, Face Towel, Bath Robe, Bath Mat, Pool Towel
+   126→
+   127→**Bath Tubs** (2 items): Bath Tub - Free Standing, Bath Tub - With Built-in Faucets
+   128→
+   129→**Spare Parts** (4 items): MiniBar Spare Elements Parts, MiniBar PCB Board, MiniBar Fan, MiniBar Door
+   130→
+   131→`ITEM_MODELS` defines all valid model/SKU codes per item, e.g.:
+   132→- MiniBar: LRMB-126/127/128/129/130/131/132 (7 models)
+   133→- Tea Kettle: LRWT-143 to LRWT-156 (13 models)
+   134→- Tea Kettle Tray: LRWT-157 to LRWT-172 (21 variants including "Tray only", "Service tray only", "Sachet Holder only", "Complete Set")
+   135→- Safe Box: LRSB-201(Black), 202, 203, 204, 206, 209, 211, 212, 213, 214, 216 (11 models)
+   136→- Wooden Hanger: LRWH-226, 227, 228, 231, 233, 234 (with/without clip variants; -B suffix for black)
+   137→- Hair Dryer: LRHD-276, 277, 278, 279, 280, 281, 285, 286, 287
+   138→- RFID Lock: LRFD-605 to LRFD-613, "Encoder (ZFD)", "Encoder (Orbita)"
+   139→- DND Set: LRFD-611, 612, "DND Set (Orbita)", "LRDR-179 IN"
+   140→- Room Telephone: LRDR-181 to LRDR-192 (12 models)
+   141→- Bath Tubs: LRBT-311, 312, 6601-6729 (24 free-standing + 7 built-in faucet variants)
+   142→- Banquet Chair: LRBF-526 to LRBF-530, 542, 543, 544
+   143→- Linen variants: GSM-based (500/600/700/800), Plain White / Stripe / Sateen, Microfibre/Hollow Fibre/Memory Foam
+   144→
+   145→### 4. EMBEDDED SEED DATA (smap) — 293 live SKUs across 6 categories actually stocked
+   146→- Bathroom Amenities: 56 SKUs (Hair Dryer 10, Hand Dryer 11, In-Room Soap Dispenser 14, Accessory Tray 1, Magnifying Mirror 6, Weighing Scale 3, Paper Dispenser 11)
+   147→- Room Amenities: 149 SKUs (Ironing Board 2, Room Dustbin 21, Rollaway Bed 6, Tea Kettle 12, Iron Holder 1, MiniBar 11, Tea Kettle Tray 24, Safe Box 10, Wooden Hanger 13, Cloth Brush 1, Shoe Horn 1, Room Telephone 11, Desktop Accessories - Tissue Box 4, Remote Holder 3, Accessory Tray 2, Notepad Holder 1, Coaster 1, Compedium 1, Coffee Mug 2, Ash Tray 1, Bed Base 1, Spring Mattress 1, Steam Iron 1, Coat Stand 1, Luggage Rack 2, Emergency Torch 4, DND Set 7, Energy Saver Switch 2, RFID Lock 1, Gateway Wifi 1)
+   148→- Lobby Items: 68 SKUs (Shoe Polisher 3, Lobby Dustbin 13, Housekeeping Trolley 10, Lobby Soap Dispenser 13, Luggage Trolley 4, Linen Trolley 2, Que Manager 21, Newspaper Stand 1, Golf Umbrella 1)
+   149→- Bath Tubs: 6 SKUs (Bath Tub - Free Standing)
+   150→- Banquet Furniture: 4 SKUs (Banquet Chair LRBF-542/543/544 WHITE; Stage LRBF-534 8*4 FT)
+   151→- Spare Parts: 10 SKUs (MiniBar Spare Elements Parts, MiniBar PCB Board New/Old Lot, MiniBar Fan variants, MiniBar Door LRMB-126/127/128/129/131)
+   152→- Linen & Bath Linen: 0 SKUs (no stock recorded)
+   153→
+   154→### 5. CLIENTS / HOTELS (from 122 outward entries)
+   155→35+ unique clients including:
+   156→- ARCADIA HOTEL SUPPLIES / Arcadia Hotel Supplies
+   157→- Aashapura Resorts
+   158→- Bhagwati Hospitality
+   159→- CASACONNECT INNOVATIONS PRIVATE LIMITED
+   160→- CHINMAYE HOSPITALITY PRIVATE LIMITED
+   161→- COGNITIVE NEST TECH SOLUTIONS LLP
+   162→- COMPUTER AID
+   163→- Exxat Trading Co
+   164→- Gajdev Aura Llp
+   165→- H Square Living Private Limited
+   166→- HARSH SAINI Hotel Fortuner
+   167→- HOTEL AJ INTERNATIONAL
+   168→- Hotel G G Regency
+   169→- La Sarene Hotels
+   170→- NATURE VALLEY DEVELOPERS PVT.LTD.
+   171→- Orika / Orika club / THE ORIKA CLUB
+   172→- P HOSPITALITY
+   173→- PRITAM BUILDCON PVT LTD
+   174→- Ramnivas Yadav
+   175→- SANSKRITI INTERNATIONAL
+   176→- SANTOSH SINGH JI
+   177→- SHIVAKUMAR
+   178→- SWOSTI PREMIUM LIMITED
+   179→- Uniq Decor and Furniture
+   180→- kAMLESH
+   181→- (plus warehouse-stock-audit pseudo-clients like "Warehouse Updated Invtory", "Stock Audit re updation updated Stock")
+   182→
+   183→### 6. CHALLAN / INVOICE NUMBERING (visible format)
+   184→- Challan prefixes seen: LAPL/, LC-AJMA/, LC-AJML/, LC-GGMP/, LC-JPRL/, LC-JPRR/, LR-AJML/
+   185→- Year-suffix format: /26-27/NNNN (financial year 26-27)
+   186→- Some legacy: /25-26/ (prior FY)
+   187→- Example real challans: `LAPL/26-27/93`, `LC-AJMA/26-27/0001`, `LC-GGMP/26-27/0028`, `LC-JPRL/26-27/0008`, `LC-AJML/26-27/0023`
+   188→
+   189→### 7. INWARD ENTRY FORM FIELDS (line 1337)
+   190→**Product Details (required):** Date, Category, Item, Model/SKU, Colour/Variant (free text), Quantity
+   191→**Billing Info (optional):** Supplier/Vendor, Invoice/Bill No., Remarks
+   192→On submit: stockMap[k].inward += qty; stockMap[k].balance += qty; if new SKU, create record {category, item, model, colour, inward:qty, dispatched:0, balance:qty}; push to inLog with uid, sr, ts.
+   193→
+   194→Inward Log columns (table): Sr | Date | Category | Item | Model | Colour | Qty | Vendor | Invoice | Remarks | Action(delete)
+   195→Filters: search text, category dropdown, date-from, date-to
+   196→
+   197→### 8. OUTWARD ENTRY FORM FIELDS (line 1485)
+   198→**Product Details (required):** Date, Category, Item, Model/SKU, Colour/Variant (dropdown — populated from existing stock), Quantity
+   199→**Available Balance bar:** shows current balance + AVAILABLE/LOW/FULLY-OUT pill, plus "🔒 On Hold: N units / Total Balance: M units" chip if any holds exist for that SKU
+   200→**Client & Billing Info (required):** Client Name, Challan Number, Bill/Invoice Number, Remarks
+   201→Validation: blocks if qty > (balance − held) with message "Cannot issue N — only M available (H on hold)"
+   202→
+   203→Outward Log columns: Sr | Date | Category | Item | Model | Colour | Qty | Bal. | Client | Challan | Bill No. | Remarks | Action(delete)
+   204→
+   205→On submit: stockMap[k].dispatched += qty; stockMap[k].balance -= qty; push to outLog with current balance snapshot.
+   206→
+   207→### 9. STOCK HOLD FORM FIELDS (line 1618)
+   208→Banner: "Hold reserves stock for a client without dispatching. Release the hold when the order is confirmed or cancelled."
+   209→Fields: Date, Client Name (req), Advance Amount (₹, optional), Category (req), Item (req), Model/SKU (req), Colour/Variant (req), Hold Qty (req), Remarks
+   210→Balance bar: "Available (after existing holds)" with AVAILABLE / LOW AVAILABLE / FULLY HELD-OUT pill
+   211→Active Holds table columns: Sr | Date | Client | Category | Item | Model | Colour | Hold Qty | Advance | Remarks | Actions (release/delete)
+   212→Logic: `getAvailAfterHold(m,c) = balance − Σ(hold.qty for same model+colour)`. Blocks if hold qty > avail.
+   213→
+   214→### 10. STOCK REGISTER (line 1664)
+   215→Columns: Sr | Category | Item | Model | Colour | Inward | Dispatched | Balance | On Hold | Available | Status
+   216→Filters: search, category, status (In Stock >10 / Low Stock 1-10 / Out of Stock ≤0)
+   217→Status pills with colored dots: 🟢 In Stock / 🟠 Low Stock / 🔴 Out of Stock
+   218→
+   219→### 11. PRODUCT HISTORY (line 5213)
+   220→Selector: Category → Item → Model → Colour (optional, "All Colours")
+   221→Stats: Total Inward 📥 / Total Outward 📗 / Current Balance 📦 / On Hold 🔒
+   222→History table: Sr | Type (IN/OUT badge) | Date | Model | Colour | Qty | Balance After (running) | Client/Vendor | Challan | Bill No. | Remarks
+   223→Filters: Type (All/IN/OUT), date-from, date-to
+   224→
+   225→### 12. ACTIVITY LOG (line 5334)
+   226→Combined IN+OUT transactions sorted by ts desc.
+   227→Columns: Sr | Type | Date | Category | Item | Model | Colour | Qty | Client | Challan/Invoice (CH: xxx | Bill: xxx) | Remarks | Action(delete)
+   228→Filters: search, type, category, date-from, date-to
+   229→
+   230→### 13. FORECAST ENGINE (line 16862)
+   231→- Window: last 90 days of outward log
+   232→- For each SKU: avgPerDay = totalOut / daySpan (first outward → today)
+   233→- daysLeft = round(balance / avgPerDay)
+   234→- Status thresholds: **critical** (<30 days, red), **warn** (30-90 days, amber), **ok** (>90 days, green), **nodata** (no outward in window, blue)
+   235→- Suggested reorder = round(avgPerDay × 30) — "30-day reorder level"
+   236→- Stat cards: Critical (Urgent replenishment needed) / Watch (Monitor closely) / Safe (Sufficient stock) / No Movement Data (No recent outward)
+   237→- Sections: "🚨 Critical — Depleting Soon (<30 days)" top 8, "📈 Top Moving Items (Last 30 days)" top 8
+   238→- Full Forecast Table: Sr | Category | Item | Model | Colour | Balance | Avg Daily Out | Est. Days Left | Suggested Reorder | Status
+   239→- Sorted by status priority then daysLeft asc
+   240→
+   241→### 14. ANALYTICS PANEL (line 15538)
+   242→Filter bar (6 columns + Reset): Category, Item, Model, Colour/Variant, Date From, Date To. Active filter badge shows "🔍 Filtered: Cat: X · Item: Y · Model: Z · Colour: W".
+   243→
+   244→4 KPI cards:
+   245→- 🟡 Current Balance (total of matched SKUs) — "X SKU(s) matched"
+   246→- 🟢 Avg Daily Dispatch (units/day · N txns in range)
+   247→- 🔴 Out of Stock SKUs (Needs immediate restock)
+   248→- 🔵 Low Stock SKUs (≤10 units remaining)
+   249→
+   250→Stock Depletion Forecast card (only when item/model selected): Item | Model | Colour | Balance | Dispatch Rate | Days Left | Est. Depletion date | Status (Healthy/Critical/Low/Out of Stock — thresholds ≤7 critical, ≤30 low)
+   251→
+   252→4 Chart.js charts:
+   253→1. 📈 Inward vs Outward Trend — grouped bar chart by week
+   254→2. 🍩 Stock Distribution — doughnut by category balance
+   255→3. 🏆 Top Dispatched Items — horizontal bar (top 10)
+   256→4. 💊 Stock Health — doughnut (In Stock / Low Stock / Out of Stock)
+   257→
+   258→Client Analysis: Top 8 Clients by Dispatch Volume (horizontal bar list with % width)
+   259→Monthly Summary Table: Month | Inward Txns | Inward Qty | Outward Txns | Outward Qty | Net Qty
+   260→
+   261→### 15. DASHBOARD (line 936)
+   262→5 stat cards: Total SKUs (gold), In Stock >10 (green), Low Stock 1-10 (amber), Out of Stock ≤0 (red), Active Holds 🔒 (purple)
+   263→With count-up animation on render.
+   264→
+   265→Row 2: "Stock by Category" grid (per-category card with OK/Low/Out pills + bottom 4 lowest items) + "Low Stock Alerts" table (top 10 alerts: Sr | Category | Item | Model | Colour | Bal. | Status)
+   266→Category filter dropdown at top of stock-by-category card.
+   267→
+   268→Row 3: Recent Inward (7 entries with 📥 dot, item+model chip, category·date·colour, +qty) + Recent Outward (7 entries with 📤 dot, item+model, category·date·client·colour, −qty)
+   269→
+   270→### 16. EXPORT FUNCTIONS
+   271→- **CSV** (`exportCSV`): All transactions, columns: Type, Date, Category, Item, Model, Colour, Qty, Balance, Client, Challan, Bill, Vendor, Remarks. Filename: `LaxRee_Inventory_YYYY-MM-DD.csv`.
+   272→- **HTML with data** (`downloadHTML`): Regenerates the entire HTML file with current `stockMap`, `inLog`, `outLog`, `holdLog`, `uid` baked into `EMBEDDED_DATA`. Filename: `LaxRee_Inventory_YYYY-MM-DD.html`.
+   273→- **Print/PDF** (`exportPDF`): Opens new window with branded report (Navy header w/ gold LaxRee logo + "HOTEL SUPPLIES REDEFINED · v2.0"), stats row (Total/In/Low/Out/On Hold), Low/Out alerts table, per-category stock tables. Triggers print dialog.
+   274→- **Excel** (`exportExcel`): 3-sheet `.xls` (XML SpreadsheetML) with auto-formulas:
+   275→  - Sheet 1 "Inward Log": Sr | Date | Category | Item | Model/SKU | Colour | Inward Qty | Running Balance | Vendor | Bill No | Remarks + TOTAL row
+   276→  - Sheet 2 "Outward Log": Sr | Date | Category | Item | Model/SKU | Colour | Outward Qty | Total Dispatched | Balance Remaining | Client | Challan No | Bill No | Remarks + TOTAL row
+   277→  - Sheet 3 "Balance Stock": Sr | Category | Item | Model/SKU | Colour | Total Inward | Dispatched | Balance (=IN-OUT formula) | Status | Health % (formula)
+   278→  - Styles: navy header (#07101f) with gold border (#C8922A), green/red/gold data cells, totals row with gold text on navy
+   279→  - Freeze top row in all sheets
+   280→
+   281→### 17. GOOGLE DRIVE SYNC MODAL (line 17175)
+   282→4-step wizard: (1) Download HTML with data embedded, (2) Open Google Drive & upload, (3) Share link with team, (4) Optional Excel report download.
+   283→
+   284→### 18. PERSISTENCE / DATA MODEL
+   285→- `EMBEDDED_DATA` (baked-in JSON): `{smap, ilog, olog, hlog, uid}` — source-of-truth seed
+   286→- localStorage keys (prefixed `lx5_`): `lx5_ilog`, `lx5_olog`, `lx5_hlog`, `lx5_uid`
+   287→- Merge strategy: start from EMBEDDED_DATA, apply only localStorage entries with `uid > EMBEDDED_DATA.uid` (dedup by uid, sort desc). If file UID > ls UID, clear stale localStorage.
+   288→- Auto-save on every mutation via `save()` — writes all 4 keys + flashes "✓ Saved · HH:MM" indicator.
+   289→- sKey function: `(model||'').trim() + '__' + (colour||'').toUpperCase().trim()` — the SKU key.
+   290→
+   291→### 19. KEY BUSINESS RULES (extracted from code, not from any spec text)
+   292→- **Negative balance allowed** — `MiniBar LRMB-127 BLACK` shows balance=−46 because 46 were dispatched before inward was logged (legacy data issue).
+   293→- **Stock thresholds:** >10 = In Stock, 1-10 = Low Stock, ≤0 = Out of Stock.
+   294→- **Hold blocks outward** — `submitOutward` checks `qty > (balance − held)` and refuses.
+   295→- **Delete reverses stock** — inward delete reduces inward+balance; outward delete reduces dispatched+increases balance; if both inward and dispatched hit 0, the SKU record is deleted from stockMap.
+   296→- **Colour is free text on inward** (auto-uppercased), but dropdown on outward (only existing colours for that model).
+   297→- **Brand colour naming:** "BLACK SHOKIT", "DL ABS+PU", "SS DOUBLE LAYER", "LINE MARBLE FINISH DOUBLE LAYER", "30L GLASS DOOR BLACK", "8*4 FT" (size as colour), "QTY IN SET", "NEW LOT"/"OLD LOT", "POLE SS/BLACK/GOLDEN" — colour field doubles as variant descriptor.
+   298→- **Vendor field optional on inward** (most seed entries have vendor="" — only qty logged).
+   299→- **Client + Challan + Bill all required on outward.**
+   300→
+   301→### 20. FEATURES EXPLICITLY ABSENT FROM ORIGINAL HTML (i.e., introduced by v4-audit agent's spec, not the HTML)
+   302→The HTML contains NO:
+   303→- User authentication, login, roles (Admin/Owner/Sales/Account/Coordinator/Support/IT)
+   304→- Purchase Request (PR) workflow, PR numbers, PR approval
+   305→- Challan upload form with multi-item rows / status workflow
+   306→- Sales dashboard with matched/wrong-model/not-found auto-analysis
+   307→- Account team: payment verification, advance payment tracking, e-way bill, item bill
+   308→- Coordinator workflow: packing, QC, vehicle arrangement, per-item photos/videos
+   309→- Support dispatch checklist: Client Name, Mob, Location, Invoice, Challan, Boxes, Transporter, Vehicle, Driver, Dispatch Date, Lead Time, Ack, Success Delivery, Google Review, Feedback
+   310→- Owner dashboard: current stock, fast-moving items, auto-raise PR, print for purchase team
+   311→- IT Manager: item category/name/model/colour editing, analytics charts
+   312→- "Auto-raise PR when stock below min" rule
+   313→- "Admin verifies only correct items dispatched" rule
+   314→- Min stock field, reorder level field per item (only computed dynamically in forecast as `avgPerDay × 30`)
+   315→- Hotel-specific deployment analytics (no hotel names beyond client field on outward)
+   316→
+   317→These role-based features were ADDED by previous agents (v4-audit) as a new multi-role Next.js redesign layered on top of the inventory data model extracted here. The Next.js seed currently has only 35 items — far fewer than the 293 SKUs in the original HTML.
+   318→
+   319→### 21. RECOMMENDED NEXT ACTIONS (for future agents)
+   320→- Re-seed the Next.js Prisma database from `EMBEDDED_DATA.smap` to get all 293 real SKUs (currently only 35 seeded).
+   321→- Mirror the 8 master categories (CAT_ITEMS) and all ITEM_MODELS as the canonical Item/Model/Colour master data.
+   322→- Port the Forecast engine logic (90-day window, 30-day reorder, critical/watch/safe/nodata statuses) into the Owner dashboard.
+   323→- Port the Analytics panel (4 KPIs + 4 Chart.js charts + Top Clients + Monthly Summary) into the IT Manager dashboard.
+   324→- For the role-based features (PR, dispatch checklist, coordinator workflow, account workflow, support dispatch checklist), they must be designed from scratch using the field lists in the task description — the original HTML provides NO source material for them.
+   325→- Preserve the Deep Navy + Gold theme and Cormorant Garamond / DM Sans fonts in the Next.js UI to maintain brand identity.
+   326→
+   327→---
+   328→Task ID: 6a-it-manager
+   329→Agent: full-stack-developer
+   330→Task: Add Inward Entry, Stock Register, Activity Log, Forecast tabs to IT Manager dashboard
+   331→
+   332→Work Log:
+   333→- Read worklog.md to understand previous work (v4-audit, v5-login-fix, audit-html-extract) — 293 SKUs, real inventory data, navy+gold theme
+   334→- Read existing src/components/laxree/dashboards/it-manager.tsx (5 existing tabs: Item Master, Add Item, Analytics, Users, All Challans) + ui.tsx (Card, Btn, Input, Select, Textarea, StatCard, Badge, Modal, SectionTitle, EmptyState) + types.ts (fmtINR, fmtDate, STATUS_COLORS, SessionUser) + use-fetch.ts (useFetch, apiPost, apiPatch)
+   335→- Inspected backing APIs: GET/POST /api/inward, GET /api/stock-register (with ?category= and ?lowStock= query), GET /api/activity-log (?type=IN|OUT query), GET /api/forecast (returns forecasts[] + summary{critical,warn,ok,nodata,topMoving,criticalItems}), GET /api/items (?category= query)
+   336→- Updated it-manager.tsx:
+   337→  * Added Textarea to ui imports, fmtDate to types imports
+   338→  * Added new types: InwardLog, ActivityLog, StockRow+StockSummary, ForecastRow+ForecastSummary
+   339→  * Added module constants: CATEGORIES (8 master cats), STATUS_COLOR_MAP + STATUS_LABEL_MAP (stock + forecast statuses → colors/labels)
+   340→  * Extended nav array with 4 new tabs (inward 📥, register 📋, activity 📜, forecast 📈) inserted between "Add Item" and "Analytics"
+   341→  * Added 4 new tab render conditions
+   342→  * Implemented InwardTab: form (Date/Category/Item dropdown filtered by category/Model+Colour auto-fill via ReadonlyField/Qty/Vendor/BillNo/Remarks Textarea) → POST /api/inward → refresh inward logs; below: Recent Inward Logs table with sticky header (Date/Category/Item/Model/Colour/Qty/Vendor/BillNo/EnteredBy), max-h-[60vh] scroll
+   343→  * Implemented StockRegisterTab: 6 summary StatCards (Total SKUs/Inward/Dispatched/Balance/On Hold/Available) + category Select + "Low Stock Only" toggle button (URL rebuilt with ?category= + &lowStock=true triggers refetch); full stock table (Sr/Category/Item/Model/Colour/Inward/Dispatched/Balance/On Hold/Available/Status badge) with sticky header + max-h-[60vh] scroll
+   344→  * Implemented ActivityLogTab: 3 type-filter pills (All/IN/OUT, color-coded green/red/gold) rebuild URL with ?type= query; combined table (Date/Type badge/Category/Item/Model/Colour/Qty with +/− sign/Party/Challan/Bill No/Entered By) sticky header + max-h-[60vh] scroll
+   345→  * Implemented ForecastTab: 4 summary StatCards (Critical red / Watch amber / OK green / No Data gray) + Critical Items list (top 8 with daysLeft + balance, sorted ascending) + Top Moving Items list (top 8 by last30Dispatch, numbered) + Full Forecast table sorted by status priority (critical→warn→ok→nodata) then daysLeft asc; columns: Sr/Category/Item/Model/Colour/Balance/Avg/Day/Days Left/Reorder/Status badge
+   346→  * Added small ReadonlyField helper component for the auto-fill Model/Colour displays (styled to match Input but non-editable)
+   347→- Verified with `bun run lint` — clean (no errors, no warnings)
+   348→- Verified dev.log: all 4 APIs (stock-register, forecast, activity-log, items) returning 200; dev server compiled successfully (`✓ Compiled in 303ms`); no runtime errors
+   349→
+   350→Stage Summary:
+   351→- IT Manager dashboard now has 9 tabs total (5 existing + 4 new): Item Master, Add Item, Inward Entry, Stock Register, Activity Log, Forecast, Analytics, Users, All Challans
+   352→- All 4 new tabs follow LaxRee navy+gold theme — no indigo/blue, only gold/green/red/amber/gray for status colors
+   353→- All long tables wrapped in `overflow-x-auto -mx-4 px-4` + `max-h-[60vh] overflow-y-auto` with sticky `<thead>` for scroll-friendly UX on mobile and desktop
+   354→- Responsive grid layouts: summary cards stack 2 cols on mobile, expand to 4-6 cols on lg; forms use md:grid-cols-2 and lg:grid-cols-3
+   355→- InwardTab uses client-side category filtering on a single /api/items fetch (no extra round-trips when category changes); selecting item auto-fills Model + Colour as read-only displays
+   356→- StockRegisterTab and ActivityLogTab rebuild their fetch URLs from filter state so useFetch auto-refetches when filters change
+   357→- ForecastTab sorts forecasts by status priority then daysLeft asc; critical items get red status pills, watch gets amber, ok gets green, no-data gets gray
+   358→- Lint clean, dev server compiles successfully, all backing APIs verified live
+   359→
+   360→---
+   361→Task ID: 6b-sales
+   362→Agent: full-stack-developer
+   363→Task: Add Outward Entry + Stock Hold tabs to Sales dashboard
+   364→
+   365→Work Log:
+   366→- Read worklog.md to understand prior work (v4-audit upgrade, 6a-it-manager added 4 IT tabs). Confirmed 293 SKUs, real inventory data, navy+gold LaxRee theme
+   367→- Read existing src/components/laxree/dashboards/sales.tsx — had 2 tabs (My Challans, Upload Challan) using useFetch/apiPost + Card/Btn/Input/Select/Modal/StatCard/Badge/SectionTitle/EmptyState
+   368→- Verified backing APIs exist (task description said "/api/stock-holds" plural but actual route is "/api/stock-hold" singular — used the actual route):
+   369→  * GET/POST /api/outward — returns { logs: [...] } / { log, message }
+   370→  * GET/POST/PATCH /api/stock-hold — returns { holds: [...] } / { hold, message }; PATCH body { id, status: 'RELEASED'|'CONVERTED' }
+   371→  * GET /api/stock-register — returns { rows: [{ id, available, onHold, balance, minStock, ... }], summary }
+   372→  * GET /api/items — returns { items: [{ id, category, itemName, model, colour, currentStock, ... }] }
+   373→- Updated sales.tsx:
+   374→  * Imports: added `useMemo` from react, `apiPatch` from use-fetch, `Textarea` from ui
+   375→  * Added types: OutwardLog, StockHold, StockRow (for available-stock lookup)
+   376→  * Added module constants: CATEGORIES (8 master cats), HOLD_STATUS_COLOR map (ACTIVE=amber, RELEASED=gray, CONVERTED=green)
+   377→  * Extended nav array with 2 new tabs: `outward` (📤 Outward Entry), `hold` (🔒 Stock Hold)
+   378→  * Added 2 tab render conditions in SalesDashboard
+   379→  * Implemented OutwardTab:
+   380→    - Fetches /api/items (single fetch, client-side category filter via useMemo)
+   381→    - Fetches /api/stock-register (one fetch) → useMemo lookup of available stock for selected item
+   382→    - Fetches /api/outward?limit=100 for recent logs table
+   383→    - Form grid (1/2/3 cols responsive): Date / Category / Item (filtered by category) / Model autofill (ReadonlyField) / Colour autofill (ReadonlyField) / Qty with live "Available: N (held: M)" indicator color-coded red/amber/green / Client Name (required) / Challan Number / Bill Number / Remarks Textarea
+   384→    - Validation: qty > 0 and <= available (also enforced by API)
+   385→    - On submit: POST /api/outward → reset form → refresh stock-register + outward logs → show success message
+   386→    - Recent Outward Logs table (sticky header, max-h-[60vh] overflow-y-auto, overflow-x-auto wrapper): Date / Item / Model / Colour / Qty (red −N) / Client / Challan / Bill No
+   387→  * Implemented StockHoldTab:
+   388→    - Same item/category/available fetch pattern as OutwardTab
+   389→    - 3 summary StatCards: Active Holds (gold) / Total Held Qty (amber) / Total Advance ₹ (green) — computed via useMemo
+   390→    - Form: Date / Category / Item / Model+Colour autofill / Hold Qty with "Available (after holds)" indicator showing balance + already-held breakdown / Client Name (required) / Advance Amount ₹ / Remarks
+   391→    - Validation: holdQty > 0 and <= available-after-holds
+   392→    - On submit: POST /api/stock-hold → reset → refresh register + holds
+   393→    - Active Holds table (sticky header, max-h-[60vh] scroll): Date / Item / Model / Colour / Hold Qty (amber) / Client / Advance ₹ (green) / Available (balance − this hold) / Status badge / Actions (Release button → PATCH /api/stock-hold with status=RELEASED, shows "Releasing…" state, refreshes on success)
+   394→  * Added small ReadonlyField helper (matches the style already used in it-manager.tsx) for auto-filled Model/Colour displays
+   395→  * Kept existing ChallanList, ChallanAnalysis, UploadForm components 100% unchanged
+   396→- Verified with `bun run lint` — clean exit 0 (no errors, no warnings)
+   397→- Verified dev.log: GET / returns 200, dev server compiled successfully (`✓ Compiled in 291ms` then `GET / 200 in 108ms`)
+   398→
+   399→Stage Summary:
+   400→- Sales dashboard now has 4 tabs total: My Challans 🧾, Upload Challan 📤, Outward Entry 📤, Stock Hold 🔒
+   401→- OutwardTab: full dispatch workflow with live available-stock indicator, validation, and recent logs table; reduces current stock automatically via API
+   402→- StockHoldTab: full reservation workflow with summary cards, live available-after-holds indicator, validation, and active holds table with one-click Release action (PATCH status=RELEASED)
+   403→- Both tabs use single fetches of /api/items + /api/stock-register (with useMemo client-side filtering by category) — no extra round-trips when category changes
+   404→- Available-stock indicators are color-coded (red if ≤0, amber if ≤ minStock, green otherwise) — no indigo/blue, strictly gold/green/red/amber/gray per LaxRee theme
+   405→- All long tables wrapped in `overflow-x-auto -mx-4 px-4` + `max-h-[60vh] overflow-y-auto` with sticky `<thead>` (`sticky top-0 bg-[#111f32] z-10`) for scroll-friendly UX
+   406→- Responsive grids: form fields stack 1 col on mobile, 2 on md, 3 on lg; summary StatCards 1 col mobile, 3 cols sm+
+   407→- All existing tabs (My Challans, Upload Challan, ChallanAnalysis modal) preserved unchanged — backward compatible
+   408→- Lint clean, dev server compiles successfully
+   409→
+   410→---
+   411→Task ID: 6c-owner
+   412→Agent: full-stack-developer
+   413→Task: Add Stock Register, Forecast, Activity Log tabs to Owner dashboard
+   414→
+   415→Work Log:
+   416→- Read worklog.md to learn prior work (v4-audit upgrade, v5-login-fix, audit-html-extract with 293 SKUs, 6a-it-manager added 4 IT tabs, 6b-sales added Sales Outward + Stock Hold tabs). Confirmed LaxRee navy+gold theme, real inventory data, existing owner.tsx had 5 tabs.
+   417→- Read existing src/components/laxree/dashboards/owner.tsx (478 lines, 5 tabs: Overview/Current Stock/Fast Moving/Challans/Purchase Requests) + ui.tsx (Card/Btn/Input/Select/Textarea/StatCard/Badge/Modal/SectionTitle/EmptyState) + types.ts (fmtINR/fmtDate/STATUS_COLORS/SessionUser) + use-fetch.ts (useFetch/apiPost/apiPatch)
+   418→- Verified backing APIs exist & return correct shape:
+   419→  * GET /api/stock-register — returns { rows:[{ id, category, itemName, model, colour, unit, inward, dispatched, balance, onHold, available, minStock, fastMoving, status:OK|LOW|OUT_OF_STOCK }], summary:{ totalSKUs, totalInward, totalDispatched, totalBalance, totalOnHold, totalAvailable, outOfStock, lowStock } }; supports ?category= and ?lowStock=true query
+   420→  * GET /api/forecast — returns { forecasts:[{ id, category, itemName, model, colour, balance, held, available, minStock, totalDispatched, avgPerDay, daysLeft, last30Dispatch, suggestedReorder, status:critical|warn|ok|nodata }], summary:{ totalSKUs, critical, warn, ok, nodata, topMoving[8], criticalItems[8] } }
+   421→  * GET /api/activity-log — returns { logs:[{ id, type:IN|OUT, date, category, itemName, model, colour, quantity, unit, party, challanNumber, billNumber, remarks, enteredBy:{name,role} }] }; supports ?type=IN|OUT and ?limit= queries
+   422→- Updated owner.tsx:
+   423→  * Added new types after existing types: StockRow, StockSummary, ForecastRow, ForecastSummary, ActivityLog (matches API shapes above)
+   424→  * Added module constants: STOCK_CATEGORIES (the 6 categories with real inventory: Room Amenities, Bathroom Amenities, Lobby Items, Bath Tubs, Banquet Furniture, Spare Parts — Linen & Bath Linen excluded since they have 0 stock), STATUS_COLOR_MAP (OK/LOW/OUT_OF_STOCK + critical/warn/ok/nodata → LaxRee palette colors), STATUS_LABEL_MAP (short badge labels)
+   425→  * Extended nav array with 3 new tabs after "Purchase Requests": register 📋, forecast 📈, activity 📜
+   426→  * Added 3 new tab render conditions in OwnerDashboard component
+   427→  * Implemented StockRegisterTab:
+   428→    - State: cat (default 'ALL'), lowOnly (default false); URL rebuilt as `/api/stock-register?category=${cat}${lowOnly ? '&lowStock=true' : ''}` so useFetch auto-refetches on filter change
+   429→    - 8 summary StatCards in responsive grid (2 cols mobile → 4 cols md → 8 cols lg): Total SKUs / Inward / Dispatched / Balance / On Hold / Available / Out of Stock / Low Stock
+   430→    - SectionTitle with right-side controls: category Select (ALL + 6 STOCK_CATEGORIES) + "Low Stock Only" toggle button (red when active)
+   431→    - Full table with sticky <thead> (`sticky top-0 bg-[#111f32] z-10`), wrapped in `overflow-x-auto -mx-4 px-4` + `max-h-[60vh] overflow-y-auto`
+   432→    - Columns: Sr / Category / Item / Model / Colour / Inward (green) / Dispatched (red) / Balance (primary) / On Hold (purple) / Available (gold) / Min Stock (muted) / Status badge (color-coded)
+   433→    - EmptyState shown when filters return no rows
+   434→  * Implemented ForecastTab:
+   435→    - State: statusFilter ('ALL'|'critical'|'warn'|'ok'|'nodata', default 'ALL')
+   436→    - 4 summary StatCards (2 cols mobile, 4 cols lg): Critical (red, <30 days) / Watch (amber, 30–90 days) / OK (green, >90 days) / No Data (gray)
+   437→    - Two side-by-side Card sections in lg:grid-cols-2:
+   438→      * Critical Items card — top 8 critical items (from summary.criticalItems, sorted by daysLeft asc) as a table: Item / Model / Balance / Avg/Day / Days Left (red) / Suggested Reorder. EmptyState when none.
+   439→      * Top Moving Items card — top 8 by last30Dispatch (from summary.topMoving) as a table: # / Item / Model / 30d Out (gold) / Balance / Avg/Day. EmptyState when none.
+   440→    - Full Forecast Table card with right-side filter pills (All/Critical/Watch/OK/No Data) — color-tinted when active
+   441→    - Filtered + sorted list (status priority critical→warn→ok→nodata, then daysLeft asc) rendered in sticky-header table (max-h-[60vh] scroll)
+   442→    - Columns: Sr / Category / Item / Model / Colour / Balance / Held (purple) / Available (gold) / Avg/Day / Days Left (red if <30, else status color, bold) / 30d Out / Suggested Reorder / Status badge
+   443→  * Implemented ActivityLogTab:
+   444→    - State: type ('ALL'|'IN'|'OUT', default 'ALL'); URL rebuilt as `/api/activity-log?limit=200${type !== 'ALL' ? `&type=${type}` : ''}` for auto-refetch
+   445→    - Computes 5 derived stats client-side from logs: inCount, outCount, qtyIn, qtyOut (using filter + reduce)
+   446→    - 5 summary StatCards (2 cols mobile, 5 cols md): Total Entries / Inward / Outward / Qty In / Qty Out
+   447→    - SectionTitle with right-side type filter pills (All=gold, IN=green, OUT=red when active)
+   448→    - Combined IN+OUT table with sticky <thead>, max-h-[60vh] scroll, overflow-x-auto wrapper
+   449→    - Columns: Date / Type badge (IN green / OUT red) / Category / Item / Model / Colour / Qty (±sign, green for IN red for OUT) / Party (Client for OUT, Vendor for IN, max-w truncate with title tooltip) / Challan (gold mono) / Bill No / Entered By / Remarks (max-w truncate with title)
+   450→    - EmptyState when no logs match
+   451→- Verified with `bun run lint` — clean exit 0 (no errors, no warnings)
+   452→- Verified dev.log: `✓ Compiled in 220ms`, `✓ Compiled in 211ms`, `GET / 200 in 110ms` after edit — no runtime errors
+   453→
+   454→Stage Summary:
+   455→- Owner dashboard now has 8 tabs total (5 existing + 3 new): Overview 📊, Current Stock 📦, Fast Moving ⚡, Challans 🧾, Purchase Requests 📋, Stock Register 📋, Forecast 📈, Activity Log 📜
+   456→- All 3 new tabs follow LaxRee navy+gold theme — no indigo/blue; status colors strictly gold/green/red/amber/purple(gray for nodata) per LaxRee palette
+   457→- All long tables wrapped in `overflow-x-auto -mx-4 px-4` + `max-h-[60vh] overflow-y-auto` with sticky `<thead>` (`sticky top-0 bg-[#111f32] z-10`) for scroll-friendly UX on mobile and desktop
+   458→- Responsive grids: summary StatCards stack 2 cols on mobile, expand to 4/5/8 cols on md/lg; side-by-side cards stack on mobile, become lg:grid-cols-2 on desktop
+   459→- StockRegisterTab and ActivityLogTab rebuild fetch URLs from filter state so useFetch auto-refetches when filters change; ForecastTab filters client-side from a single /api/forecast fetch
+   460→- StockRegisterTab uses 6 STOCK_CATEGORIES (the ones with actual inventory, excluding Linen & Bath Linen which have 0 stock per audit-html-extract)
+   461→- ForecastTab sorts forecasts by status priority (critical→warn→ok→nodata) then daysLeft asc; Days Left cell turns red when <30 days
+   462→- All existing tabs (Overview, Current Stock, Fast Moving, Challans with detail modal, Purchase Requests with PR form + print modal) preserved unchanged — backward compatible
+   463→- Lint clean, dev server compiles successfully, all backing APIs verified live (200 responses in dev.log)
+   464→
+   465→---
+   466→Task ID: v6-major-upgrade
+   467→Agent: main (Z.ai Code)
+   468→Task: Major system upgrade — port all inventory logic from original HTML file, fix logout visibility, add Inward/Outward/Hold/Forecast/Activity Log features, re-seed with 293 real SKUs
+   469→
+   470→Work Log:
+   471→- Investigated user complaints: logout not visible, data not showing, HTML file logic missing
+   472→- Found original HTML file at /home/z/my-project/upload/ (NOT deleted — 18,079 lines, 1.1MB)
+   473→- Extracted EMBEDDED_DATA.smap: 293 real SKUs across 6 categories (Room Amenities 149, Bathroom Amenities 56, Lobby Items 68, Bath Tubs 6, Banquet Furniture 4, Spare Parts 10)
+   474→- Extracted 13 real hotel client names (P HOSPITALITY, HOTEL AJ INTERNATIONAL, SANSKRITI INTERNATIONAL, THE ORIKA CLUB, SWOSTI PREMIUM LIMITED, ARCADIA HOTEL SUPPLIES, etc.)
+   475→- Extracted 54 real challan numbers (LAPL/26-27/NNN, LC-JPRL/26-27/NNNN, LC-AJMA/26-27/NNNN, LC-AJML/26-27/NNNN, LC-GGMP/26-27/NNNN formats)
+   476→- Phase 1: Fixed logout visibility — replaced tiny icon-only buttons with clear labeled buttons "🔑 Change Password" and "⏻ Logout" in sidebar footer
+   477→- Phase 2-3: Updated Prisma schema — added InwardLog, OutwardLog, StockHold models with proper relations to User and Item
+   478→- Phase 4: Wrote new seed.ts using extracted JSON data — seeded 293 items + 30 inward logs + 40 outward logs (real clients+challans) + 5 stock holds + 1 sample challan (LC-JPRL/26-27/0008 for P HOSPITALITY) + 10 auto-raised PRs for low-stock items
+   479→- Phase 5: Built 5 new API routes:
+   480→  * /api/inward (GET list, POST create — updates item stock +inwardCount)
+   481→  * /api/outward (GET list, POST create — validates available stock after holds, updates item stock -currentStock +outwardCount)
+   482→  * /api/stock-hold (GET list, POST create — validates available, PATCH release/convert)
+   483→  * /api/stock-register (GET — full register with computed held/available/status per SKU + summary)
+   484→  * /api/activity-log (GET — combined IN+OUT sorted by date desc)
+   485→  * /api/forecast (GET — forecast engine: avgPerDay, daysLeft, status critical/warn/ok/nodata, topMoving, criticalItems, suggestedReorder)
+   486→- Phase 6a: IT Manager dashboard — added 4 new tabs (Inward Entry form, Stock Register, Activity Log, Forecast) via subagent
+   487→- Phase 6b: Sales dashboard — added 2 new tabs (Outward Entry form with available stock validation, Stock Hold with release button) via subagent
+   488→- Phase 6c: Owner dashboard — added 3 new tabs (Stock Register, Forecast, Activity Log) via subagent
+   489→- Phase 8: Verified with Agent Browser:
+   490→  * Owner login → Stock Register shows 293 SKUs, 37,797 inward, 34,968 balance, 65 low stock, 6 out of stock
+   491→  * Owner → Forecast shows 4 critical items, top moving items, days-left calculations
+   492→  * Owner → Activity Log shows real transactions with P HOSPITALITY, Arcadia Supplies, Room Dustbin, Hair Dryer
+   493→  * Owner → Logout button clearly visible with text label, works correctly
+   494→  * IT Manager → Inward Entry form with Category/Item dropdowns, Vendor, Bill No, auto-fill Model/Colour
+   495→  * IT Manager → Stock Register, Activity Log, Forecast all showing real data
+   496→  * Sales → Outward Entry form with client name, challan, bill fields + available stock indicator
+   497→  * Sales → Stock Hold showing real clients (SWOSTI, ORIKA, SANSKRITI) with Release buttons
+   498→  * No console errors, no runtime errors, lint clean
+   499→
+   500→Stage Summary:
+   501→- Database: 293 real SKUs (vs 35 before), 30 inward + 40 outward + 5 hold transactions, real client names, real challan numbers
+   502→- 7 roles all working: Admin, Owner (Ashish Agarwal), Sales, Account, Coordinator, Support, IT (department names)
+   503→- Login works directly (no forced password change); Admin can change any user's password; users can change own via 🔑 button
+   504→- Logout button clearly labeled and visible in sidebar
+   505→- New inventory features: Inward Entry, Outward Entry, Stock Hold, Stock Register, Activity Log, Forecast engine
+   506→- All data real & working — no empty states, no loading spinners that never resolve
+   507→- LaxRee theme maintained: Deep Navy + Gold, no indigo/blue
+   508→- Original HTML file preserved at /home/z/my-project/upload/
+   509→
+   510→---
+   511→Task ID: v7-pr-overview-stockhold
+   512→Agent: main (Z.ai Code)
+   513→Task: Professional PR with company logo, fix Overview duplication, cascading stock lookup dropdown in all dashboards, auto stock hold when sales creates challan
+   514→
+   515→Work Log:
+   516→- Extracted LaxRee company logo (base64 PNG) from original HTML file → saved to /home/z/my-project/public/laxree-logo.png (10.9KB)
+   517→- Updated app-shell.tsx sidebar logo: replaced 🏨 emoji with real laxree-logo.png (h-16 w-16, gold border, white bg)
+   518→- Updated login-screen.tsx: replaced 🏨 emoji with real laxree-logo.png (h-20 w-20)
+   519→- Added `className` prop support to Btn component (was being passed in login but silently ignored)
+   520→- Owner Overview tab simplified: removed "Fast Moving" stat card (duplicated with Fast Moving tab), removed "Stock by Category" detailed bar chart (duplicated with Current Stock tab). Now shows only pure KPIs: Inventory Overview (4 cards: Total Items/Stock/Low Stock/Challans), Revenue Overview (3 cards: Revenue/Received/Pending), Challans by Status (quick counts only). Reorganized into clearly-labeled sections.
+   521→- Created shared StockLookupCard component (src/components/laxree/stock-lookup.tsx): cascading 3-step dropdown — Category → Item Name → Model → displays live Current Stock / On Hold / Available / Min Stock / Inward / Dispatched + status badge. Auto-fetches /api/items and /api/stock-register.
+   522→- Added StockLookupCard to Owner "Current Stock" tab (top, above existing list). Also made existing list scrollable with sticky header (max-h-[60vh]).
+   523→- Added StockLookupCard to IT Manager "Item Master" tab + "Stock Register" tab (top). Made Item Master list scrollable with sticky header.
+   524→- Added StockLookupCard to Admin "All Items" tab (top). Made list scrollable with sticky header.
+   525→- Upgraded Owner PrintModal (Purchase Request) to professional letterhead:
+   526→  * Real LaxRee logo (laxree-logo.png, gold border) in header
+   527→  * Company address block (LaxRee House, Jaipur, GSTIN, contact)
+   528→  * "PURCHASE REQUEST" boxed badge + PR number + date + status
+   529→  * Two-column meta block: Raised By (department) + Supplier/Vendor (blank lines)
+   530→  * Subject line
+   531→  * Professional items table with #/Item/Model/Qty/Remarks columns, zebra striping, dark header, gold total row
+   532→  * Total Quantity row
+   533→  * Notes block (if any)
+   534→  * Terms & Conditions text
+   535→  * Three signature blocks (Raised By / Approved By / Received By) with role labels
+   536→  * System-generated footer with PR number + date
+   537→- Backend: Modified /api/challans/upload to auto-create StockHold entries for each MATCHED challan item:
+   538→  * Aggregates quantities per item (handles duplicate items in one challan)
+   539→  * Validates available stock (currentStock − existing active holds)
+   540→  * Partial hold if insufficient (holds what's available, notes the shortfall in remarks)
+   541→  * Links hold to challan via challanId field
+   542→  * Splits advance amount across held items
+   543→  * Returns autoHoldCount in response
+   544→- Updated Sales UploadForm to show purple banner after upload: "🔒 Stock Auto-Held: N item(s) put on hold for [Client] to protect stock health"
+   545→- Verified lint clean (0 errors, 0 warnings after removing 3 unused eslint-disable comments)
+   546→- Verified dev server compiles successfully
+   547→
+   548→Stage Summary:
+   549→- Company logo (real LaxRee brand mark) now used in sidebar + login + PR print letterhead
+   550→- Overview tab de-duplicated: only pure KPIs + quick counts, no detailed lists (those live in dedicated tabs)
+   551→- Cascading Stock Lookup (Category → Item → Model → live stock) available in Owner/IT Manager/Admin dashboards
+   552→- Purchase Request print is now a professional business document with logo, letterhead, address, terms, signatures
+   553→- Stock health protected: when Sales creates a challan, matched items are auto-held so they cannot be double-sold to another client
+   554→- All holds linked to challan (challanId) for future convert-to-outward on dispatch
+   555→
+   556→---
+   557→Task ID: 11
+   558→Agent: general-purpose (it-manager dashboard refactor)
+   559→Task: Refactor it-manager.tsx to use activeTab/onTabChange props instead of internal useState
+   560→
+   561→Work Log:
+   562→- Read prior worklog (v4-audit, password-change, hold-stock tasks) for context
+   563→- Read full it-manager.tsx (~814 lines) and located all references to internal `tab` state (lines 56, 57, 73, 75, 81-89)
+   564→- Used MultiEdit to apply precise changes to the main exported ITManagerDashboard function:
+   565→  1. Changed function signature: `({ user }: { user: SessionUser })` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+   566→  2. Removed internal `const [tab, setTab] = useState('items')` line
+   567→  3. In-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}`
+   568→  4. In-content tab button active styling: `tab===n.id` → `activeTab===n.id`
+   569→  5. All 9 content rendering conditionals (items, add, inward, register, activity, forecast, analytics, users, all-challans) switched from `tab === '...'` to `activeTab === '...'`
+   570→- Kept `useState` import (still used by 10+ other useState hooks in sub-components)
+   571→- Left all sub-components (ItemsTab, AddItemTab, InwardTab, StockRegisterTab, ActivityLogTab, ForecastTab, AnalyticsTab, UsersTab, AllChallansTab), types, API calls, and styling unchanged
+   572→- Verified caller app/page.tsx:120 already passes `activeTab={currentTab} onTabChange={setActiveTab}` — props align, no caller change required
+   573→- Ran `npx tsc --noEmit 2>&1 | grep -E "it-manager"` → NO ERRORS in it-manager
+   574→
+   575→Stage Summary:
+   576→- IT Manager dashboard is now controlled by parent sidebar state (activeTab/onTabChange) instead of an internal disconnected useState
+   577→- Clicking a sidebar nav item will now correctly update the dashboard content (the topbar title was already wired to the same state)
+   578→- tsc verification: clean — no TypeScript errors referencing it-manager
+   579→- No changes required to callers; app/page.tsx already passes the needed props
+   580→
+   581→---
+   582→Task ID: 7
+   583→Agent: general-purpose (sales dashboard refactor)
+   584→Task: Refactor sales.tsx to use activeTab/onTabChange props instead of internal useState
+   585→
+   586→Work Log:
+   587→- Read /home/z/my-project/worklog.md to understand prior audit/v4 work context
+   588→- Read full sales.tsx (~716 lines) to map the SalesDashboard component structure (lines 44–69)
+   589→- Confirmed component had internal `const [tab, setTab] = useState('list')` driving 4 nav buttons (list/upload/outward/hold) and 4 content branches
+   590→- Grep'd for all `tab`, `setTab`, `useState` references to ensure no other usages of the internal tab state existed (only the main SalesDashboard used them; sub-components ChallanList, UploadForm, OutwardTab, StockHoldTab have their own useState hooks which were untouched)
+   591→- Used MultiEdit to make 3 precise changes to the main SalesDashboard function:
+   592→  1. Changed signature: `export function SalesDashboard({ user }: { user: SessionUser })` → `export function SalesDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+   593→  2. Removed the line `const [tab, setTab] = useState('list')` (kept `useState` import since 20+ other useState calls in sub-components still use it)
+   594→  3. Updated in-content nav button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+   595→  4. Updated all 4 content rendering branches: `tab === 'list'` → `activeTab === 'list'`, `tab === 'upload'` → `activeTab === 'upload'`, `tab === 'outward'` → `activeTab === 'outward'`, `tab === 'hold'` → `activeTab === 'hold'` (changed all 4, not just the 2 mentioned in task brief, because leaving 'outward'/'hold' referencing the now-removed `tab` variable would have broken compilation)
+   596→  5. Updated UploadForm `onDone` callback: `onDone={() => setTab('list')}` → `onDone={() => onTabChange('list')}`
+   597→- Verified no remaining `tab`/`setTab` identifiers in the SalesDashboard function (only comment text mentions of "tab" remain, which are harmless)
+   598→- Ran `npx tsc --noEmit 2>&1 | grep -E "sales"` → exit code 1 (grep found NO matching lines, meaning zero errors in sales.tsx)
+   599→- Ran full `npx tsc --noEmit` to confirm only pre-existing unrelated errors remain (in examples/websocket/ and skills/ directories — none in src/components/laxree/dashboards/sales.tsx)
+   600→
+   601→Stage Summary:
+   602→- Successfully refactored SalesDashboard to be a controlled component driven by `activeTab`/`onTabChange` props from its parent, eliminating the disconnected internal state that was causing the sidebar-nav-vs-dashboard-content desync UX bug
+   603→- Changes were surgical: only the main exported SalesDashboard function was modified (lines 44–69); all sub-components (ChallanList, UploadForm, OutwardTab, StockHoldTab), API calls, types, and styling are untouched
+   604→- TypeScript verification: `grep -E "sales"` against tsc output returns nothing — zero errors in the sales dashboard file
+   605→- Note for parent integrator: any parent rendering `<SalesDashboard user={...} />` now must also pass `activeTab` (string) and `onTabChange` ((id: string) => void); the sidebar nav config in the parent must include ids 'list', 'upload', 'outward', and 'hold' for full functionality
+   606→
+   607→---
+   608→Task ID: 6
+   609→Agent: general-purpose (owner dashboard refactor)
+   610→Task: Refactor owner.tsx to use activeTab/onTabChange props instead of internal useState
+   611→
+   612→Work Log:
+   613→- Read worklog.md and owner.tsx (~960 lines) for full context
+   614→- Confirmed page.tsx already passes activeTab + onTabChange props to OwnerDashboard (line 115)
+   615→- Located the only internal `tab` state usage (lines 54-88 of owner.tsx)
+   616→- Made three precise edits via MultiEdit:
+   617→  1. Replaced `export function OwnerDashboard({ user }: { user: SessionUser }) { const [tab, setTab] = useState('overview')` with `export function OwnerDashboard({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {` (removed internal useState)
+   618→  2. Changed in-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+   619→  3. Changed ALL 8 content-rendering conditions from `tab === 'X'` → `activeTab === 'X'` (overview, stock, fast, challans, pr, register, forecast, activity — all 8 nav IDs, not just the 5 sidebar items listed in the task, to avoid dangling references)
+   620→- Left `import { useState } from 'react'` intact (still used by sub-components: OverviewTab, StockTab, ChallansTab, PRTab, StockRegisterTab, ForecastTab, ActivityLogTab)
+   621→- Did not touch any sub-components, types, API calls, or styling
+   622→- Verified no `tab`/`setTab` code references remain (only a literal string "Challans tab" in a SectionTitle sub prop)
+   623→- Ran `npx tsc --noEmit 2>&1 | grep -E "owner"` → NO_ERRORS_FOR_OWNER (clean)
+   624→
+   625→Stage Summary:
+   626→- OwnerDashboard now receives `activeTab`/`onTabChange` from parent (src/app/page.tsx line 115), making sidebar nav clicks drive dashboard content
+   627→- UX bug fixed: sidebar nav ↔ dashboard content now in sync (previously clicking sidebar items only updated the topbar title, not the dashboard body)
+   628→- In-content tab buttons also call onTabChange so they sync back to the sidebar selection
+   629→- TypeScript compiles cleanly with zero errors related to owner.tsx
+   630→- Refactor pattern matches the other already-refactored dashboards (AdminDashboard, SalesDashboard, AccountDashboard, CoordinatorDashboard, SupportDashboard, ITManagerDashboard all use the same activeTab/onTabChange signature)
+   631→
+   632→---
+   633→Task ID: 5+9
+   634→Agent: general-purpose (admin + coordinator dashboard refactor)
+   635→Task: Refactor admin.tsx and coordinator.tsx to use activeTab/onTabChange props instead of internal useState
+   636→
+   637→Work Log:
+   638→- Read worklog.md to understand prior refactors (it-manager, support, account, sales already done the same way)
+   639→- Read both target files fully: admin.tsx (313 lines, main fn AdminDashboard at L12-39 with internal `useState('overview')` + 5-tab nav + 5 render branches) and coordinator.tsx (275 lines, main fn CoordinatorDashboard at L16-39 with internal `useState('messages')` + 3-tab nav + 3 render branches)
+   640→- Confirmed parent app/page.tsx (lines 114, 118) already passes `activeTab={currentTab} onTabChange={setActiveTab}` to both AdminDashboard and CoordinatorDashboard — the dashboards were ignoring those props and using internal state instead, causing the sidebar-click → content-not-changing UX bug
+   641→
+   642→- Edited admin.tsx via MultiEdit (3 atomic edits):
+   643→  1. Function signature: `({ user }: { user: SessionUser })` + `const [tab, setTab] = useState('overview')` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })` (removed useState line entirely)
+   644→  2. Tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+   645→  3. Render branches: `tab === 'overview'|'users'|'challans'|'items'|'messages'` → `activeTab === ...` (5 substitutions)
+   646→  - Kept `useState` import (still used by UsersTab's resetUser/newPw/saving/msg state)
+   647→  - Left all sub-components (OverviewTab, UsersTab, ChallansTab, ItemsTab, MessagesTab), types, API calls, and styling unchanged
+   648→
+   649→- Edited coordinator.tsx via MultiEdit (3 atomic edits):
+   650→  1. Function signature: `({ user }: { user: SessionUser })` + `const [tab, setTab] = useState('messages')` → `({ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void })`
+   651→  2. Tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}` and `tab===n.id` → `activeTab===n.id`
+   652→  3. Render branches: `tab === 'messages'|'checklist'|'photos'` → `activeTab === ...` (3 substitutions)
+   653→  - Kept `useState` import (still used by MessagesTab.sel, ChecklistTab.sel, ChecklistDetail.vehicleInfo, PhotosTab.sel/photos)
+   654→  - Left all sub-components (MessagesTab, ChecklistTab, ChecklistDetail, PhotosTab), types, API calls, and styling unchanged
+   655→
+   656→- Verified by reading the modified function signatures and tab button sections in both files — all changes match the spec exactly
+   657→- Ran verification: `npx tsc --noEmit 2>&1 | grep -E "admin|coordinator|Dashboard"` → NO OUTPUT (clean). The grep also confirmed no error mentions Dashboard. Only unrelated pre-existing errors remain (examples/websocket/* socket.io-client, skills/* image-edit/stock-analysis). A separate pending error exists for OwnerDashboard (app/page.tsx:115) which is OUT of scope for Task 5+9.
+   658→
+   659→Stage Summary:
+   660→- Both AdminDashboard and CoordinatorDashboard are now controlled by parent sidebar state (activeTab/onTabChange) instead of disconnected internal useState — fixing the major UX bug where sidebar clicks updated the topbar title but not the dashboard content
+   661→- Clicking a sidebar nav item will now correctly update the dashboard content for ADMIN and COORDINATOR roles (the topbar title was already wired to the same state)
+   662→- tsc verification: clean — no TypeScript errors referencing admin, coordinator, or Dashboard for these two files
+   663→- No caller changes required; app/page.tsx already passes the needed props to both dashboards
+   664→
+   665→---
+   666→Task ID: 8+10
+   667→Agent: general-purpose (account + support dashboard refactor)
+   668→Task: Refactor account.tsx and support.tsx to use activeTab/onTabChange props instead of internal useState
+   669→
+   670→Work Log:
+   671→- Read worklog.md (prior v4-audit + v5-login-fix context) and confirmed AppShell already manages `activeTab`/`onTabChange` state and passes them to all 7 dashboards in src/app/page.tsx (including AccountDashboard line 117 and SupportDashboard line 119). The bug was that account.tsx and support.tsx still held their own internal `const [tab, setTab] = useState(...)` and ignored the incoming props — so sidebar clicks updated topbar title only, not the dashboard content.
+   672→- Read both files fully (account.tsx = 287 lines, support.tsx = 287 lines).
+   673→- account.tsx edits (3 MultiEdit operations on the main exported function only; sub-components MessagesTab/VerifyTab/ChecklistTab/ChecklistDetail/BillsTab left untouched):
+   674→  * Function signature: `{ user }: { user: SessionUser }` → `{ user, activeTab, onTabChange }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }`
+   675→  * Removed `const [tab, setTab] = useState('messages')` line; KEPT `const [refreshKey, setRefreshKey] = useState(0)` as instructed
+   676→  * In-content tab button: `onClick={() => setTab(n.id)}` → `onClick={() => onTabChange(n.id)}`
+   677→  * In-content tab button active class: `tab===n.id` → `activeTab===n.id`
+   678→  * Content rendering: all 4 occurrences `{tab === 'messages'|'verify'|'checklist'|'bills' && ...}` → `{activeTab === ... && ...}`
+   679→  * `useState` import retained (still used by refreshKey)
+   680→- support.tsx edits (same 3 MultiEdit operations; sub-components PendingTab/ChecklistForm/AllTab/Row left untouched):
+   681→  * Function signature: added `activeTab` + `onTabChange` props
+   682→  * Removed `const [tab, setTab] = useState('pending')` line; KEPT `const [refreshKey, setRefreshKey] = useState(0)`
+   683→  * In-content tab button: `setTab(n.id)` → `onTabChange(n.id)`, `tab===n.id` → `activeTab===n.id`
+   684→  * Content rendering: `{tab === 'pending' ...}` and `{tab === 'all' ...}` → `{activeTab === 'pending' ...}` and `{activeTab === 'all' ...}`
+   685→  * `useState` import retained
+   686→- Verified no leftover `tab`/`setTab` references in either file (grep returned matches only in unrelated owner.tsx and sales.tsx comments — out of scope).
+   687→- Ran verification: `cd /home/z/my-project && npx tsc --noEmit 2>&1 | grep -E "account|support"` → zero matches (grep exit 1 = no errors mentioning account/support). Total tsc output = 4 pre-existing errors in unrelated `examples/` and `skills/` folders (socket.io-client, socket.io, image-edit, stock-analysis-skill); zero errors in `src/` — refactor is type-clean.
+   688→
+   689→Stage Summary:
+   690→- Both dashboards are now controlled components: tab state is owned by AppShell (single source of truth via `activeTab`/`onTabChange`) and shared between the sidebar nav and the in-content tab strip.
+   691→- Sidebar nav clicks in AppShell already call `setActiveTab(n.id)` which flows down as `currentTab` → now drives the dashboard content rendering too. Topbar title and dashboard body now stay in sync.
+   692→- In-content tab buttons also call `onTabChange(n.id)`, so clicking them updates the sidebar highlight as well (bidirectional sync).
+   693→- `refreshKey` state preserved in both files — internal data refresh on verify/dispatch actions still works.
+   694→- All sub-components, types, API calls, and styling untouched.
+   695→- tsc clean for both files (no account/support errors).
+   696→
+   697→---
+   698→Task ID: PW-1
+   699→Agent: main (password permission refactor)
+   700→Task: Restrict "Change Password" sidebar button to ADMIN/IT_MANAGER/OWNER only; give Admin + IT Manager power to change any user's password from their dashboard
+   701→
+   702→Work Log:
+   703→- Updated `src/app/api/users/[id]/reset-password/route.ts`: changed role check from `ADMIN`-only to `ADMIN || IT_MANAGER`
+   704→- Updated `src/app/api/users/route.ts` PATCH handler: changed toggle-active permission from `ADMIN`-only to `ADMIN || IT_MANAGER`
+   705→- Updated `src/components/laxree/app-shell.tsx`: "Change Password" button now conditionally rendered only for ADMIN, IT_MANAGER, OWNER; non-privileged roles (SALES, ACCOUNT, COORDINATOR, SUPPORT) see only the full-width Logout button
+   706→- Upgraded `src/components/laxree/dashboards/it-manager.tsx` UsersTab: replaced read-only card grid with full management table mirroring Admin's UsersTab — includes "🔑 Change Pw" button (opens reset modal) + "Disable/Enable" toggle per user; added `apiPatch` and `ROLE_META` imports
+   707→
+   708→Stage Summary:
+   709→- Non-privileged roles (Sales, Account, Coordinator, Support) no longer see "Change Password" in sidebar — only Logout
+   710→- Admin and IT Manager both have full user management: table view + password reset modal + active/inactive toggle
+   711→- Owner can change only their own password via sidebar button (no user management tab)
+   712→- Browser-verified: Coordinator sees only Logout; IT Manager sees Change Password + can reset any user's password (tested resetting Sales password to sales999, logged in successfully, then restored to laxree123)
+   713→- tsc + lint both clean; all API calls return 200
+   714→
+   715→---
+   716→Task ID: workflow-redesign-1
+   717→Agent: main (Z.ai Code)
+   718→Task: Complete workflow redesign for Sales, Account, Coordinator, Support dashboards per user's detailed specification.
+   719→
+   720→Work Log:
+   721→- Updated Prisma schema: added 40+ fields to Challan model (billingName, billingAddress, shippingAddress, gstNumber, amountWithoutGst, amountWithGst, gstPercentage, packingCharge, shippingCharge, freightAmount, paymentMode, accountRejected fields, coordinatorApproved, warehouseCompleted, vehicleArranged, ewayBill/invoice fields, dispatchDate, trackingLink, transporterName, vehicleNumber, dispatchImages, whatsappSent, emailSent, reviewRequested/received, pdfFileName, aiAnalysisData)
+   722→- Updated ChallanItem model: added category, unitPrice, totalPrice, stockStatus (AVAILABLE/ON_HOLD/WILL_BE_AVAILABLE), stockRemark, expectedAvailabilityDays, availableQty, auditStatus (PENDING/APPROVED/REJECTED/ON_HOLD), auditNotes, auditedAt/ById, warehouseStatus (PENDING/QUALITY_CHECK/PACKAGING/DONE), warehouseNotes, warehouseDoneAt/ById, dispatchImagePath
+   723→- Added named relations: AccountVerifier, CoordinatorApprover, VehicleArranger, BillsUploader, ItemAuditor, WarehouseWorker
+   724→- Created API routes:
+   725→  - GET /api/stock-check (cascading: category → itemName → model → colour, returns available stock after cutting holds)
+   726→  - GET /api/challans/dashboard (monthly summary, totals, status breakdown, last 12 months)
+   727→  - Updated GET /api/challans (role-based filtering, month/year, accountVerified, coordinatorApproved, paymentStatus)
+   728→  - Updated POST /api/challans/upload (new fields: billing, GST, financial breakdown, auto stock check per item: AVAILABLE/ON_HOLD/WILL_BE_AVAILABLE 25-30 days)
+   729→  - Updated POST /api/challans/[id]/verify-payment (approve OR reject with reason, sends to coordinator or back to sales)
+   730→  - POST /api/challans/[id]/audit (per-item approve/reject/on_hold + PATCH for final submit)
+   731→  - POST /api/challans/[id]/warehouse (per-item quality_check/packaging/done + PATCH for dispatch images)
+   732→  - POST /api/challans/[id]/vehicle (freight amount, transporter, vehicle — only after warehouse done)
+   733→  - POST /api/challans/[id]/dispatch (final dispatch → sends to support)
+   734→  - POST /api/challans/[id]/whatsapp (generates WhatsApp URL with tracking link + PATCH for email)
+   735→  - POST /api/challans/[id]/review (request review via WhatsApp OR submit client review)
+   736→  - POST /api/challans/[id]/bills (upload e-way bill + item bill)
+   737→  - Updated GET /api/users (coordinator can view sales employees for filtering)
+   738→- Updated page.tsx roleNav for SALES (dashboard, stock-check, upload, list, hold), ACCOUNT (dashboard, pending, partial, fullpaid, bills), COORDINATOR (dashboard, process, audit, warehouse, vehicle, review, bills), SUPPORT (dashboard, dispatch, tracking, review)
+   739→- Ran db:push successfully
+   740→
+   741→Stage Summary:
+   742→- Schema and all API routes are complete and ready for dashboard development
+   743→- 4 dashboards need to be rebuilt: Sales, Account, Coordinator, Support
+   744→- Each dashboard must use existing UI components (Card, Btn, Input, Select, Modal, etc.) from ../ui
+   745→- LaxRee luxury theme: Deep Navy (#07101f, #0c1928, #111f32) + Gold (#C8922A, #E4AF4A)
+   746→- Each dashboard receives props: { user: SessionUser, activeTab: string, onTabChange: (id:string)=>void }
+   747→- useFetch hook: useFetch<T>(url, deps[]) returns { data, loading, error, refresh }
+   748→- apiPost(url, body), apiPatch(url, body) helpers available
+   749→- Types: fmtINR, fmtDate, STATUS_COLORS, STAGE_LABELS from ../types
+   750→
+   751→---
+   752→Task ID: workflow-redesign-account
+   753→Agent: general-purpose (Account Dashboard)
+   754→Task: Rewrite `/src/components/laxree/dashboards/account.tsx` with the new 5-tab account workflow (dashboard / pending / partial / fullpaid / bills).
+   755→
+   756→Work Log:
+   757→- Read worklog, ui.tsx, types.ts, use-fetch.ts, existing account.tsx, Prisma Challan schema, and the relevant API routes (/api/challans, /api/challans/[id]/verify-payment, /api/challans/[id]/bills, /api/challans/[id]/whatsapp) to confirm field names, response shapes and auth rules.
+   758→- Replaced account.tsx with a complete self-contained file beginning with `'use client'`. Preserved the required props interface `{ user, activeTab, onTabChange }` and the green (#3CB87A) account accent.
+   759→- Built the 5 tabs:
+   760→  1. DashboardTab — fetches `/api/challans`, renders 6 StatCards (Total / Pending / Partial / Full Paid / Total Amount / Total Received), a "Needs Attention" pending-approval grid (top 6) with mini cards showing challan no, client, billing name, GST, shipping address, amounts, plus 3 quick-action buttons.
+   761→  2. PendingTab — fetches `/api/challans?status=UPLOADED`, filters to non-verified/non-rejected. Each card shows full detail (challan & quotation number, billing/shipping address, GST, expected delivery, financial breakdown incl. GST %, packing charge, advance, remaining, payment mode, items table with name/model/qty/unit price/total). Approve opens a modal with receivedAmount input → POST `/api/challans/${id}/verify-payment` `{verified:true, receivedAmount}`. Reject opens a modal with required reason → POST same endpoint `{verified:false, rejectReason}`. Shows "On approve: sent to Coordinator by [approverName] at [time]".
+   762→  3. PartialTab — fetches `/api/challans`, filters `paymentStatus==='PARTIAL' && accountVerified`. StatCards show count / total received / total remaining / avg aging. Each card highlights remaining amount, shows days-since-verification with color-coded aging badge (>14d red, >7d amber, else green), and a "Follow Up (WhatsApp)" button that opens a `wa.me` link pre-filled with a balance-due reminder message (handles missing mobile by falling back to `wa.me/?text=`).
+   763→  4. FullPaidTab — fetches `/api/challans`, filters `paymentStatus==='PAID' && accountVerified`. Each card shows approved-by + timestamp, total/received, billing name, GST, and E-Way/Invoice status badges.
+   764→  5. BillsTab — fetches `/api/challans?accountVerified=true`. Per challan renders an E-Way section (number + filename inputs) and an Invoice section (number + filename inputs) prefilled from existing fields, with green/gray status badges. "Upload Bills" button POSTs `/api/challans/${id}/bills` `{ewayBillNo, ewayBillFile, invoiceNo, invoiceFile}` and refreshes. Shows last-uploaded-by + timestamp when present.
+   765→- Defined a complete `Challan` TS type covering all new fields: quotationNumber, billingName, billingAddress, shippingAddress, gstNumber, amountWithoutGst, amountWithGst, gstPercentage, packingCharge, paymentMode, accountRejected, accountRejectReason, accountVerifiedBy (name/role), ewayBillNo, ewayBillFile, invoiceNo, invoiceFile, billsUploadedAt, billsUploadedBy, plus uploadedBy and challanItems.
+   766→- Used existing UI components (Card, Btn, Input, Modal, SectionTitle, StatCard, Badge, EmptyState, Textarea) from `../ui` and helpers (fmtINR, fmtDate, STATUS_COLORS, SessionUser) from `../types`. Hooks (useFetch, apiPost) from `../use-fetch`. No indigo/blue accents introduced.
+   767→- Verified clean: `npx tsc --noEmit --skipLibCheck` shows zero errors in account.tsx (remaining errors are in unrelated files: examples/, skills/, stock-check route). `npx eslint src/components/laxree/dashboards/account.tsx` returns no warnings.
+   768→
+   769→Stage Summary:
+   770→- Account Dashboard rewritten end-to-end with the new 5-tab workflow.
+   771→- All five tabs implemented, self-contained, type-safe, lint-clean, and using only the LaxRee luxury theme (navy + gold + green account accent).
+   772→- Integrates with the existing verify-payment and bills API routes; partial-paid WhatsApp follow-up link is generated client-side (no new backend route needed).
+   773→- Ready for Sales / Coordinator / Support dashboards to be rebuilt against the same API contracts.
+   774→
+   775→---
+   776→Task ID: workflow-redesign-coordinator
+   777→Agent: general-purpose (Coordinator Dashboard)
+   778→Task: Rewrite `/home/z/my-project/src/components/laxree/dashboards/coordinator.tsx` with the new 7-tab workflow (dashboard, process, audit, warehouse, vehicle, review, bills) per the redesigned LaxRee Inventory workflow.
+   779→
+   780→Work Log:
+   781→- Read /home/z/my-project/worklog.md to understand prior work (v4-audit, workflow-redesign-1 schema/API work, dashboard refactors for activeTab/onTabChange pattern)
+   782→- Read existing files: ui.tsx (Card, Btn, Input, Select, Textarea, Modal, SectionTitle, StatCard, Badge, EmptyState), types.ts (SessionUser, fmtINR, fmtDate, STATUS_COLORS, STAGE_LABELS), use-fetch.ts (useFetch, apiPost, apiPatch), existing coordinator.tsx (3-tab legacy version)
+   783→- Read account.tsx as a reference for tab patterns, Modal usage, and workflow stage handling
+   784→- Verified API endpoints by reading route files: /api/challans (GET with month/year/status filters), /api/challans/[id]/audit (POST per-item + PATCH submit), /api/challans/[id]/warehouse (POST per-item + PATCH dispatch image), /api/challans/[id]/vehicle (POST arrangement), /api/challans/[id]/dispatch (POST final), /api/challans/[id]/bills (POST bills), /api/users (GET with role filter)
+   785→- Verified Prisma schema for exact Challan and ChallanItem fields (coordinatorApproved, coordinatorApprovedBy, coordinatorApprovedAt, warehouseCompleted, warehouseCompletedAt, vehicleArranged, vehicleArrangedBy, vehicleArrangedAt, freightAmount, transporterName, vehicleNumber, dispatchDate, ewayBillNo, ewayBillFile, invoiceNo, invoiceFile, billsUploadedAt, billsUploadedBy for Challan; auditStatus, auditNotes, auditedAt, auditedBy, warehouseStatus, warehouseNotes, warehouseDoneAt, warehouseDoneBy, dispatchImagePath, stockStatus, stockRemark, availableQty for ChallanItem)
+   786→- Verified page.tsx roleNav for COORDINATOR has exactly: dashboard, process, audit, warehouse, vehicle, review, bills
+   787→- Wrote complete new coordinator.tsx (~1210 lines) with:
+   788→  * Full Challan + ChallanItem + SimpleUser TypeScript types matching the schema
+   789→  * PIPELINE constant for dashboard visualization (UPLOADED → PAYMENT_VERIFIED → COORDINATOR_AUDITED → WAREHOUSE_DONE → VEHICLE_ARRANGED → DISPATCHED)
+   790→  * Main CoordinatorDashboard component receives { user, activeTab, onTabChange } props exactly as specified; manages selectedChallanId + refreshKey state internally and shares selectedChallanId across tabs
+   791→  * Top tab strip uses activeTab for highlight and onTabChange for switching (purple #9B6ED4 accent)
+   792→  * DashboardTab: 5 StatCards (To Process, Pending Audit, In Warehouse, Ready Vehicle, Dispatched), pipeline visualization with arrow separators and per-stage counts, "Needs Your Attention" card grid with priority-sorted actionable challans (Open → switches to audit tab)
+   793→  * ProcessTab: month (1-12) + year (2024-2026) + sales employee dropdown (fetches /api/users?role=SALES), fetches /api/challans?month=X&year=Y and filters client-side by employee, latest challans grid with challan no, client, date, amount, uploaded by, status; "Start Audit →" button selects challan + switches to audit tab
+   794→  * AuditTab: left challan picker (account-verified, not coordinator-approved) + right audit detail. AuditDetail shows WPS checklist header (client/city/mobile/expected/amounts/uploaded by/payment mode) + items table (item, qty, stock status, audit status, action buttons). Approve (✓), Reject (✕ with notes modal), On Hold (⏸ with notes modal). Submit Audit button enabled only when ALL items APPROVED; opens confirmation modal "Are you sure? Yes/No"; PATCH /api/challans/[id]/audit. Shows warning "Not approved items will be On Hold" if any rejected/on-hold
+   795→  * WarehouseTab: fetches /api/challans?coordinatorApproved=true, splits into pending (warehouseCompleted=false) and completed. Each pending challan shows progress bar (doneCount/totalCount) + per-item WarehouseItemRow with step tracker (PENDING → QC → Packaging → Done) and 3 buttons (Quality Check ✓, Packaging ✓, Done ✓). Buttons disabled based on current stage. Completed challans shown in separate read-only grid
+   796→  * VehicleTab: fetches /api/challans, splits into needArrangement (warehouseCompleted && !vehicleArranged) and arranged. For each pending: shows e-way bill + invoice preview from account team, inputs for Freight Amount, Transporter Name, Vehicle Number, "Arrange Vehicle" button → POST /api/challans/[id]/vehicle. Arranged challans shown read-only with freight/transporter/vehicle/arranged by/arranged at
+   797→  * ReviewTab: fetches /api/challans, shows vehicleArranged && !dispatchDate. Each challan shows vehicle info header + per-item filename input + "Upload" button → PATCH /api/challans/[id]/warehouse with { itemId, dispatchImagePath }. Dispatch button enabled only when all items have images; opens confirmation modal; POST /api/challans/[id]/dispatch
+   798→  * BillsTab: read-only view of challans where ewayBillNo or invoiceNo is not null; shows e-way bill number, file name, invoice number, file name, uploaded by, uploaded at
+   799→  * All actions show inline success/error messages with color-coded banners (green for success, red for error)
+   800→  * Used Loading helper component for consistent loading state
+   801→  * All currency via fmtINR, dates via fmtDate, status badges via STATUS_COLORS
+   802→  * LaxRee luxury theme: Deep Navy (#07101f, #0c1928, #111f32) + Gold (#C8922A, #E4AF4A) + Coordinator purple accent (#9B6ED4); NO indigo or blue colors
+   803→- Removed dead code (an unused `tabId` variable in DashboardTab that was being rendered in a hidden span to silence the unused-var warning — refactored to remove the variable entirely)
+   804→- Verified TypeScript: `npx tsc --noEmit 2>&1 | grep -iE "coordinator"` returns ZERO output (no errors in coordinator.tsx). Only pre-existing errors remain (examples/websocket, skills/image-edit, skills/stock-analysis-skill, src/app/api/stock-check/route.ts, sales.tsx disabled prop — all unrelated)
+   805→- Verified ESLint: `npx eslint src/components/laxree/dashboards/coordinator.tsx` returns ZERO output (clean)
+   806→
+   807→Stage Summary:
+   808→- Coordinator dashboard fully rewritten with new 7-tab workflow matching the redesigned LaxRee Inventory process
+   809→- Props interface preserved exactly: `{ user: SessionUser; activeTab: string; onTabChange: (id: string) => void }`
+   810→- Cross-tab state management via `selectedChallanId` (selected in Dashboard/Process → opens in Audit) and `refreshKey` (cascades refresh after mutations)
+   811→- All 7 API endpoints wired correctly: GET /api/challans (with month/year/coordinatorApproved filters), GET /api/users?role=SALES, POST /api/challans/[id]/audit (per-item), PATCH /api/challans/[id]/audit (submit), POST /api/challans/[id]/warehouse (per-item), PATCH /api/challans/[id]/warehouse (dispatch image), POST /api/challans/[id]/vehicle, POST /api/challans/[id]/dispatch
+   812→- TypeScript types fully specified for Challan + ChallanItem (all coordinator/warehouse/vehicle/bills/dispatch/audit fields per schema)
+   813→- LaxRee theme maintained throughout (navy + gold + coordinator purple #9B6ED4); no indigo/blue
+   814→- tsc clean (zero coordinator-related errors), eslint clean
+   815→- File size: 1210 lines, self-contained, ready for integration with parent page.tsx (which already passes the correct props)
+   816→
+   817→---
+   818→Task ID: workflow-redesign-sales
+   819→Agent: general-purpose (Sales Dashboard)
+   820→Task: Rewrite `/src/components/laxree/dashboards/sales.tsx` with the new 5-tab sales workflow (dashboard / stock-check / upload / list / hold).
+   821→
+   822→Work Log:
+   823→- Read worklog, ui.tsx, types.ts, use-fetch.ts, existing sales.tsx (714 lines), page.tsx roleNav (SALES section), Prisma Challan/ChallanItem/StockHold schema, and the relevant API routes (`/api/stock-check`, `/api/challans`, `/api/challans/dashboard`, `/api/challans/upload`, `/api/stock-hold`) to confirm request/response shapes and field names.
+   824→- Replaced sales.tsx with a complete self-contained 1383-line file starting with `'use client'`. Preserved the required props interface `{ user, activeTab, onTabChange }` and the existing nav-tab UI pattern (gold accent on active tab).
+   825→- Built the 5 tabs:
+   826→  1. DashboardTab — fetches `/api/challans/dashboard?role=SALES&userId=${user.id}&month=${month}&year=${year}`. Month (1–12) + Year (2024–2026) dropdowns at top. Renders 4 StatCards (Total Challans / Total Amount / Total Advance / Total Received), a 12-month CSS bar chart (gold gradient bars, auto-scaled by max count), a status-breakdown grid using `byStatus` (Badge + count per status), and the latest 10 challans in a compact table.
+   827→  2. StockCheckTab — fully cascading dropdowns via `/api/stock-check`. Step 1 fetches categories on mount (`useFetch`). Steps 2–4 use `useEffect` to fetch itemNames / models / colours as the parent selection changes, with loading spinners in the placeholder text. When all 4 are selected, fetches the matching items and shows a results card per item with Current Stock, Held Qty, **Available Stock (gold-highlighted)**, Min Stock, Unit, Fast Moving badge, IN STOCK/LOW STOCK/OUT OF STOCK badge. If `availableStock <= 0`, shows a red warning "Will be available in 25–30 days".
+   828→  3. UploadTab — 4-section form: (A) Client Details (Challan #, Quotation #, Client Name, City, Mobile, Billing Name auto-defaults to client name, Billing Address, Shipping Address, GST #, Expected Delivery Date); (B) Financial Details (Amount Without GST, GST % default 18, Packing Charge, with auto-calculated Amount With GST and Amount Total in gold-highlighted read-only fields, plus a "Shipping charge will be decided by Coordinator" note); (C) Items — dynamic add/remove rows each with Category, Item Name (req), Item #, Model, Colour, Qty, Unit Price and an auto-calculated line total; (D) PDF upload (filename-only via `pdfFileName`). "Submit Challan" opens a Modal with two big choice buttons: "Full Amount Paid" (sets paymentMode=FULL, advance=total) and "Partial Amount Paid" (reveals an advance-amount input with remaining-balance hint). Confirm → POST `/api/challans/upload` with full payload (incl. items mapped to `{category, itemName, itemNumber, model, colour, quantity, unitPrice, totalPrice}`). On success renders `UploadResult` with a 3-tile summary (Available / Partial / 25–30 Days), a stock-summary banner, a per-item stock analysis table (AVAILABLE green / ON_HOLD amber / WILL_BE_AVAILABLE red badges with stockRemark), and "Upload Another" / "Go to My Challans" buttons.
+   829→  4. MyChallansTab — fetches `/api/challans?role=SALES&userId=${user.id}`. Renders each challan as an expandable row: collapsed view shows challan #, client, city, date, total, payment-status badge, account-verification badge (PENDING VERIFY / VERIFIED / REJECTED), stock-summary line ("X available · Y partial · Z 25–30 days · N items total"). Expanded view reveals billing/shipping details, financial breakdown (excl GST / with GST / packing / advance), per-item stock status table (item, model, qty, available qty, stock badge), account reject reason if rejected, and PDF filename if attached.
+   830→  5. StockHoldTab — preserved the existing stock-hold code intact: summary StatCards (Active Holds / Total Held Qty / Total Advance), a form with Category+Item Selects (filtered by category), live available-after-holds indicator, Hold Qty / Client Name / Advance / Remarks fields, POST `/api/stock-hold` to create, and the active-holds table with Release buttons (PATCH `/api/stock-hold` `{id, status:'RELEASED'}`).
+   831→- Defined a complete TS type set: `Item`, `StockCheckItem` (with availableStock, heldQty, minStock, fastMoving), `ChallanItem` (with stockStatus, stockRemark, expectedAvailabilityDays, availableQty, matchedItem), `Challan` (with all new financial + billing + verification fields), `DashboardData` (total/totalAmount/totalAdvance/totalReceived/byStatus/byPaymentStatus/monthly/challans), `StockSummary`, `UploadResponse`, `StockRow`, `StockHold`. Added a `STOCK_STATUS_COLOR` map (AVAILABLE green / ON_HOLD amber / WILL_BE_AVAILABLE red / PENDING grey) used by both the upload result and the My-Challans expand view.
+   832→- Used existing UI components (Card, Btn, Input, Select, Textarea, Modal, SectionTitle, StatCard, Badge, EmptyState) and helpers (fmtINR, fmtDate, STATUS_COLORS, SessionUser) from `../ui` and `../types`. Hooks (useFetch, apiPost, apiPatch) from `../use-fetch`. Only LaxRee navy + gold accents — no indigo/blue.
+   833→- Verified clean: `npx tsc --noEmit` shows zero errors in sales.tsx (remaining errors are all pre-existing in unrelated files: examples/websocket, skills/, and `/api/stock-check/route.ts` line 77).
+   834→
+   835→Stage Summary:
+   836→- Sales Dashboard rewritten end-to-end with the new 5-tab workflow (dashboard / stock-check / upload / list / hold).
+   837→- All five tabs implemented, self-contained, type-safe, and styled exclusively with the LaxRee luxury theme (navy + gold + semantic green/amber/red for stock states).
+   838→- Integrates with the existing `/api/stock-check` cascading endpoint, `/api/challans/dashboard` summary endpoint, `/api/challans/upload` (which auto-runs AI stock analysis and auto-holds matched stock), `/api/challans` list endpoint, and `/api/stock-hold` endpoints — no backend changes were required.
+   839→- The upload flow now properly captures all financial breakdown fields (amountWithoutGst / gstPercentage / amountWithGst / packingCharge / amountTotal) and billing details (billingName, billingAddress, shippingAddress, gstNumber, quotationNumber, pdfFileName) that the backend already accepts.
+   840→- Payment mode is chosen explicitly via a modal (FULL vs PARTIAL) before submit, satisfying the "payment popup" requirement.
+   841→- Ready for downstream dashboards (Coordinator / Support / Admin) to consume the same Challan shape with `stockStatus` and `accountVerified` fields.
+   842→
+   843→---
+   844→Task ID: workflow-redesign-support
+   845→Agent: general-purpose (Support Dashboard)
+   846→Task: Rewrite `/home/z/my-project/src/components/laxree/dashboards/support.tsx` with the new workflow-redesign dashboard (4 tabs: Dashboard, Client Dispatch, Send Tracking, Client Reviews) — replaces the old support-checklist-based dispatch form.
+   847→
+   848→Work Log:
+   849→- Read worklog.md (prior workflow-redesign-1 task added 40+ Challan fields + API routes for whatsapp/review/dispatch)
+   850→- Read ui.tsx (Card, Btn, Input, Select, Textarea, Modal, SectionTitle, StatCard, Badge, EmptyState components)
+   851→- Read types.ts (SessionUser, fmtINR, fmtDate, STATUS_COLORS, GOLD/NAVY/STAT theme constants)
+   852→- Read use-fetch.ts (useFetch<T>(url, deps), apiPost, apiPatch signatures)
+   853→- Read existing support.tsx (old ChecklistForm-based dispatch flow — replaced entirely)
+   854→- Verified API response shapes by reading src/app/api/challans/route.ts (returns { challans: [...] } with challanItems include), src/app/api/challans/[id]/whatsapp/route.ts (POST returns { whatsappUrl }, PATCH marks emailSent), src/app/api/challans/[id]/review/route.ts (action:'request' returns { reviewUrl }, action:'submit' stores reviewText+rating)
+   855→- Verified page.tsx SUPPORT roleNav tab IDs match: dashboard, dispatch, tracking, review (line 100-105)
+   856→- Verified Prisma schema fields exist: dispatchDate, trackingLink, transporterName, vehicleNumber, freightAmount, whatsappSent/At, emailSent/At, reviewRequested/At, reviewReceived, reviewRating, reviewReceivedAt, clientMobile, dispatchImages (lines 79-153 of schema.prisma)
+   857→- Wrote complete new support.tsx (914 lines) with these components:
+   858→  * Helpers: parseImages (handles JSON array or CSV string), Stars (Unicode ★ gold/gray), buildWhatsAppMessage (exact template), isDispatched, needsReviewRequest (15-day calc), Row
+   859→  * SupportDashboard (main, props interface preserved)
+   860→  * DashboardTab: 5 StatCards (Total Dispatched, In Transit, Delivered, Pending Reviews, Reviews Collected), recent 5 dispatched grid, "Review Requests Due" table
+   861→  * DispatchTab: celebration Modal popup on mount when newly-dispatched challans exist ("🎉 Client Dispatched!"), two parallel useFetch calls (status=DISPATCHED + status=IN_TRANSIT), DispatchList cards with all 9 fields, DispatchDetailModal with images grid
+   862→  * TrackingTab: pending (dispatchDate && !whatsappSent) cards with tracking-link input + Send via WhatsApp (success/green variant) + Mark Email Sent (gold) buttons, collapsible message preview per card, already-sent table (read-only), WhatsAppPreviewModal
+   863→  * ReviewTab: 4 StatCards (Pending, Awaiting, Collected, Avg Rating), three sub-sections A/B/C — RequestReviewCard (POST action:request → opens wa.me), CollectReviewCard (Select rating 1-5 + Textarea review + POST action:submit), Completed Reviews grid with Stars + review text
+   864→- Theme compliance: Navy (#07101f/#0c1928/#111f32) backgrounds, Gold (#C8922A/#E4AF4A) accents, Support orange (#E09E3C) for active tab + freight/pending badges, success green (#3CB87A) for WhatsApp buttons + delivered/sent indicators, Stars use #E4AF4A filled + #3a4a5e empty — NO indigo/blue
+   865→- All WhatsApp opens use `window.open(res.whatsappUrl, '_blank')` (POST whatsapp) and `window.open(res.reviewUrl, '_blank')` (POST review request)
+   866→- 15-day calc uses `new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)` exactly as specified
+   867→- TypeScript verification:
+   868→  * `npx tsc --noEmit 2>&1 | grep dashboards/support` → ZERO matches (clean)
+   869→  * With --noUnusedLocals --noUnusedParameters → ZERO matches in support.tsx
+   870→  * Removed unused `useMemo` import; kept `user: SessionUser` in props type but omitted from destructuring (interface unchanged, caller in page.tsx still passes user={user})
+   871→- Pre-existing unrelated errors remain (sales.tsx Select disabled prop, stock-check route, skills/stock-analysis-skill) — OUT of scope, not introduced by this task
+   872→
+   873→Stage Summary:
+   874→- support.tsx fully rewritten (914 lines) — old ChecklistForm flow replaced with the new 4-tab workflow (Dashboard / Client Dispatch / Send Tracking / Client Reviews)
+   875→- All 3 specified API endpoints wired: POST /api/challans/[id]/whatsapp (returns whatsappUrl), PATCH /api/challans/[id]/whatsapp (marks emailSent), POST /api/challans/[id]/review (action: 'request' returns reviewUrl, action: 'submit' stores reviewText + rating)
+   876→- WhatsApp message template matches spec exactly (Dear [Name], dispatched notice, challan no, freight in ₹, tracking link, LaxRee sign-off)
+   877→- Celebration popup auto-fires on Dispatch tab open when newly-dispatched (status=DISPATCHED) challans exist — handoff acknowledgment from Coordinator
+   878→- UI uses existing components from ../ui (Card, Btn, Input, Select, Textarea, Modal, SectionTitle, StatCard, Badge, EmptyState) and theme helpers from ../types (fmtINR, fmtDate, STATUS_COLORS) — no new UI primitives introduced
+   879→- TypeScript compiles clean (0 errors in support.tsx, including strict unused-locals check)
+   880→- Props interface preserved exactly: `{ user: SessionUser; activeTab: string; onTabChange: (id: string) => void }` — caller (page.tsx:136) requires no changes
+   881→
+   882→---
+   883→Task ID: workflow-redesign-verify
+   884→Agent: main (Z.ai Code)
+   885→Task: Verify the complete workflow redesign across Sales, Account, Coordinator, Support dashboards.
+   886→
+   887→Work Log:
+   888→- Ran `bun run lint` — 0 errors, 0 warnings (clean)
+   889→- Ran `npx tsc --noEmit` — 0 errors in src/ (only pre-existing skills/ error remains)
+   890→- Ran `bun run db:push` — schema synced successfully
+   891→- Started dev server and verified page renders (login screen with all 7 roles)
+   892→- Logged in as Sales via browser — dashboard rendered correctly with:
+   893→  • Sidebar: Dashboard, Check Stock, Upload Challan, My Challans, Stock Hold
+   894→  • Dashboard tab: Month/Year selectors, "Last 12 Months" chart, "Status Breakdown", "Latest Challans" table with real data (WF-TEST-002, Grand Hotel Delhi, ₹50,000, PARTIAL, IN TRANSIT)
+   895→  • Check Stock tab: 4 cascading dropdowns (Category → Item Name → Model → Colour) rendering correctly
+   896→- Ran 14-step end-to-end API workflow test (all passed):
+   897→  1. Sales login ✓
+   898→  2. Stock check categories API (6 categories returned) ✓
+   899→  3. Upload challan with AI stock analysis ("1 will be available in 25-30 days") ✓
+   900→  4. Account login ✓
+   901→  5. Get challan for verification ✓
+   902→  6. Account approve payment ("Payment verified, sent to Coordinator") ✓
+   903→  7. Account upload e-way bill + invoice ("Bills uploaded successfully") ✓
+   904→  8. Coordinator login ✓
+   905→  9. Coordinator audit item APPROVED + submit audit ("Audit submitted, sent to warehouse") ✓
+   906→  10. Coordinator warehouse: QC → Packaging → Done (all 3 steps) ✓
+   907→  11. Coordinator vehicle arrangement ("Vehicle arranged successfully") ✓
+   908→  12. Coordinator dispatch ("Challan dispatched, sent to Support team") ✓
+   909→  13. Support WhatsApp tracking (URL generated: https://wa.me/919876543210?text=Dear%20Grand%...) ✓
+   910→  14. Support review request ("Review request sent to client") ✓
+   911→
+   912→Stage Summary:
+   913→- All 4 dashboards (Sales, Account, Coordinator, Support) successfully rebuilt with new workflow
+   914→- Complete end-to-end workflow chain verified via API tests (14/14 passed)
+   915→- Sales Dashboard visually verified in browser (dashboard + check stock tabs confirmed)
+   916→- TypeScript and ESLint both clean
+   917→- Dev server unstable in sandbox (OOM kills next-server after ~30s) but all functionality proven via API tests
+   918→- New schema with 40+ fields on Challan + 15+ fields on ChallanItem supports the full workflow
+   919→- 11 API routes created/updated for the workflow
+   920→- All 4 dashboard components written by parallel subagents, integrated successfully
+   921→
+   922→---
+   923→Task ID: challan-autofill-demo
+   924→Agent: main (Z.ai Code)
+   925→Task: Apply user-provided LAXREE logo, rename "LaxRee Hotel" → "Laxree", move "Upload Challan" to last position in Sales nav, add AI-powered challan PDF auto-fill feature, and run a demo with the user-provided CASACONNECT challan.
+   926→
+   927→Work Log:
+   928→- Replaced `public/laxree-logo.png` with the user-provided LAXREE logo (gold "LAXREE" text with "Hotel Supplies Redefined" tagline, from `upload/pasted_image_1784357121570.png`). Changed `object-cover` → `object-contain p-1` so the full logo is visible inside the circular badge.
+   929→- Renamed "LaxRee Hotel" → "Laxree" across all files: `app-shell.tsx` (sidebar + footer), `login-screen.tsx` (heading), `page.tsx` (loading screen), `owner.tsx` (PR letterhead — updated address to Gurugram, phone to 9251683657, GSTIN to 06AANCC2070Q1ZI, tagline to "Hotel Supplies Redefined"), `account.tsx` (WhatsApp reminder), `support.tsx` (WhatsApp tracking message), `api/challans/[id]/whatsapp/route.ts`, `api/challans/[id]/review/route.ts`, `api/purchase-requests/route.ts` (raisedByName + comment).
+   930→- Reordered Sales nav in `page.tsx`: Dashboard → Check Stock → My Challans → Stock Hold → **Upload Challan (last)**. Also reordered the local nav array in `sales.tsx` SalesDashboard to match.
+   931→- Created `/api/challans/extract` route that accepts a PDF via multipart/form-data and proxies it to the challan-extract mini-service (port 3031). The proxy design keeps the heavy `z-ai-web-dev-sdk` out of the Next.js dev server process (which was causing OOM kills during route compilation).
+   932→- Created `mini-services/challan-extract/` (port 3031): a standalone Bun HTTP server that:
+   933→  * Accepts POST multipart/form-data with a `file` field (PDF)
+   934→  * Reads the PDF buffer → base64 data URL
+   935→  * Calls `z-ai-web-dev-sdk` VLM (glm-4.6v) with `file_url` content type
+   936→  * Uses a detailed extraction prompt that understands the Laxree challan format (Challan No, Billing Name, M/S, Quotation No, Site Add, Phone, items table with Model/Description/Colour/Qty/Discounted Price/Amount/GST/Total, Packing Charges, Total Without/With Tax, Grand Total)
+   937→  * Returns strict JSON with all fields matching the Sales upload form's Section A/B/C structure
+   938→  * Includes a custom multipart parser (no external deps)
+   939→- Modified `sales.tsx` UploadTab to add a prominent gold-bordered "Auto-fill from Challan PDF" card at the TOP of the form (above Section A). Features:
+   940→  * File input for PDF upload
+   941→  * "Analyzing challan with AI… (~10–15s)" spinner during VLM processing
+   942→  * Green success banner: "✓ Challan analyzed! Auto-filled N items and all client/financial details"
+   943→  * Red error banner if extraction fails
+   944→  * "How it works" info box explaining the AI auto-fill + manual review flow
+   945→  * On success: populates all form fields — Section A (challan no, quotation, client name, city, mobile, billing name/address, shipping address, GST, expected delivery), Section B (amount without GST, GST %, packing charge), Section C (items array with itemName, itemNumber, model, colour, qty, unitPrice), Section D (PDF filename)
+   946→  * All auto-filled fields remain fully editable — sales person can review and adjust before submitting
+   947→- Verified Account dashboard `BillsTab` already has BOTH "E-Way" and "Item Bill" (invoice) upload options with separate number + filename inputs for each, and status badges showing E-Way ✓/✗ and Invoice ✓/✗.
+   948→- Ran end-to-end API demo with the user-provided CASACONNECT challan PDF:
+   949→  * Login as sales@laxree.com → HTTP 200 ✓
+   950→  * POST /api/challans/extract with the PDF → HTTP 200 in 13.97s ✓
+   951→  * Extracted data (all correct):
+   952→    - Challan No: LC-GGMP/26-27/0027
+   953→    - Quotation No: LR-GGMP/26-27/0936-A
+   954→    - Client: TANVIR HUSSAIN (JAMMU)
+   955→    - Mobile: 7006637596
+   956→    - Billing: CASACONNECT INNOVATIONS PRIVATE LIMITED
+   957→    - Address: HOUSE NO.334-A, SHASTRI NAGAR, GANDHINAGAR, JAMMU 180004
+   958→    - GST: 01AANCC2070Q1Z1
+   959→    - Expected Delivery: 2026-05-26
+   960→    - Amount w/o GST: ₹1,875 | GST: 18% | Packing: ₹37.50 | With GST: ₹2,212.50 | Grand Total: ₹2,256.75
+   961→    - Item: MANUAL SOAP DISPENSER (LRWA-382, WHITE, Qty 5, ₹375 each, ₹1,875 total)
+   962→- Created `start-services.sh` helper script that starts both the mini-service (port 3031) and Next.js dev server (port 3000) with proper cleanup.
+   963→- TypeScript: 0 errors in modified files. ESLint: 0 warnings in modified files.
+   964→- Browser UI demo could not complete due to sandbox memory limitation (Chromium + Next.js dev server exceeds 4GB available RAM — OOM kills the dev server when the browser loads). This is a known sandbox issue documented in prior worklog entries. The API-level demo above proves the full end-to-end flow works correctly.
+   965→
+   966→Stage Summary:
+   967→- Branding: User-provided LAXREE logo applied; "LaxRee Hotel" renamed to "Laxree" everywhere (sidebar, login, loading screen, PR letterhead, WhatsApp messages, review requests, PR raisedByName)
+   968→- Sales nav: "Upload Challan" moved to LAST position (after Dashboard, Check Stock, My Challans, Stock Hold)
+   969→- Auto-fill feature: New `/api/challans/extract` endpoint + `mini-services/challan-extract/` (port 3031) using z-ai-web-dev-sdk VLM (glm-4.6v) to parse Laxree challan PDFs. Sales UploadTab now has a prominent "Auto-fill from Challan PDF" card at the top that uploads the PDF, calls the VLM, and auto-populates Sections A/B/C — all fields remain editable for review.
+   970→- Account team: Already has both E-Way AND Item Bill upload options (verified).
+   971→- Demo: API-level end-to-end demo completed successfully with the CASACONNECT challan — all data extracted correctly in ~14 seconds.
+   972→- Architecture: Mini-service pattern keeps the heavy VLM SDK out of the Next.js process, preventing OOM during route compilation. The Next.js `/api/challans/extract` route is a thin proxy to `http://127.0.0.1:3031/`.
+   973→

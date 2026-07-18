@@ -1,0 +1,716 @@
+     1→     1→'use client'
+     2→     2→import { useMemo, useState } from 'react'
+     3→     3→import { useFetch, apiPost, apiPatch } from '../use-fetch'
+     4→     4→import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
+     5→     5→import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
+     6→     6→
+     7→     7→type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number }
+     8→     8→type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:string|null; quantity:number; status:string; matchedItem: Item|null; corrected:boolean }
+     9→     9→type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; clientMobile:string|null; expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number; paymentType:string; paymentStatus:string; status:string; createdAt:string; challanItems:ChallanItem[]; uploadedBy:{name:string;role:string} }
+    10→    10→
+    11→    11→// OutwardLog shape returned by /api/outward
+    12→    12→type OutwardLog = {
+    13→    13→  id:string; date:string; category:string; itemName:string; model:string;
+    14→    14→  colour:string|null; quantity:number; unit:string; clientName:string;
+    15→    15→  challanNumber:string|null; billNumber:string|null; remarks:string|null;
+    16→    16→  enteredBy?: { name:string; role:string }
+    17→    17→}
+    18→    18→
+    19→    19→// StockHold shape returned by /api/stock-hold
+    20→    20→type StockHold = {
+    21→    21→  id:string; date:string; category:string; itemName:string; model:string;
+    22→    22→  colour:string|null; holdQty:number; clientName:string; advanceAmount:number;
+    23→    23→  remarks:string|null; status:'ACTIVE'|'RELEASED'|'CONVERTED';
+    24→    24→  item: { id:string; currentStock:number; category:string; itemName:string; model:string; colour:string|null };
+    25→    25→  heldBy?: { name:string; role:string }
+    26→    26→}
+    27→    27→
+    28→    28→// StockRegister row used to look up live available stock per item
+    29→    29→type StockRow = {
+    30→    30→  id:string; category:string; itemName:string; model:string; colour:string|null;
+    31→    31→  unit:string; inward:number; dispatched:number; balance:number; onHold:number;
+    32→    32→  available:number; minStock:number; fastMoving:boolean;
+    33→    33→  status:'OK'|'LOW'|'OUT_OF_STOCK'
+    34→    34→}
+    35→    35→
+    36→    36→const CATEGORIES = ['Room Amenities','Bathroom Amenities','Lobby Items','Banquet Furniture','Linen','Bath Linen','Bath Tubs','Spare Parts']
+    37→    37→
+    38→    38→const HOLD_STATUS_COLOR: Record<string, string> = {
+    39→    39→  ACTIVE: '#E09E3C',
+    40→    40→  RELEASED: '#4E6180',
+    41→    41→  CONVERTED: '#3CB87A',
+    42→    42→}
+    43→    43→
+    44→    44→export function SalesDashboard({ user }: { user: SessionUser }) {
+    45→    45→  const [tab, setTab] = useState('list')
+    46→    46→  const nav = [
+    47→    47→    { id:'list', label:'My Challans', icon:'🧾' },
+    48→    48→    { id:'upload', label:'Upload Challan', icon:'📤' },
+    49→    49→    { id:'outward', label:'Outward Entry', icon:'📤' },
+    50→    50→    { id:'hold', label:'Stock Hold', icon:'🔒' },
+    51→    51→  ]
+    52→    52→  return (
+    53→    53→    <div className="space-y-4">
+    54→    54→      <div className="flex gap-1.5 flex-wrap">
+    55→    55→        {nav.map((n) => (
+    56→    56→          <button key={n.id} onClick={() => setTab(n.id)}
+    57→    57→            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
+    58→    58→              tab===n.id ? 'bg-[#C8922A]/15 text-[#E4AF4A] border-[#C8922A]/25' : 'text-[#96A8BF] border-white/7 hover:bg-white/5'
+    59→    59→            }`}>
+    60→    60→            <span className="mr-1">{n.icon}</span>{n.label}
+    61→    61→          </button>
+    62→    62→        ))}
+    63→    63→      </div>
+    64→    64→      {tab === 'list' && <ChallanList user={user} />}
+    65→    65→      {tab === 'upload' && <UploadForm user={user} onDone={() => setTab('list')} />}
+    66→    66→      {tab === 'outward' && <OutwardTab user={user} />}
+    67→    67→      {tab === 'hold' && <StockHoldTab user={user} />}
+    68→    68→    </div>
+    69→    69→  )
+    70→    70→}
+    71→    71→
+    72→    72→/* ------------------------------------------------------------------ */
+    73→    73→/* Outward Entry tab — dispatch stock to client                        */
+    74→    74→/* ------------------------------------------------------------------ */
+    75→    75→function OutwardTab({ user }: { user: SessionUser }) {
+    76→    76→  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
+    77→    77→  const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
+    78→    78→  const { data: logsData, loading: logsLoading, refresh: refreshLogs } = useFetch<{ logs: OutwardLog[] }>('/api/outward?limit=100')
+    79→    79→
+    80→    80→  const [date, setDate] = useState('')
+    81→    81→  const [category, setCategory] = useState('')
+    82→    82→  const [itemId, setItemId] = useState('')
+    83→    83→  const [qty, setQty] = useState('')
+    84→    84→  const [clientName, setClientName] = useState('')
+    85→    85→  const [challanNumber, setChallanNumber] = useState('')
+    86→    86→  const [billNumber, setBillNumber] = useState('')
+    87→    87→  const [remarks, setRemarks] = useState('')
+    88→    88→  const [saving, setSaving] = useState(false)
+    89→    89→  const [err, setErr] = useState('')
+    90→    90→  const [ok, setOk] = useState('')
+    91→    91→
+    92→    92→  const items = itemsData?.items || []
+    93→    93→  const filteredItems = useMemo(
+    94→    94→    () => items.filter((i) => !category || i.category === category),
+    95→    95→    [items, category],
+    96→    96→  )
+    97→    97→  const selectedItem = useMemo(
+    98→    98→    () => items.find((i) => i.id === itemId) || null,
+    99→    99→    [items, itemId],
+   100→   100→  )
+   101→   101→  const regRow = useMemo(
+   102→   102→    () => regData?.rows.find((r) => r.id === itemId) || null,
+   103→   103→    [regData, itemId],
+   104→   104→  )
+   105→   105→  const available = regRow?.available ?? null
+   106→   106→
+   107→   107→  const qtyNum = Number(qty) || 0
+   108→   108→  const qtyValid = qtyNum > 0 && (available === null || qtyNum <= available)
+   109→   109→
+   110→   110→  const reset = () => {
+   111→   111→    setDate(''); setCategory(''); setItemId(''); setQty(''); setClientName('')
+   112→   112→    setChallanNumber(''); setBillNumber(''); setRemarks('')
+   113→   113→  }
+   114→   114→
+   115→   115→  const submit = async () => {
+   116→   116→    setErr(''); setOk('')
+   117→   117→    if (!itemId) { setErr('Select an item'); return }
+   118→   118→    if (!clientName.trim()) { setErr('Client name is required'); return }
+   119→   119→    if (qtyNum <= 0) { setErr('Quantity must be greater than 0'); return }
+   120→   120→    if (available !== null && qtyNum > available) {
+   121→   121→      setErr(`Only ${available} units available`); return
+   122→   122→    }
+   123→   123→    setSaving(true)
+   124→   124→    try {
+   125→   125→      const res = await apiPost('/api/outward', {
+   126→   126→        itemId, quantity: qtyNum, clientName: clientName.trim(),
+   127→   127→        challanNumber: challanNumber || undefined,
+   128→   128→        billNumber: billNumber || undefined,
+   129→   129→        remarks: remarks || undefined,
+   130→   130→        date: date || undefined,
+   131→   131→      })
+   132→   132→      setOk(res.message || `Dispatched ${qtyNum} unit(s) to ${clientName}`)
+   133→   133→      reset()
+   134→   134→      refreshReg(); refreshLogs()
+   135→   135→    } catch (e: unknown) {
+   136→   136→      setErr(e instanceof Error ? e.message : 'Failed to dispatch')
+   137→   137→    } finally { setSaving(false) }
+   138→   138→  }
+   139→   139→
+   140→   140→  return (
+   141→   141→    <div className="space-y-4">
+   142→   142→      <Card className="p-4">
+   143→   143→        <SectionTitle icon="📤" title="Outward Entry" sub="Dispatch stock to a client — reduces current stock automatically" />
+   144→   144→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   145→   145→          <Input label="Date" type="date" value={date} onChange={setDate} />
+   146→   146→          <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
+   147→   147→            options={[{value:'',label:'— All Categories —'}, ...CATEGORIES.map((c) => ({value:c,label:c}))]} />
+   148→   148→          <Select label="Item" value={itemId} onChange={setItemId} required
+   149→   149→            options={[{value:'',label:'— Select Item —'}, ...filteredItems.map((it) => ({
+   150→   150→              value: it.id,
+   151→   151→              label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
+   152→   152→            }))]} />
+   153→   153→          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
+   154→   154→          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
+   155→   155→          <div>
+   156→   156→            <Input label="Quantity" type="number" value={qty} onChange={setQty} placeholder="0" required
+   157→   157→              step="1" />
+   158→   158→            {itemId && (
+   159→   159→              <div className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${
+   160→   160→                available === null ? 'text-[#96A8BF]' :
+   161→   161→                available <= 0 ? 'text-[#E05050]' :
+   162→   162→                available <= (regRow?.minStock || 0) ? 'text-[#E09E3C]' :
+   163→   163→                'text-[#3CB87A]'
+   164→   164→              }`}>
+   165→   165→                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+   166→   166→                Available: <span className="font-semibold">{available ?? '…'}</span>
+   167→   167→                {regRow && regRow.onHold > 0 && <span className="text-[#4E6180]"> (held: {regRow.onHold})</span>}
+   168→   168→                {qty && !qtyValid && available !== null && (
+   169→   169→                  <span className="ml-1 text-[#E05050]">· exceeds stock</span>
+   170→   170→                )}
+   171→   171→              </div>
+   172→   172→            )}
+   173→   173→          </div>
+   174→   174→          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
+   175→   175→          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0002" />
+   176→   176→          <Input label="Bill / Invoice Number" value={billNumber} onChange={setBillNumber} placeholder="INV-…" />
+   177→   177→          <div className="md:col-span-2 lg:col-span-3">
+   178→   178→            <Textarea label="Remarks" value={remarks} onChange={setRemarks} placeholder="Optional notes about dispatch…" rows={2} />
+   179→   179→          </div>
+   180→   180→        </div>
+   181→   181→
+   182→   182→        {err && <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+   183→   183→        {ok && <div className="mt-3 rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">✓ {ok}</div>}
+   184→   184→
+   185→   185→        <div className="flex justify-end gap-2 mt-4">
+   186→   186→          <Btn onClick={reset} disabled={saving}>Clear</Btn>
+   187→   187→          <Btn variant="gold" onClick={submit} disabled={saving || !itemId || !qtyValid}>
+   188→   188→            {saving ? 'Dispatching…' : '📤 Dispatch Stock'}
+   189→   189→          </Btn>
+   190→   190→        </div>
+   191→   191→      </Card>
+   192→   192→
+   193→   193→      <Card className="p-4">
+   194→   194→        <SectionTitle icon="📋" title="Recent Outward Logs" sub={`${logsData?.logs.length || 0} recent dispatches`} right={
+   195→   195→          <Btn size="sm" onClick={refreshLogs}>↻ Refresh</Btn>
+   196→   196→        } />
+   197→   197→        {logsLoading ? <div className="text-center py-6 text-[#96A8BF] text-sm">Loading…</div> :
+   198→   198→         !logsData || logsData.logs.length === 0 ? <EmptyState icon="📤" title="No outward entries yet" sub="Dispatched stock will appear here" /> : (
+   199→   199→          <div className="overflow-x-auto -mx-4 px-4">
+   200→   200→            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-white/7">
+   201→   201→              <table className="w-full text-[12px]">
+   202→   202→                <thead className="sticky top-0 bg-[#111f32] z-10">
+   203→   203→                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   204→   204→                    <th className="py-2 px-3">Date</th>
+   205→   205→                    <th className="py-2 px-3">Item</th>
+   206→   206→                    <th className="py-2 px-3">Model</th>
+   207→   207→                    <th className="py-2 px-3">Colour</th>
+   208→   208→                    <th className="py-2 px-3 text-right">Qty</th>
+   209→   209→                    <th className="py-2 px-3">Client</th>
+   210→   210→                    <th className="py-2 px-3">Challan</th>
+   211→   211→                    <th className="py-2 px-3">Bill No</th>
+   212→   212→                  </tr>
+   213→   213→                </thead>
+   214→   214→                <tbody>
+   215→   215→                  {logsData.logs.map((l) => (
+   216→   216→                    <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   217→   217→                      <td className="py-2 px-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(l.date)}</td>
+   218→   218→                      <td className="py-2 px-3 text-[#EDE4D0]">{l.itemName}</td>
+   219→   219→                      <td className="py-2 px-3 text-[#96A8BF] font-mono">{l.model || '—'}</td>
+   220→   220→                      <td className="py-2 px-3 text-[#96A8BF]">{l.colour || '—'}</td>
+   221→   221→                      <td className="py-2 px-3 text-right text-[#E05050] font-semibold">−{l.quantity}</td>
+   222→   222→                      <td className="py-2 px-3 text-[#EDE4D0]">{l.clientName}</td>
+   223→   223→                      <td className="py-2 px-3 text-[#E4AF4A] font-mono">{l.challanNumber || '—'}</td>
+   224→   224→                      <td className="py-2 px-3 text-[#96A8BF] font-mono">{l.billNumber || '—'}</td>
+   225→   225→                    </tr>
+   226→   226→                  ))}
+   227→   227→                </tbody>
+   228→   228→              </table>
+   229→   229→            </div>
+   230→   230→          </div>
+   231→   231→        )}
+   232→   232→      </Card>
+   233→   233→    </div>
+   234→   234→  )
+   235→   235→}
+   236→   236→
+   237→   237→/* ------------------------------------------------------------------ */
+   238→   238→/* Stock Hold tab — reserve stock against advance                      */
+   239→   239→/* ------------------------------------------------------------------ */
+   240→   240→function StockHoldTab({ user }: { user: SessionUser }) {
+   241→   241→  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
+   242→   242→  const { data: regData, refresh: refreshReg } = useFetch<{ rows: StockRow[] }>('/api/stock-register')
+   243→   243→  const { data: holdsData, loading: holdsLoading, refresh: refreshHolds } = useFetch<{ holds: StockHold[] }>('/api/stock-hold?status=ACTIVE')
+   244→   244→
+   245→   245→  const [date, setDate] = useState('')
+   246→   246→  const [category, setCategory] = useState('')
+   247→   247→  const [itemId, setItemId] = useState('')
+   248→   248→  const [holdQty, setHoldQty] = useState('')
+   249→   249→  const [clientName, setClientName] = useState('')
+   250→   250→  const [advanceAmount, setAdvanceAmount] = useState('')
+   251→   251→  const [remarks, setRemarks] = useState('')
+   252→   252→  const [saving, setSaving] = useState(false)
+   253→   253→  const [releasing, setReleasing] = useState<string | null>(null)
+   254→   254→  const [err, setErr] = useState('')
+   255→   255→  const [ok, setOk] = useState('')
+   256→   256→
+   257→   257→  const items = itemsData?.items || []
+   258→   258→  const filteredItems = useMemo(
+   259→   259→    () => items.filter((i) => !category || i.category === category),
+   260→   260→    [items, category],
+   261→   261→  )
+   262→   262→  const selectedItem = useMemo(
+   263→   263→    () => items.find((i) => i.id === itemId) || null,
+   264→   264→    [items, itemId],
+   265→   265→  )
+   266→   266→  const regRow = useMemo(
+   267→   267→    () => regData?.rows.find((r) => r.id === itemId) || null,
+   268→   268→    [regData, itemId],
+   269→   269→  )
+   270→   270→  // available after existing holds = regRow.available (already subtracts active holds)
+   271→   271→  const availableAfterHold = regRow?.available ?? null
+   272→   272→
+   273→   273→  const holds = holdsData?.holds || []
+   274→   274→  const summary = useMemo(() => ({
+   275→   275→    total: holds.length,
+   276→   276→    totalQty: holds.reduce((s, h) => s + h.holdQty, 0),
+   277→   277→    totalAdvance: holds.reduce((s, h) => s + h.advanceAmount, 0),
+   278→   278→  }), [holds])
+   279→   279→
+   280→   280→  const qtyNum = Number(holdQty) || 0
+   281→   281→  const qtyValid = qtyNum > 0 && (availableAfterHold === null || qtyNum <= availableAfterHold)
+   282→   282→
+   283→   283→  const reset = () => {
+   284→   284→    setDate(''); setCategory(''); setItemId(''); setHoldQty(''); setClientName('')
+   285→   285→    setAdvanceAmount(''); setRemarks('')
+   286→   286→  }
+   287→   287→
+   288→   288→  const submit = async () => {
+   289→   289→    setErr(''); setOk('')
+   290→   290→    if (!itemId) { setErr('Select an item'); return }
+   291→   291→    if (!clientName.trim()) { setErr('Client name is required'); return }
+   292→   292→    if (qtyNum <= 0) { setErr('Hold quantity must be greater than 0'); return }
+   293→   293→    if (availableAfterHold !== null && qtyNum > availableAfterHold) {
+   294→   294→      setErr(`Cannot hold ${qtyNum}. Only ${availableAfterHold} available (after existing holds).`); return
+   295→   295→    }
+   296→   296→    setSaving(true)
+   297→   297→    try {
+   298→   298→      const res = await apiPost('/api/stock-hold', {
+   299→   299→        itemId, holdQty: qtyNum, clientName: clientName.trim(),
+   300→   300→        advanceAmount: Number(advanceAmount) || 0,
+   301→   301→        remarks: remarks || undefined,
+   302→   302→      })
+   303→   303→      setOk(res.message || `Held ${qtyNum} unit(s) for ${clientName}`)
+   304→   304→      reset()
+   305→   305→      refreshReg(); refreshHolds()
+   306→   306→    } catch (e: unknown) {
+   307→   307→      setErr(e instanceof Error ? e.message : 'Failed to place hold')
+   308→   308→    } finally { setSaving(false) }
+   309→   309→  }
+   310→   310→
+   311→   311→  const release = async (id: string) => {
+   312→   312→    setErr(''); setOk('')
+   313→   313→    setReleasing(id)
+   314→   314→    try {
+   315→   315→      const res = await apiPatch('/api/stock-hold', { id, status: 'RELEASED' })
+   316→   316→      setOk(res.message || 'Hold released — stock returned to available pool')
+   317→   317→      refreshReg(); refreshHolds()
+   318→   318→    } catch (e: unknown) {
+   319→   319→      setErr(e instanceof Error ? e.message : 'Failed to release hold')
+   320→   320→    } finally { setReleasing(null) }
+   321→   321→  }
+   322→   322→
+   323→   323→  return (
+   324→   324→    <div className="space-y-4">
+   325→   325→      {/* Summary cards */}
+   326→   326→      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+   327→   327→        <StatCard label="Active Holds" value={summary.total} accent="#E4AF4A" icon="🔒" />
+   328→   328→        <StatCard label="Total Held Qty" value={summary.totalQty} accent="#E09E3C" icon="📦" />
+   329→   329→        <StatCard label="Total Advance" value={fmtINR(summary.totalAdvance)} accent="#3CB87A" icon="💰" />
+   330→   330→      </div>
+   331→   331→
+   332→   332→      <Card className="p-4">
+   333→   333→        <SectionTitle icon="🔒" title="Place Stock Hold" sub="Reserve stock against advance payment — held units excluded from outward availability" />
+   334→   334→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+   335→   335→          <Input label="Date" type="date" value={date} onChange={setDate} />
+   336→   336→          <Select label="Category" value={category} onChange={(v) => { setCategory(v); setItemId('') }}
+   337→   337→            options={[{value:'',label:'— All Categories —'}, ...CATEGORIES.map((c) => ({value:c,label:c}))]} />
+   338→   338→          <Select label="Item" value={itemId} onChange={setItemId} required
+   339→   339→            options={[{value:'',label:'— Select Item —'}, ...filteredItems.map((it) => ({
+   340→   340→              value: it.id,
+   341→   341→              label: `${it.itemName}${it.model ? ` (${it.model})` : ''}${it.colour ? ` · ${it.colour}` : ''}`,
+   342→   342→            }))]} />
+   343→   343→          <ReadonlyField label="Model / SKU" value={selectedItem?.model || '—'} />
+   344→   344→          <ReadonlyField label="Colour / Variant" value={selectedItem?.colour || '—'} />
+   345→   345→          <div>
+   346→   346→            <Input label="Hold Quantity" type="number" value={holdQty} onChange={setHoldQty} placeholder="0" required step="1" />
+   347→   347→            {itemId && (
+   348→   348→              <div className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${
+   349→   349→                availableAfterHold === null ? 'text-[#96A8BF]' :
+   350→   350→                availableAfterHold <= 0 ? 'text-[#E05050]' :
+   351→   351→                availableAfterHold <= (regRow?.minStock || 0) ? 'text-[#E09E3C]' :
+   352→   352→                'text-[#3CB87A]'
+   353→   353→              }`}>
+   354→   354→                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+   355→   355→                Available (after holds): <span className="font-semibold">{availableAfterHold ?? '…'}</span>
+   356→   356→                {regRow && <>
+   357→   357→                  <span className="text-[#4E6180]">· balance: {regRow.balance}</span>
+   358→   358→                  {regRow.onHold > 0 && <span className="text-[#E09E3C]">· already held: {regRow.onHold}</span>}
+   359→   359→                </>}
+   360→   360→                {holdQty && !qtyValid && availableAfterHold !== null && (
+   361→   361→                  <span className="ml-1 text-[#E05050]">· exceeds available</span>
+   362→   362→                )}
+   363→   363→              </div>
+   364→   364→            )}
+   365→   365→          </div>
+   366→   366→          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel / Client name" required />
+   367→   367→          <Input label="Advance Amount (₹)" type="number" value={advanceAmount} onChange={setAdvanceAmount} placeholder="0" step="0.01" />
+   368→   368→          <div className="md:col-span-2 lg:col-span-3">
+   369→   369→            <Textarea label="Remarks" value={remarks} onChange={setRemarks} placeholder="Optional — lead time, expected conversion date, etc." rows={2} />
+   370→   370→          </div>
+   371→   371→        </div>
+   372→   372→
+   373→   373→        {err && <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+   374→   374→        {ok && <div className="mt-3 rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">✓ {ok}</div>}
+   375→   375→
+   376→   376→        <div className="flex justify-end gap-2 mt-4">
+   377→   377→          <Btn onClick={reset} disabled={saving}>Clear</Btn>
+   378→   378→          <Btn variant="gold" onClick={submit} disabled={saving || !itemId || !qtyValid}>
+   379→   379→            {saving ? 'Placing Hold…' : '🔒 Place Hold'}
+   380→   380→          </Btn>
+   381→   381→        </div>
+   382→   382→      </Card>
+   383→   383→
+   384→   384→      <Card className="p-4">
+   385→   385→        <SectionTitle icon="📋" title="Active Stock Holds" sub={`${holds.length} active reservation(s)`} right={
+   386→   386→          <Btn size="sm" onClick={refreshHolds}>↻ Refresh</Btn>
+   387→   387→        } />
+   388→   388→        {holdsLoading ? <div className="text-center py-6 text-[#96A8BF] text-sm">Loading…</div> :
+   389→   389→         holds.length === 0 ? <EmptyState icon="🔒" title="No active holds" sub="Place a hold above to reserve stock" /> : (
+   390→   390→          <div className="overflow-x-auto -mx-4 px-4">
+   391→   391→            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-white/7">
+   392→   392→              <table className="w-full text-[12px]">
+   393→   393→                <thead className="sticky top-0 bg-[#111f32] z-10">
+   394→   394→                  <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   395→   395→                    <th className="py-2 px-3">Date</th>
+   396→   396→                    <th className="py-2 px-3">Item</th>
+   397→   397→                    <th className="py-2 px-3">Model</th>
+   398→   398→                    <th className="py-2 px-3">Colour</th>
+   399→   399→                    <th className="py-2 px-3 text-right">Hold Qty</th>
+   400→   400→                    <th className="py-2 px-3">Client</th>
+   401→   401→                    <th className="py-2 px-3 text-right">Advance ₹</th>
+   402→   402→                    <th className="py-2 px-3 text-right">Available</th>
+   403→   403→                    <th className="py-2 px-3">Status</th>
+   404→   404→                    <th className="py-2 px-3 text-right">Actions</th>
+   405→   405→                  </tr>
+   406→   406→                </thead>
+   407→   407→                <tbody>
+   408→   408→                  {holds.map((h) => {
+   409→   409→                    const itemBalance = h.item?.currentStock ?? 0
+   410→   410→                    const availableNow = itemBalance - h.holdQty
+   411→   411→                    return (
+   412→   412→                      <tr key={h.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   413→   413→                        <td className="py-2 px-3 text-[#96A8BF] whitespace-nowrap">{fmtDate(h.date)}</td>
+   414→   414→                        <td className="py-2 px-3 text-[#EDE4D0]">{h.itemName}</td>
+   415→   415→                        <td className="py-2 px-3 text-[#96A8BF] font-mono">{h.model || '—'}</td>
+   416→   416→                        <td className="py-2 px-3 text-[#96A8BF]">{h.colour || '—'}</td>
+   417→   417→                        <td className="py-2 px-3 text-right text-[#E09E3C] font-semibold">{h.holdQty}</td>
+   418→   418→                        <td className="py-2 px-3 text-[#EDE4D0]">{h.clientName}</td>
+   419→   419→                        <td className="py-2 px-3 text-right text-[#3CB87A]">{fmtINR(h.advanceAmount)}</td>
+   420→   420→                        <td className="py-2 px-3 text-right text-[#96A8BF]">{availableNow}</td>
+   421→   421→                        <td className="py-2 px-3"><Badge label={h.status} color={HOLD_STATUS_COLOR[h.status]} /></td>
+   422→   422→                        <td className="py-2 px-3 text-right">
+   423→   423→                          {h.status === 'ACTIVE' ? (
+   424→   424→                            <Btn size="sm" variant="danger" disabled={releasing === h.id}
+   425→   425→                              onClick={() => release(h.id)}>
+   426→   426→                              {releasing === h.id ? 'Releasing…' : 'Release'}
+   427→   427→                            </Btn>
+   428→   428→                          ) : <span className="text-[#4E6180] text-[11px]">—</span>}
+   429→   429→                        </td>
+   430→   430→                      </tr>
+   431→   431→                    )
+   432→   432→                  })}
+   433→   433→                </tbody>
+   434→   434→              </table>
+   435→   435→            </div>
+   436→   436→          </div>
+   437→   437→        )}
+   438→   438→      </Card>
+   439→   439→    </div>
+   440→   440→  )
+   441→   441→}
+   442→   442→
+   443→   443→/* ------------------------------------------------------------------ */
+   444→   444→/* Shared read-only display field                                      */
+   445→   445→/* ------------------------------------------------------------------ */
+   446→   446→function ReadonlyField({ label, value }: { label: string; value: string }) {
+   447→   447→  return (
+   448→   448→    <label className="block">
+   449→   449→      <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">{label}</span>
+   450→   450→      <div className="w-full rounded-lg border border-white/10 bg-[#0c1928]/60 px-3 py-2 text-[13px] text-[#EDE4D0] font-mono">
+   451→   451→        {value}
+   452→   452→      </div>
+   453→   453→    </label>
+   454→   454→  )
+   455→   455→}
+   456→   456→
+   457→   457→/* ------------------------------------------------------------------ */
+   458→   458→/* Existing tabs — Challan list + analysis + upload (unchanged)        */
+   459→   459→/* ------------------------------------------------------------------ */
+   460→   460→function ChallanList({ user }: { user: SessionUser }) {
+   461→   461→  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
+   462→   462→  const [sel, setSel] = useState<Challan | null>(null)
+   463→   463→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   464→   464→  if (!data) return null
+   465→   465→
+   466→   466→  const mine = data.challans // sales sees all but can filter
+   467→   467→
+   468→   468→  return (
+   469→   469→    <Card className="p-4">
+   470→   470→      <SectionTitle icon="🧾" title="Challans" sub={`${mine.length} total`} />
+   471→   471→      {mine.length === 0 ? <EmptyState icon="🧾" title="No challans" sub="Upload your first challan to begin" /> : (
+   472→   472→        <div className="overflow-x-auto -mx-4 px-4">
+   473→   473→          <table className="w-full text-[12px]">
+   474→   474→            <thead>
+   475→   475→              <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   476→   476→                <th className="py-2 pr-3">Challan #</th>
+   477→   477→                <th className="py-2 pr-3">Client</th>
+   478→   478→                <th className="py-2 pr-3">Expected</th>
+   479→   479→                <th className="py-2 pr-3 text-right">Advance</th>
+   480→   480→                <th className="py-2 pr-3 text-right">Total</th>
+   481→   481→                <th className="py-2 pr-3">Items</th>
+   482→   482→                <th className="py-2">Status</th>
+   483→   483→              </tr>
+   484→   484→            </thead>
+   485→   485→            <tbody>
+   486→   486→              {mine.map((c) => {
+   487→   487→                const matched = c.challanItems.filter((i) => i.status==='MATCHED').length
+   488→   488→                const issues = c.challanItems.length - matched
+   489→   489→                return (
+   490→   490→                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer" onClick={() => setSel(c)}>
+   491→   491→                    <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
+   492→   492→                    <td className="py-2 pr-3 text-[#EDE4D0]">{c.clientName}<div className="text-[10px] text-[#4E6180]">{c.clientCity}</div></td>
+   493→   493→                    <td className="py-2 pr-3 text-[#96A8BF]">{fmtDate(c.expectedDeliveryDate)}</td>
+   494→   494→                    <td className="py-2 pr-3 text-right text-[#3CB87A]">{fmtINR(c.amountAdvance)}</td>
+   495→   495→                    <td className="py-2 pr-3 text-right text-[#EDE4D0]">{fmtINR(c.amountTotal)}</td>
+   496→   496→                    <td className="py-2 pr-3">
+   497→   497→                      <span className="text-[#3CB87A]">{matched}</span>
+   498→   498→                      {issues > 0 && <span className="text-[#E09E3C]"> / {issues}⚠</span>}
+   499→   499→                      <span className="text-[#4E6180]"> / {c.challanItems.length}</span>
+   500→   500→                    </td>
+   501→   501→                    <td className="py-2"><Badge label={c.status.replace(/_/g,' ')} color={STATUS_COLORS[c.status]} /></td>
+   502→   502→                  </tr>
+   503→   503→                )
+   504→   504→              })}
+   505→   505→            </tbody>
+   506→   506→          </table>
+   507→   507→        </div>
+   508→   508→      )}
+   509→   509→
+   510→   510→      <Modal open={!!sel} onClose={() => { setSel(null); refresh() }} title={sel ? `${sel.challanNumber} — Analysis` : ''} wide>
+   511→   511→        {sel && <ChallanAnalysis c={sel} />}
+   512→   512→      </Modal>
+   513→   513→    </Card>
+   514→   514→  )
+   515→   515→}
+   516→   516→
+   517→   517→function ChallanAnalysis({ c }: { c: Challan }) {
+   518→   518→  const matched = c.challanItems.filter((i) => i.status === 'MATCHED')
+   519→   519→  const wrong = c.challanItems.filter((i) => i.status === 'WRONG_MODEL')
+   520→   520→  const notFound = c.challanItems.filter((i) => i.status === 'NOT_FOUND')
+   521→   521→  const remaining = c.amountTotal - c.amountReceived
+   522→   522→
+   523→   523→  return (
+   524→   524→    <div className="space-y-4">
+   525→   525→      {/* Summary stats */}
+   526→   526→      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+   527→   527→        <StatCard label="Total" value={fmtINR(c.amountTotal)} accent="#E4AF4A" />
+   528→   528→        <StatCard label="Advance" value={fmtINR(c.amountAdvance)} accent="#3CB87A" />
+   529→   529→        <StatCard label="Received" value={fmtINR(c.amountReceived)} accent="#4A9EE0" />
+   530→   530→        <StatCard label="Remaining" value={fmtINR(remaining)} accent={remaining>0?'#E09E3C':'#3CB87A'} />
+   531→   531→      </div>
+   532→   532→
+   533→   533→      {/* Summary: available / not available */}
+   534→   534→      <Card className="p-3">
+   535→   535→        <SectionTitle icon="📋" title="Summary — Item Availability" />
+   536→   536→        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+   537→   537→          <div className="rounded-lg border border-[#3CB87A]/20 bg-[#3CB87A]/5 p-2.5">
+   538→   538→            <div className="text-[#3CB87A] font-semibold mb-1">✓ Available ({matched.length})</div>
+   539→   539→            {matched.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName} <span className="text-[#96A8BF]">×{i.quantity}</span></div>)}
+   540→   540→            {matched.length === 0 && <div className="text-[#4E6180]">None</div>}
+   541→   541→          </div>
+   542→   542→          <div className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 p-2.5">
+   543→   543→            <div className="text-[#E09E3C] font-semibold mb-1">⚠ Model Mismatch ({wrong.length})</div>
+   544→   544→            {wrong.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName}<div className="text-[10px] text-[#96A8BF]">Challan: {i.model} → Stock: {i.matchedItem?.model}</div></div>)}
+   545→   545→            {wrong.length === 0 && <div className="text-[#4E6180]">None</div>}
+   546→   546→          </div>
+   547→   547→          <div className="rounded-lg border border-[#E05050]/20 bg-[#E05050]/5 p-2.5">
+   548→   548→            <div className="text-[#E05050] font-semibold mb-1">✕ Not in Catalogue ({notFound.length})</div>
+   549→   549→            {notFound.map((i) => <div key={i.id} className="text-[#EDE4D0]">• {i.itemName} <span className="text-[#96A8BF]">({i.model})</span></div>)}
+   550→   550→            {notFound.length === 0 && <div className="text-[#4E6180]">None</div>}
+   551→   551→          </div>
+   552→   552→        </div>
+   553→   553→      </Card>
+   554→   554→
+   555→   555→      {/* Detailed items table */}
+   556→   556→      <div>
+   557→   557→        <h4 className="text-[12px] font-semibold text-[#E4AF4A] mb-2">Item Analysis Detail</h4>
+   558→   558→        <div className="rounded-lg border border-white/7 overflow-hidden">
+   559→   559→          <table className="w-full text-[12px]">
+   560→   560→            <thead>
+   561→   561→              <tr className="text-left text-[10px] uppercase text-[#4E6180] bg-white/[0.02]">
+   562→   562→                <th className="py-2 px-3">Item Name</th>
+   563→   563→                <th className="py-2 px-3">Item #</th>
+   564→   564→                <th className="py-2 px-3">Model (Challan)</th>
+   565→   565→                <th className="py-2 px-3">Model (Stock)</th>
+   566→   566→                <th className="py-2 px-3 text-right">Qty</th>
+   567→   567→                <th className="py-2 px-3">Status</th>
+   568→   568→              </tr>
+   569→   569→            </thead>
+   570→   570→            <tbody>
+   571→   571→              {c.challanItems.map((ci) => (
+   572→   572→                <tr key={ci.id} className="border-t border-white/5">
+   573→   573→                  <td className="py-2 px-3 text-[#EDE4D0]">{ci.itemName}</td>
+   574→   574→                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.itemNumber || '—'}</td>
+   575→   575→                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
+   576→   576→                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.matchedItem?.model || '—'}</td>
+   577→   577→                  <td className="py-2 px-3 text-right">{ci.quantity}</td>
+   578→   578→                  <td className="py-2 px-3"><Badge label={ci.status.replace(/_/g,' ')} color={STATUS_COLORS[ci.status]} /></td>
+   579→   579→                </tr>
+   580→   580→              ))}
+   581→   581→            </tbody>
+   582→   582→          </table>
+   583→   583→        </div>
+   584→   584→      </div>
+   585→   585→
+   586→   586→      {c.paymentStatus === 'PARTIAL' && (
+   587→   587→        <div className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 p-3 text-[12px] text-[#E09E3C]">
+   588→   588→          ⚠ Partial payment: ₹{remaining.toLocaleString('en-IN')} remaining. Account team has been notified to verify the advance.
+   589→   589→        </div>
+   590→   590→      )}
+   591→   591→      {c.paymentStatus === 'PAID' && (
+   592→   592→        <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 p-3 text-[12px] text-[#3CB87A]">
+   593→   593→          ✓ Full payment received. Challan sent to Account team for verification.
+   594→   594→        </div>
+   595→   595→      )}
+   596→   596→    </div>
+   597→   597→  )
+   598→   598→}
+   599→   599→
+   600→   600→function UploadForm({ user, onDone }: { user: SessionUser; onDone: () => void }) {
+   601→   601→  const [challanNumber, setChallanNumber] = useState('')
+   602→   602→  const [clientName, setClientName] = useState('')
+   603→   603→  const [clientCity, setClientCity] = useState('')
+   604→   604→  const [clientMobile, setClientMobile] = useState('')
+   605→   605→  const [expectedDate, setExpectedDate] = useState('')
+   606→   606→  const [amountTotal, setAmountTotal] = useState('')
+   607→   607→  const [amountAdvance, setAmountAdvance] = useState('')
+   608→   608→  const [paymentType, setPaymentType] = useState('ADVANCE')
+   609→   609→  const [items, setItems] = useState([{ itemName:'', itemNumber:'', model:'', quantity:1 }])
+   610→   610→  const [saving, setSaving] = useState(false)
+   611→   611→  const [err, setErr] = useState('')
+   612→   612→  const [result, setResult] = useState<Challan | null>(null)
+   613→   613→  const [autoHoldCount, setAutoHoldCount] = useState(0)
+   614→   614→
+   615→   615→  const { data: itemsData } = useFetch<{ items: Item[] }>('/api/items')
+   616→   616→
+   617→   617→  const submit = async () => {
+   618→   618→    setErr('')
+   619→   619→    if (!challanNumber || !clientName) { setErr('Challan number and client name required'); return }
+   620→   620→    const validItems = items.filter((i) => i.itemName.trim())
+   621→   621→    if (!validItems.length) { setErr('Add at least one item'); return }
+   622→   622→    if (paymentType === 'ADVANCE' && !amountAdvance) { setErr('Advance amount is mandatory when payment type is Advance'); return }
+   623→   623→    setSaving(true)
+   624→   624→    try {
+   625→   625→      const res = await apiPost('/api/challans/upload', {
+   626→   626→        challanNumber, clientName, clientCity, clientMobile,
+   627→   627→        expectedDeliveryDate: expectedDate || null,
+   628→   628→        amountTotal: Number(amountTotal) || 0,
+   629→   629→        amountAdvance: Number(amountAdvance) || 0,
+   630→   630→        paymentType,
+   631→   631→        items: validItems,
+   632→   632→      })
+   633→   633→      setResult(res.challan)
+   634→   634→      setAutoHoldCount(typeof res.autoHoldCount === 'number' ? res.autoHoldCount : 0)
+   635→   635→    } catch (e: unknown) {
+   636→   636→      setErr(e instanceof Error ? e.message : 'Upload failed')
+   637→   637→    } finally { setSaving(false) }
+   638→   638→  }
+   639→   639→
+   640→   640→  if (result) {
+   641→   641→    return (
+   642→   642→      <Card className="p-4">
+   643→   643→        <div className="text-center mb-4">
+   644→   644→          <div className="text-3xl mb-2">✅</div>
+   645→   645→          <h3 className="font-serif text-lg font-bold text-[#3CB87A]">Challan Uploaded &amp; Analyzed!</h3>
+   646→   646→          <p className="text-[12px] text-[#96A8BF] mt-1">System auto-analyzed {result.challanItems.length} items</p>
+   647→   647→        </div>
+   648→   648→        {autoHoldCount > 0 && (
+   649→   649→          <div className="mb-4 rounded-lg border border-[#9B6ED4]/30 bg-[#9B6ED4]/10 px-3 py-2.5 text-[12px] text-[#9B6ED4]">
+   650→   650→            🔒 <strong>Stock Auto-Held:</strong> {autoHoldCount} matched item(s) have been put on hold for <strong>{result.clientName}</strong> to protect stock health. Holds are linked to challan <span className="font-mono">{result.challanNumber}</span> — see the Stock Hold tab.
+   651→   651→          </div>
+   652→   652→        )}
+   653→   653→        <ChallanAnalysis c={result} />
+   654→   654→        <div className="flex justify-end gap-2 mt-4">
+   655→   655→          <Btn onClick={() => { setResult(null); setAutoHoldCount(0); onDone() }}>Done</Btn>
+   656→   656→          <Btn variant="gold" onClick={() => { setResult(null); setAutoHoldCount(0); setChallanNumber(''); setClientName(''); setClientCity(''); setClientMobile(''); setExpectedDate(''); setAmountTotal(''); setAmountAdvance(''); setItems([{ itemName:'', itemNumber:'', model:'', quantity:1 }]) }}>Upload Another</Btn>
+   657→   657→        </div>
+   658→   658→      </Card>
+   659→   659→    )
+   660→   660→  }
+   661→   661→
+   662→   662→  return (
+   663→   663→    <div className="space-y-4">
+   664→   664→      <Card className="p-4">
+   665→   665→        <SectionTitle icon="📤" title="Upload New Challan" sub="System will auto-analyze each item against master inventory" />
+   666→   666→        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   667→   667→          <Input label="Challan Number" value={challanNumber} onChange={setChallanNumber} placeholder="CH-2026-0002" required />
+   668→   668→          <Input label="Client Name" value={clientName} onChange={setClientName} placeholder="Hotel Name" required />
+   669→   669→          <Input label="City" value={clientCity} onChange={setClientCity} placeholder="City" />
+   670→   670→          <Input label="Mobile" value={clientMobile} onChange={setClientMobile} placeholder="+91…" />
+   671→   671→          <Input label="Expected Delivery Date" type="date" value={expectedDate} onChange={setExpectedDate} />
+   672→   672→          <Select label="Payment Type" value={paymentType} onChange={setPaymentType} options={[
+   673→   673→            { value:'FULL', label:'Full Payment' },
+   674→   674→            { value:'ADVANCE', label:'Advance Payment' },
+   675→   675→            { value:'NONE', label:'No Payment Yet' },
+   676→   676→          ]} />
+   677→   677→          <Input label="Total Amount (₹)" type="number" value={amountTotal} onChange={setAmountTotal} placeholder="0" />
+   678→   678→          <Input label={paymentType==='ADVANCE'?'Advance Amount (₹) *':'Advance Amount (₹)'} type="number" value={amountAdvance} onChange={setAmountAdvance} placeholder="0" required={paymentType==='ADVANCE'} />
+   679→   679→        </div>
+   680→   680→      </Card>
+   681→   681→
+   682→   682→      <Card className="p-4">
+   683→   683→        <SectionTitle icon="📦" title="Challan Items" sub="Add each item — system will check name + model" />
+   684→   684→        <div className="space-y-2">
+   685→   685→          {items.map((it, idx) => (
+   686→   686→            <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+   687→   687→              <div className="col-span-4">
+   688→   688→                <Select label={idx===0?'Item Name':''} value={it.itemName} onChange={(v) => {
+   689→   689→                  const n=[...items]; n[idx]={...it,itemName:v}
+   690→   690→                  const f = itemsData?.items.find((m)=>m.itemName===v)
+   691→   691→                  if (f) { n[idx].model = f.model; n[idx].itemNumber = f.model.split('-').pop() || '' }
+   692→   692→                  setItems(n)
+   693→   693→                }} options={[{value:'',label:'— Select / Type —'},...(itemsData?.items.map((m)=>({value:m.itemName,label:`${m.itemName} (${m.model})`}))||[])]} />
+   694→   694→              </div>
+   695→   695→              <div className="col-span-3"><Input label={idx===0?'Item #':''} value={it.itemNumber} onChange={(v)=>{const n=[...items];n[idx]={...it,itemNumber:v};setItems(n)}} placeholder="MB-40L" /></div>
+   696→   696→              <div className="col-span-3"><Input label={idx===0?'Model':''} value={it.model} onChange={(v)=>{const n=[...items];n[idx]={...it,model:v};setItems(n)}} placeholder="LR-MB-40L" /></div>
+   697→   697→              <div className="col-span-1"><Input label={idx===0?'Qty':''} type="number" value={it.quantity} onChange={(v)=>{const n=[...items];n[idx]={...it,quantity:Number(v)||1};setItems(n)}} /></div>
+   698→   698→              <div className="col-span-1 flex gap-1">
+   699→   699→                {idx===items.length-1 && <Btn size="sm" onClick={()=>setItems([...items,{itemName:'',itemNumber:'',model:'',quantity:1}])}>+</Btn>}
+   700→   700→                {items.length>1 && <Btn size="sm" variant="danger" onClick={()=>setItems(items.filter((_,i)=>i!==idx))}>×</Btn>}
+   701→   701→              </div>
+   702→   702→            </div>
+   703→   703→          ))}
+   704→   704→        </div>
+   705→   705→      </Card>
+   706→   706→
+   707→   707→      {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+   708→   708→
+   709→   709→      <div className="flex justify-end gap-2">
+   710→   710→        <Btn onClick={onDone}>Cancel</Btn>
+   711→   711→        <Btn variant="gold" onClick={submit} disabled={saving}>{saving ? 'Uploading & Analyzing…' : '📤 Upload & Analyze'}</Btn>
+   712→   712→      </div>
+   713→   713→    </div>
+   714→   714→  )
+   715→   715→}
+   716→   716→

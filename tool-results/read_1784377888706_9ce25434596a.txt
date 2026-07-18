@@ -1,0 +1,815 @@
+     1→'use client'
+     2→import { useEffect, useRef, useState } from 'react'
+     3→import { useFetch, apiPost, apiPatch } from '../use-fetch'
+     4→import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
+     5→import { fmtINR, fmtDate, STATUS_COLORS, SessionUser } from '../types'
+     6→
+     7→// ────────────────────────────────────────────────────────────────────────────
+     8→// Types
+     9→// ────────────────────────────────────────────────────────────────────────────
+    10→type Challan = {
+    11→  id: string
+    12→  challanNumber: string
+    13→  clientName: string
+    14→  clientCity: string
+    15→  clientMobile: string | null
+    16→  clientLocation: string | null
+    17→  expectedDeliveryDate: string | null
+    18→  amountTotal: number
+    19→  freightAmount: number
+    20→  status: string
+    21→  dispatchDate: string | null
+    22→  trackingLink: string | null
+    23→  transporterName: string | null
+    24→  vehicleNumber: string | null
+    25→  dispatchImages: string | null
+    26→  whatsappSent: boolean
+    27→  whatsappSentAt: string | null
+    28→  emailSent: boolean
+    29→  emailSentAt: string | null
+    30→  reviewRequested: boolean
+    31→  reviewRequestedAt: string | null
+    32→  reviewReceived: string | null
+    33→  reviewRating: number | null
+    34→  reviewReceivedAt: string | null
+    35→  createdAt: string
+    36→  challanItems: { id: string; itemName: string; quantity: number }[]
+    37→}
+    38→
+    39→// ────────────────────────────────────────────────────────────────────────────
+    40→// Helpers
+    41→// ────────────────────────────────────────────────────────────────────────────
+    42→const FIFTEEN_DAYS_AGO = () => new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+    43→
+    44→function parseImages(raw: string | null): string[] {
+    45→  if (!raw) return []
+    46→  try {
+    47→    const v = JSON.parse(raw)
+    48→    return Array.isArray(v) ? v.filter(Boolean) : []
+    49→  } catch {
+    50→    return raw.split(',').map((s) => s.trim()).filter(Boolean)
+    51→  }
+    52→}
+    53→
+    54→function Stars({ rating, size = 'sm' }: { rating: number | null; size?: 'sm' | 'md' }) {
+    55→  if (rating == null) return <span className="text-[#4E6180] text-xs">—</span>
+    56→  const cls = size === 'md' ? 'text-base' : 'text-sm'
+    57→  return (
+    58→    <span className={`font-mono tracking-tight ${cls}`}>
+    59→      <span style={{ color: '#E4AF4A' }}>{'★'.repeat(rating)}</span>
+    60→      <span style={{ color: '#3a4a5e' }}>{'★'.repeat(Math.max(0, 5 - rating))}</span>
+    61→    </span>
+    62→  )
+    63→}
+    64→
+    65→function buildWhatsAppMessage(c: Challan, trackingLink: string): string {
+    66→  return `Dear ${c.clientName},
+    67→
+    68→Your order has been dispatched! 🚚
+    69→
+    70→Challan No: ${c.challanNumber}
+    71→Freight Amount: ${fmtINR(c.freightAmount || 0)}
+    72→Track your shipment: ${trackingLink || '[Tracking Link]'}
+    73→
+    74→Thank you for choosing Laxree.`
+    75→}
+    76→
+    77→function isDispatched(c: Challan) {
+    78→  return !!c.dispatchDate || c.status === 'DISPATCHED' || c.status === 'IN_TRANSIT' || c.status === 'DELIVERED' || c.status === 'CLOSED'
+    79→}
+    80→
+    81→function needsReviewRequest(c: Challan) {
+    82→  if (c.reviewRequested || c.reviewReceived) return false
+    83→  if (!c.dispatchDate) return false
+    84→  return new Date(c.dispatchDate) <= FIFTEEN_DAYS_AGO()
+    85→}
+    86→
+    87→function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+    88→  return (
+    89→    <div className="grid grid-cols-3 gap-2">
+    90→      <div className="text-[#4E6180] text-[11px]">{label}</div>
+    91→      <div className={`col-span-2 text-[#EDE4D0] text-[12px] ${mono ? 'font-mono' : ''}`}>{value ?? '—'}</div>
+    92→    </div>
+    93→  )
+    94→}
+    95→
+    96→// ────────────────────────────────────────────────────────────────────────────
+    97→// Main Dashboard
+    98→// ────────────────────────────────────────────────────────────────────────────
+    99→export function SupportDashboard({ activeTab }: { user: SessionUser; activeTab: string; onTabChange: (id: string) => void }) {
+   100→  const [refreshKey, setRefreshKey] = useState(0)
+   101→  return (
+   102→    <div className="space-y-4">
+   103→      {activeTab === 'dashboard' && <DashboardTab onChanged={() => setRefreshKey((k) => k + 1)} />}
+   104→      {activeTab === 'dispatch' && <DispatchTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
+   105→      {activeTab === 'tracking' && <TrackingTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
+   106→      {activeTab === 'review' && <ReviewTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
+   107→    </div>
+   108→  )
+   109→}
+   110→
+   111→// ────────────────────────────────────────────────────────────────────────────
+   112→// 1. Dashboard Tab
+   113→// ────────────────────────────────────────────────────────────────────────────
+   114→function DashboardTab({ onChanged }: { onChanged: () => void }) {
+   115→  const { data, loading, error } = useFetch<{ challans: Challan[] }>('/api/challans')
+   116→
+   117→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   118→  if (error) return <div className="text-center py-10 text-[#E05050] text-sm">{error}</div>
+   119→  if (!data) return null
+   120→
+   121→  const all = data.challans
+   122→  const dispatched = all.filter(isDispatched)
+   123→  const inTransit = all.filter((c) => c.status === 'IN_TRANSIT')
+   124→  const delivered = all.filter((c) => c.status === 'DELIVERED' || c.status === 'CLOSED')
+   125→  const pendingReviews = all.filter(needsReviewRequest)
+   126→  const reviewsCollected = all.filter((c) => c.reviewReceived != null)
+   127→
+   128→  return (
+   129→    <div className="space-y-4">
+   130→      {/* KPIs */}
+   131→      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+   132→        <StatCard label="Total Dispatched" value={dispatched.length} accent="#E09E3C" icon="🚚" sub="All-time dispatched" />
+   133→        <StatCard label="In Transit" value={inTransit.length} accent="#E09E3C" icon="📍" sub="Out for delivery" />
+   134→        <StatCard label="Delivered" value={delivered.length} accent="#3CB87A" icon="✅" sub="Delivered / closed" />
+   135→        <StatCard label="Pending Reviews" value={pendingReviews.length} accent="#E4AF4A" icon="⏳" sub="15+ days dispatched" />
+   136→        <StatCard label="Reviews Collected" value={reviewsCollected.length} accent="#3CB87A" icon="⭐" sub="Client feedback in" />
+   137→      </div>
+   138→
+   139→      {/* Refresh button */}
+   140→      <div className="flex justify-end">
+   141→        <Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>
+   142→      </div>
+   143→    </div>
+   144→  )
+   145→}
+   146→
+   147→// ────────────────────────────────────────────────────────────────────────────
+   148→// 2. Client Dispatch Tab
+   149→// ────────────────────────────────────────────────────────────────────────────
+   150→function DispatchTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+   151→  // Fetch DISPATCHED challans (just handed off) AND IN_TRANSIT (already tracked)
+   152→  const dispatchedFetch = useFetch<{ challans: Challan[] }>('/api/challans?status=DISPATCHED', [refreshKey])
+   153→  const inTransitFetch = useFetch<{ challans: Challan[] }>('/api/challans?status=IN_TRANSIT', [refreshKey])
+   154→  const [showCelebration, setShowCelebration] = useState(false)
+   155→  const [sel, setSel] = useState<Challan | null>(null)
+   156→
+   157→  // Show celebration popup when newly-dispatched challans exist on tab open
+   158→  const celebratedRef = useRef(false)
+   159→  useEffect(() => {
+   160→    if (dispatchedFetch.data && dispatchedFetch.data.challans.length > 0 && !celebratedRef.current) {
+   161→      celebratedRef.current = true
+   162→      // eslint-disable-next-line react-hooks/set-state-in-effect
+   163→      setShowCelebration(true)
+   164→    }
+   165→  }, [dispatchedFetch.data])
+   166→
+   167→  if (dispatchedFetch.loading || inTransitFetch.loading)
+   168→    return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   169→
+   170→  const newlyDispatched = dispatchedFetch.data?.challans || []
+   171→  const inTransit = inTransitFetch.data?.challans || []
+   172→  const allDispatched = [...newlyDispatched, ...inTransit]
+   173→
+   174→  return (
+   175→    <div className="space-y-4">
+   176→      {/* Celebration modal — newly dispatched */}
+   177→      <Modal open={showCelebration} onClose={() => setShowCelebration(false)} title="🎉 Client Dispatched!">
+   178→        <div className="space-y-3">
+   179→          <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 p-3 text-[12px] text-[#3CB87A]">
+   180→            Coordinator has dispatched {newlyDispatched.length} new {newlyDispatched.length === 1 ? 'challan' : 'challans'}!
+   181→            Please send WhatsApp tracking links and verify delivery.
+   182→          </div>
+   183→          <div className="space-y-2">
+   184→            {newlyDispatched.slice(0, 5).map((c) => (
+   185→              <div key={c.id} className="flex items-center justify-between rounded-md border border-white/7 bg-white/[0.02] px-3 py-2 text-[12px]">
+   186→                <div>
+   187→                  <div className="font-mono text-[#E4AF4A]">{c.challanNumber}</div>
+   188→                  <div className="text-[#EDE4D0]">{c.clientName}</div>
+   189→                </div>
+   190→                <div className="text-right text-[10.5px] text-[#96A8BF]">
+   191→                  <div>{c.clientCity || '—'}</div>
+   192→                  <div>{fmtINR(c.freightAmount || 0)}</div>
+   193→                </div>
+   194→              </div>
+   195→            ))}
+   196→            {newlyDispatched.length > 5 && (
+   197→              <div className="text-center text-[11px] text-[#4E6180]">+ {newlyDispatched.length - 5} more below…</div>
+   198→            )}
+   199→          </div>
+   200→          <div className="flex justify-end gap-2 pt-1">
+   201→            <Btn variant="ghost" onClick={() => setShowCelebration(false)}>Dismiss</Btn>
+   202→            <Btn variant="gold" onClick={() => setShowCelebration(false)}>Got it!</Btn>
+   203→          </div>
+   204→        </div>
+   205→      </Modal>
+   206→
+   207→      {/* Stat strip */}
+   208→      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+   209→        <StatCard label="Newly Dispatched" value={newlyDispatched.length} accent="#E09E3C" icon="🆕" sub="Awaiting tracking link" />
+   210→        <StatCard label="In Transit" value={inTransit.length} accent="#E09E3C" icon="📍" sub="Tracking sent" />
+   211→        <StatCard label="Total Active" value={allDispatched.length} accent="#E4AF4A" icon="🚚" sub="On support's plate" />
+   212→      </div>
+   213→
+   214→      {/* Newly dispatched section */}
+   215→      <Card className="p-4">
+   216→        <SectionTitle
+   217→          icon="🆕"
+   218→          title="Newly Dispatched"
+   219→          sub="Just handed off by Coordinator — send tracking link next"
+   220→          right={<Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>}
+   221→        />
+   222→        {newlyDispatched.length === 0 ? (
+   223→          <EmptyState icon="✅" title="No new dispatches" sub="Newly dispatched challans from Coordinator will appear here" />
+   224→        ) : (
+   225→          <DispatchList challans={newlyDispatched} onSelect={setSel} />
+   226→        )}
+   227→      </Card>
+   228→
+   229→      {/* In transit section */}
+   230→      <Card className="p-4">
+   231→        <SectionTitle icon="📍" title="In Transit" sub="Tracking link already sent to client" />
+   232→        {inTransit.length === 0 ? (
+   233→          <EmptyState icon="📭" title="None in transit" sub="Once you send a tracking link, the challan moves here" />
+   234→        ) : (
+   235→          <DispatchList challans={inTransit} onSelect={setSel} />
+   236→        )}
+   237→      </Card>
+   238→
+   239→      {/* Detail modal */}
+   240→      {sel && <DispatchDetailModal challan={sel} onClose={() => setSel(null)} />}
+   241→    </div>
+   242→  )
+   243→}
+   244→
+   245→function DispatchList({ challans, onSelect }: { challans: Challan[]; onSelect: (c: Challan) => void }) {
+   246→  return (
+   247→    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   248→      {challans.map((c) => {
+   249→        const imgCount = parseImages(c.dispatchImages).length
+   250→        return (
+   251→          <button
+   252→            key={c.id}
+   253→            onClick={() => onSelect(c)}
+   254→            className="text-left rounded-lg border border-white/7 bg-white/[0.02] p-3.5 hover:bg-white/5 hover:border-[#E09E3C]/25 transition-all"
+   255→          >
+   256→            <div className="flex items-start justify-between mb-2">
+   257→              <div className="min-w-0">
+   258→                <div className="font-mono text-[12px] text-[#E4AF4A]">{c.challanNumber}</div>
+   259→                <div className="text-[14px] text-[#EDE4D0] font-medium truncate">{c.clientName}</div>
+   260→                <div className="text-[11px] text-[#96A8BF]">
+   261→                  {c.clientMobile || '—'} · {c.clientCity || '—'}
+   262→                </div>
+   263→              </div>
+   264→              <Badge label={c.status} color={STATUS_COLORS[c.status]} />
+   265→            </div>
+   266→            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] mt-2 pt-2 border-t border-white/5">
+   267→              <div>
+   268→                <span className="text-[#4E6180]">Freight: </span>
+   269→                <span className="text-[#EDE4D0]">{fmtINR(c.freightAmount || 0)}</span>
+   270→              </div>
+   271→              <div>
+   272→                <span className="text-[#4E6180]">Transporter: </span>
+   273→                <span className="text-[#EDE4D0]">{c.transporterName || '—'}</span>
+   274→              </div>
+   275→              <div>
+   276→                <span className="text-[#4E6180]">Vehicle: </span>
+   277→                <span className="text-[#EDE4D0]">{c.vehicleNumber || '—'}</span>
+   278→              </div>
+   279→              <div>
+   280→                <span className="text-[#4E6180]">Dispatched: </span>
+   281→                <span className="text-[#EDE4D0]">{fmtDate(c.dispatchDate)}</span>
+   282→              </div>
+   283→              <div>
+   284→                <span className="text-[#4E6180]">Photos: </span>
+   285→                <span className="text-[#EDE4D0]">{imgCount}</span>
+   286→              </div>
+   287→              <div>
+   288→                <span className="text-[#4E6180]">WhatsApp: </span>
+   289→                <span className={c.whatsappSent ? 'text-[#3CB87A]' : 'text-[#E09E3C]'}>{c.whatsappSent ? '✓ Sent' : '✗ Pending'}</span>
+   290→              </div>
+   291→              <div className="col-span-2">
+   292→                <span className="text-[#4E6180]">Email: </span>
+   293→                <span className={c.emailSent ? 'text-[#3CB87A]' : 'text-[#E09E3C]'}>{c.emailSent ? '✓ Sent' : '✗ Pending'}</span>
+   294→              </div>
+   295→            </div>
+   296→          </button>
+   297→        )
+   298→      })}
+   299→    </div>
+   300→  )
+   301→}
+   302→
+   303→function DispatchDetailModal({ challan, onClose }: { challan: Challan; onClose: () => void }) {
+   304→  const images = parseImages(challan.dispatchImages)
+   305→  return (
+   306→    <Modal open onClose={onClose} title={`Dispatch — ${challan.challanNumber}`} wide>
+   307→      <div className="space-y-4">
+   308→        <div className="rounded-lg border border-[#E09E3C]/20 bg-[#E09E3C]/5 p-3 text-[12px] text-[#E09E3C]">
+   309→          <strong>Handoff from Coordinator.</strong> Send the WhatsApp tracking link from the "Send Tracking" tab to move this to "In Transit".
+   310→        </div>
+   311→
+   312→        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+   313→          <Row label="Challan #" value={challan.challanNumber} mono />
+   314→          <Row label="Status" value={<Badge label={challan.status} color={STATUS_COLORS[challan.status]} />} />
+   315→          <Row label="Client" value={challan.clientName} />
+   316→          <Row label="Mobile" value={challan.clientMobile} mono />
+   317→          <Row label="City" value={challan.clientCity} />
+   318→          <Row label="Location" value={challan.clientLocation} />
+   319→          <Row label="Freight Amount" value={fmtINR(challan.freightAmount || 0)} />
+   320→          <Row label="Transporter" value={challan.transporterName} />
+   321→          <Row label="Vehicle No." value={challan.vehicleNumber} mono />
+   322→          <Row label="Dispatch Date" value={fmtDate(challan.dispatchDate)} />
+   323→          <Row
+   324→            label="WhatsApp"
+   325→            value={
+   326→              challan.whatsappSent
+   327→                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.whatsappSentAt)}</span>
+   328→                : <span className="text-[#E09E3C]">✗ Not sent</span>
+   329→            }
+   330→          />
+   331→          <Row
+   332→            label="Email"
+   333→            value={
+   334→              challan.emailSent
+   335→                ? <span className="text-[#3CB87A]">✓ Sent · {fmtDate(challan.emailSentAt)}</span>
+   336→                : <span className="text-[#E09E3C]">✗ Not sent</span>
+   337→            }
+   338→          />
+   339→          <Row label="Items" value={`${challan.challanItems.length} line items`} />
+   340→          <Row label="Total Amount" value={fmtINR(challan.amountTotal || 0)} />
+   341→        </div>
+   342→
+   343→        {challan.trackingLink && (
+   344→          <div className="rounded-md border border-white/7 bg-[#0c1928] p-3">
+   345→            <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-1">Tracking Link</div>
+   346→            <a
+   347→              href={challan.trackingLink}
+   348→              target="_blank"
+   349→              rel="noreferrer"
+   350→              className="text-[12px] text-[#3CB87A] hover:underline break-all"
+   351→            >
+   352→              {challan.trackingLink}
+   353→            </a>
+   354→          </div>
+   355→        )}
+   356→
+   357→        {/* Dispatch images */}
+   358→        <div>
+   359→          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] mb-2">Dispatch Photos ({images.length})</div>
+   360→          {images.length === 0 ? (
+   361→            <div className="text-[11px] text-[#4E6180] italic">No dispatch photos uploaded.</div>
+   362→          ) : (
+   363→            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+   364→              {images.map((src, i) => (
+   365→                <a
+   366→                  key={i}
+   367→                  href={src}
+   368→                  target="_blank"
+   369→                  rel="noreferrer"
+   370→                  className="block aspect-square rounded-md overflow-hidden border border-white/7 hover:border-[#E09E3C]/40"
+   371→                >
+   372→                  <img src={src} alt={`Dispatch ${i + 1}`} className="w-full h-full object-cover" />
+   373→                </a>
+   374→              ))}
+   375→            </div>
+   376→          )}
+   377→        </div>
+   378→
+   379→        <div className="flex justify-end pt-1">
+   380→          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+   381→        </div>
+   382→      </div>
+   383→    </Modal>
+   384→  )
+   385→}
+   386→
+   387→// ────────────────────────────────────────────────────────────────────────────
+   388→// 3. Send Tracking Tab
+   389→// ────────────────────────────────────────────────────────────────────────────
+   390→function TrackingTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+   391→  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>('/api/challans', [refreshKey])
+   392→  const [previewChallan, setPreviewChallan] = useState<Challan | null>(null)
+   393→
+   394→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   395→  if (error) return <div className="text-center py-10 text-[#E05050] text-sm">{error}</div>
+   396→  if (!data) return null
+   397→
+   398→  // Pending: dispatched but WhatsApp not yet sent
+   399→  const pending = data.challans.filter((c) => c.dispatchDate && !c.whatsappSent)
+   400→  // Sent: WhatsApp already sent (read-only)
+   401→  const sent = data.challans
+   402→    .filter((c) => c.whatsappSent)
+   403→    .sort((a, b) => new Date(b.whatsappSentAt || 0).getTime() - new Date(a.whatsappSentAt || 0).getTime())
+   404→
+   405→  return (
+   406→    <div className="space-y-4">
+   407→      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+   408→        <StatCard label="Pending Tracking" value={pending.length} accent="#E09E3C" icon="📤" sub="Awaiting WhatsApp send" />
+   409→        <StatCard label="WhatsApp Sent" value={sent.length} accent="#3CB87A" icon="✓" sub="Tracking link delivered" />
+   410→        <StatCard label="Email Sent" value={sent.filter((c) => c.emailSent).length} accent="#E4AF4A" icon="✉️" sub="Of sent challans" />
+   411→      </div>
+   412→
+   413→      {/* Pending tracking */}
+   414→      <Card className="p-4">
+   415→        <SectionTitle
+   416→          icon="📤"
+   417→          title="Send Tracking Link"
+   418→          sub="Enter the tracking URL → send via WhatsApp → mark email sent"
+   419→          right={<Btn size="sm" variant="ghost" onClick={() => { onChanged(); refresh() }}>↻ Refresh</Btn>}
+   420→        />
+   421→        {pending.length === 0 ? (
+   422→          <EmptyState icon="✅" title="All caught up!" sub="No dispatched challans are waiting for tracking links" />
+   423→        ) : (
+   424→          <div className="space-y-3">
+   425→            {pending.map((c) => (
+   426→              <TrackingCard
+   427→                key={c.id}
+   428→                challan={c}
+   429→                onPreview={() => setPreviewChallan(c)}
+   430→                onDone={() => { onChanged(); refresh() }}
+   431→              />
+   432→            ))}
+   433→          </div>
+   434→        )}
+   435→      </Card>
+   436→
+   437→      {/* Already sent */}
+   438→      <Card className="p-4">
+   439→        <SectionTitle icon="✓" title="Already Sent" sub="Tracking links already delivered to clients" />
+   440→        {sent.length === 0 ? (
+   441→          <EmptyState icon="📭" title="Nothing sent yet" sub="Sent challans will appear here" />
+   442→        ) : (
+   443→          <div className="overflow-x-auto -mx-4 px-4">
+   444→            <table className="w-full text-[12px]">
+   445→              <thead>
+   446→                <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] border-b border-white/7">
+   447→                  <th className="py-2 pr-3">Challan #</th>
+   448→                  <th className="py-2 pr-3">Client</th>
+   449→                  <th className="py-2 pr-3">Mobile</th>
+   450→                  <th className="py-2 pr-3">Freight</th>
+   451→                  <th className="py-2 pr-3">WhatsApp Sent</th>
+   452→                  <th className="py-2 pr-3">Email</th>
+   453→                  <th className="py-2 pr-3">Tracking Link</th>
+   454→                </tr>
+   455→              </thead>
+   456→              <tbody>
+   457→                {sent.map((c) => (
+   458→                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+   459→                    <td className="py-2 pr-3 text-[#E4AF4A] font-mono">{c.challanNumber}</td>
+   460→                    <td className="py-2 pr-3 text-[#EDE4D0]">{c.clientName}</td>
+   461→                    <td className="py-2 pr-3 text-[#96A8BF]">{c.clientMobile || '—'}</td>
+   462→                    <td className="py-2 pr-3 text-[#96A8BF]">{fmtINR(c.freightAmount || 0)}</td>
+   463→                    <td className="py-2 pr-3 text-[#3CB87A]">{fmtDate(c.whatsappSentAt)}</td>
+   464→                    <td className="py-2 pr-3">
+   465→                      {c.emailSent
+   466→                        ? <span className="text-[#3CB87A]">✓ {fmtDate(c.emailSentAt)}</span>
+   467→                        : <span className="text-[#E09E3C]">Pending</span>}
+   468→                    </td>
+   469→                    <td className="py-2 pr-3">
+   470→                      {c.trackingLink
+   471→                        ? <a href={c.trackingLink} target="_blank" rel="noreferrer" className="text-[#3CB87A] hover:underline text-[11px]">Open ↗</a>
+   472→                        : <span className="text-[#4E6180]">—</span>}
+   473→                    </td>
+   474→                  </tr>
+   475→                ))}
+   476→              </tbody>
+   477→            </table>
+   478→          </div>
+   479→        )}
+   480→      </Card>
+   481→
+   482→      {/* WhatsApp message preview modal */}
+   483→      {previewChallan && (
+   484→        <WhatsAppPreviewModal
+   485→          challan={previewChallan}
+   486→          trackingLink={previewChallan.trackingLink || ''}
+   487→          onClose={() => setPreviewChallan(null)}
+   488→        />
+   489→      )}
+   490→    </div>
+   491→  )
+   492→}
+   493→
+   494→function TrackingCard({ challan, onPreview, onDone }: { challan: Challan; onPreview: () => void; onDone: () => void }) {
+   495→  const [trackingLink, setTrackingLink] = useState(challan.trackingLink || '')
+   496→  const [sending, setSending] = useState(false)
+   497→  const [emailing, setEmailing] = useState(false)
+   498→  const [err, setErr] = useState('')
+   499→
+   500→  const sendWhatsApp = async () => {
+   501→    if (!trackingLink.trim()) {
+   502→      setErr('Please enter a tracking link first')
+   503→      return
+   504→    }
+   505→    setSending(true); setErr('')
+   506→    try {
+   507→      const res = await apiPost(`/api/challans/${challan.id}/whatsapp`, { trackingLink: trackingLink.trim() })
+   508→      if (res.whatsappUrl) window.open(res.whatsappUrl, '_blank')
+   509→      onDone()
+   510→    } catch (e) {
+   511→      setErr(e instanceof Error ? e.message : 'Failed to send WhatsApp')
+   512→    } finally { setSending(false) }
+   513→  }
+   514→
+   515→  const markEmail = async () => {
+   516→    setEmailing(true); setErr('')
+   517→    try {
+   518→      await apiPatch(`/api/challans/${challan.id}/whatsapp`, {})
+   519→      onDone()
+   520→    } catch (e) {
+   521→      setErr(e instanceof Error ? e.message : 'Failed to mark email sent')
+   522→    } finally { setEmailing(false) }
+   523→  }
+   524→
+   525→  return (
+   526→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3.5">
+   527→      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+   528→        <div className="min-w-0">
+   529→          <div className="flex items-center gap-2">
+   530→            <span className="font-mono text-[12px] text-[#E4AF4A]">{challan.challanNumber}</span>
+   531→            <Badge label={challan.status} color={STATUS_COLORS[challan.status]} />
+   532→          </div>
+   533→          <div className="text-[14px] text-[#EDE4D0] font-medium mt-0.5">{challan.clientName}</div>
+   534→          <div className="text-[11px] text-[#96A8BF]">
+   535→            📞 {challan.clientMobile || '—'} · 💰 {fmtINR(challan.freightAmount || 0)} · 📅 {fmtDate(challan.dispatchDate)}
+   536→          </div>
+   537→        </div>
+   538→        <Btn size="sm" variant="ghost" onClick={onPreview}>👁 Preview message</Btn>
+   539→      </div>
+   540→
+   541→      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
+   542→        <Input
+   543→          label="Tracking Link (URL)"
+   544→          value={trackingLink}
+   545→          onChange={setTrackingLink}
+   546→          placeholder="https://track.bluedart.com/..."
+   547→        />
+   548→        <Btn
+   549→          variant="success"
+   550→          onClick={sendWhatsApp}
+   551→          disabled={sending}
+   552→          className="md:mb-0"
+   553→        >
+   554→          {sending ? 'Sending…' : '💬 Send via WhatsApp'}
+   555→        </Btn>
+   556→        <Btn
+   557→          variant="gold"
+   558→          onClick={markEmail}
+   559→          disabled={emailing}
+   560→          className="md:mb-0"
+   561→        >
+   562→          {emailing ? 'Saving…' : '✉️ Mark Email Sent'}
+   563→        </Btn>
+   564→      </div>
+   565→
+   566→      {err && <div className="mt-2 text-[11px] text-[#E05050]">⚠ {err}</div>}
+   567→
+   568→      {/* Mini preview of message */}
+   569→      <details className="mt-3 group">
+   570→        <summary className="text-[11px] text-[#96A8BF] cursor-pointer hover:text-[#EDE4D0] select-none">
+   571→          📝 View WhatsApp message preview
+   572→        </summary>
+   573→        <pre className="mt-2 rounded-md border border-white/7 bg-[#0c1928] p-3 text-[11px] text-[#96A8BF] whitespace-pre-wrap font-sans leading-relaxed">
+   574→{buildWhatsAppMessage(challan, trackingLink)}
+   575→        </pre>
+   576→      </details>
+   577→    </div>
+   578→  )
+   579→}
+   580→
+   581→function WhatsAppPreviewModal({ challan, trackingLink, onClose }: { challan: Challan; trackingLink: string; onClose: () => void }) {
+   582→  return (
+   583→    <Modal open onClose={onClose} title="WhatsApp Message Preview">
+   584→      <div className="space-y-3">
+   585→        <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 p-3">
+   586→          <div className="text-[11px] text-[#3CB87A] font-semibold mb-1">💬 Message that will be sent</div>
+   587→          <div className="text-[11px] text-[#96A8BF]">
+   588→            Opens WhatsApp with this pre-filled message to <span className="text-[#EDE4D0]">{challan.clientMobile || 'client'}</span>
+   589→          </div>
+   590→        </div>
+   591→        <pre className="rounded-md border border-white/7 bg-[#0c1928] p-3 text-[12px] text-[#EDE4D0] whitespace-pre-wrap font-sans leading-relaxed">
+   592→{buildWhatsAppMessage(challan, trackingLink)}
+   593→        </pre>
+   594→        <div className="flex justify-end">
+   595→          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+   596→        </div>
+   597→      </div>
+   598→    </Modal>
+   599→  )
+   600→}
+   601→
+   602→// ────────────────────────────────────────────────────────────────────────────
+   603→// 4. Client Reviews Tab
+   604→// ────────────────────────────────────────────────────────────────────────────
+   605→function ReviewTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+   606→  const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>('/api/challans', [refreshKey])
+   607→
+   608→  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
+   609→  if (error) return <div className="text-center py-10 text-[#E05050] text-sm">{error}</div>
+   610→  if (!data) return null
+   611→
+   612→  // A. Pending review requests — dispatched 15+ days ago, review not yet requested
+   613→  const pendingRequest = data.challans.filter(needsReviewRequest)
+   614→  // B. Collect review — review requested, but no review received yet
+   615→  const collectReview = data.challans.filter((c) => c.reviewRequested && c.reviewReceived == null)
+   616→  // C. Completed reviews — review received
+   617→  const completed = data.challans
+   618→    .filter((c) => c.reviewReceived != null)
+   619→    .sort((a, b) => new Date(b.reviewReceivedAt || 0).getTime() - new Date(a.reviewReceivedAt || 0).getTime())
+   620→
+   621→  const avgRating = completed.length > 0
+   622→    ? (completed.reduce((s, c) => s + (c.reviewRating || 0), 0) / completed.length).toFixed(1)
+   623→    : '—'
+   624→
+   625→  return (
+   626→    <div className="space-y-4">
+   627→      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+   628→        <StatCard label="Pending Requests" value={pendingRequest.length} accent="#E09E3C" icon="📤" sub="15+ days dispatched" />
+   629→        <StatCard label="Awaiting Review" value={collectReview.length} accent="#E4AF4A" icon="⏳" sub="Requested, not received" />
+   630→        <StatCard label="Reviews Collected" value={completed.length} accent="#3CB87A" icon="⭐" sub="Client feedback in" />
+   631→        <StatCard label="Avg Rating" value={avgRating} accent="#E4AF4A" icon="📊" sub="Out of 5" />
+   632→      </div>
+   633→
+   634→      {/* A. Pending review requests */}
+   635→      <Card className="p-4">
+   636→        <SectionTitle
+   637→          icon="📤"
+   638→          title="Pending Review Requests"
+   639→          sub="Dispatched 15+ days ago — request the client to share feedback"
+   640→          right={<Btn size="sm" variant="ghost" onClick={() => { onChanged(); refresh() }}>↻ Refresh</Btn>}
+   641→        />
+   642→        {pendingRequest.length === 0 ? (
+   643→          <EmptyState icon="✅" title="Nothing due" sub="No challans are 15+ days past dispatch without a review request" />
+   644→        ) : (
+   645→          <div className="space-y-2">
+   646→            {pendingRequest.map((c) => (
+   647→              <RequestReviewCard key={c.id} challan={c} onDone={() => { onChanged(); refresh() }} />
+   648→            ))}
+   649→          </div>
+   650→        )}
+   651→      </Card>
+   652→
+   653→      {/* B. Collect client review */}
+   654→      <Card className="p-4">
+   655→        <SectionTitle icon="⏳" title="Collect Client Review" sub="Review requested — record the client's rating and feedback" />
+   656→        {collectReview.length === 0 ? (
+   657→          <EmptyState icon="📭" title="None awaiting" sub="Once a client shares feedback, record it here" />
+   658→        ) : (
+   659→          <div className="space-y-3">
+   660→            {collectReview.map((c) => (
+   661→              <CollectReviewCard key={c.id} challan={c} onDone={() => { onChanged(); refresh() }} />
+   662→            ))}
+   663→          </div>
+   664→        )}
+   665→      </Card>
+   666→
+   667→      {/* C. Completed reviews */}
+   668→      <Card className="p-4">
+   669→        <SectionTitle icon="⭐" title="Completed Reviews" sub="All client feedback collected so far" />
+   670→        {completed.length === 0 ? (
+   671→          <EmptyState icon="⭐" title="No reviews yet" sub="Completed client reviews will appear here" />
+   672→        ) : (
+   673→          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   674→            {completed.map((c) => (
+   675→              <div key={c.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3.5">
+   676→                <div className="flex items-start justify-between mb-2">
+   677→                  <div className="min-w-0">
+   678→                    <div className="font-mono text-[12px] text-[#E4AF4A]">{c.challanNumber}</div>
+   679→                    <div className="text-[14px] text-[#EDE4D0] font-medium">{c.clientName}</div>
+   680→                    <div className="text-[11px] text-[#96A8BF]">{c.clientCity || '—'} · {fmtDate(c.reviewReceivedAt)}</div>
+   681→                  </div>
+   682→                  <Stars rating={c.reviewRating} size="md" />
+   683→                </div>
+   684→                {c.reviewReceived && (
+   685→                  <div className="rounded-md border border-white/7 bg-[#0c1928] p-2.5 text-[12px] text-[#EDE4D0] italic leading-relaxed">
+   686→                    "{c.reviewReceived}"
+   687→                  </div>
+   688→                )}
+   689→              </div>
+   690→            ))}
+   691→          </div>
+   692→        )}
+   693→      </Card>
+   694→    </div>
+   695→  )
+   696→}
+   697→
+   698→function RequestReviewCard({ challan, onDone }: { challan: Challan; onDone: () => void }) {
+   699→  const [requesting, setRequesting] = useState(false)
+   700→  const [err, setErr] = useState('')
+   701→  const daysAgo = challan.dispatchDate
+   702→    ? Math.floor((Date.now() - new Date(challan.dispatchDate).getTime()) / (24 * 60 * 60 * 1000))
+   703→    : 0
+   704→
+   705→  const request = async () => {
+   706→    setRequesting(true); setErr('')
+   707→    try {
+   708→      const res = await apiPost(`/api/challans/${challan.id}/review`, { action: 'request' })
+   709→      if (res.reviewUrl) window.open(res.reviewUrl, '_blank')
+   710→      onDone()
+   711→    } catch (e) {
+   712→      setErr(e instanceof Error ? e.message : 'Failed to request review')
+   713→    } finally { setRequesting(false) }
+   714→  }
+   715→
+   716→  return (
+   717→    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/7 bg-white/[0.02] p-3">
+   718→      <div className="min-w-0">
+   719→        <div className="flex items-center gap-2">
+   720→          <span className="font-mono text-[12px] text-[#E4AF4A]">{challan.challanNumber}</span>
+   721→          <Badge label={`${daysAgo}d ago`} color="#E09E3C" />
+   722→        </div>
+   723→        <div className="text-[13px] text-[#EDE4D0] font-medium">{challan.clientName}</div>
+   724→        <div className="text-[11px] text-[#96A8BF]">
+   725→          📞 {challan.clientMobile || '—'} · 📅 Dispatched {fmtDate(challan.dispatchDate)}
+   726→        </div>
+   727→        {err && <div className="text-[11px] text-[#E05050] mt-1">⚠ {err}</div>}
+   728→      </div>
+   729→      <Btn variant="success" onClick={request} disabled={requesting}>
+   730→        {requesting ? 'Requesting…' : '💬 Request Review'}
+   731→      </Btn>
+   732→    </div>
+   733→  )
+   734→}
+   735→
+   736→function CollectReviewCard({ challan, onDone }: { challan: Challan; onDone: () => void }) {
+   737→  const [rating, setRating] = useState('5')
+   738→  const [reviewText, setReviewText] = useState('')
+   739→  const [submitting, setSubmitting] = useState(false)
+   740→  const [err, setErr] = useState('')
+   741→
+   742→  const submit = async () => {
+   743→    if (!reviewText.trim()) {
+   744→      setErr('Please enter the client\'s review text')
+   745→      return
+   746→    }
+   747→    setSubmitting(true); setErr('')
+   748→    try {
+   749→      await apiPost(`/api/challans/${challan.id}/review`, {
+   750→        action: 'submit',
+   751→        reviewText: reviewText.trim(),
+   752→        rating: Number(rating),
+   753→      })
+   754→      setReviewText('')
+   755→      setRating('5')
+   756→      onDone()
+   757→    } catch (e) {
+   758→      setErr(e instanceof Error ? e.message : 'Failed to submit review')
+   759→    } finally { setSubmitting(false) }
+   760→  }
+   761→
+   762→  return (
+   763→    <div className="rounded-lg border border-white/7 bg-white/[0.02] p-3.5">
+   764→      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+   765→        <div className="min-w-0">
+   766→          <div className="flex items-center gap-2">
+   767→            <span className="font-mono text-[12px] text-[#E4AF4A]">{challan.challanNumber}</span>
+   768→            <Badge label="Review Requested" color="#E4AF4A" />
+   769→          </div>
+   770→          <div className="text-[14px] text-[#EDE4D0] font-medium">{challan.clientName}</div>
+   771→          <div className="text-[11px] text-[#96A8BF]">
+   772→            📞 {challan.clientMobile || '—'} · Requested {fmtDate(challan.reviewRequestedAt)}
+   773→          </div>
+   774→        </div>
+   775→        <div className="text-right">
+   776→          <div className="text-[10px] uppercase tracking-wider text-[#4E6180]">Selected</div>
+   777→          <Stars rating={Number(rating)} size="md" />
+   778→        </div>
+   779→      </div>
+   780→
+   781→      <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-3">
+   782→        <Select
+   783→          label="Client Rating (1-5)"
+   784→          value={rating}
+   785→          onChange={setRating}
+   786→          options={[
+   787→            { value: '5', label: '★★★★★  Excellent' },
+   788→            { value: '4', label: '★★★★☆  Good' },
+   789→            { value: '3', label: '★★★☆☆  Average' },
+   790→            { value: '2', label: '★★☆☆☆  Poor' },
+   791→            { value: '1', label: '★☆☆☆☆  Terrible' },
+   792→          ]}
+   793→          required
+   794→        />
+   795→        <Textarea
+   796→          label="Client Review Text"
+   797→          value={reviewText}
+   798→          onChange={setReviewText}
+   799→          placeholder="What did the client say about the items, delivery, and service?"
+   800→          rows={3}
+   801→          required
+   802→        />
+   803→      </div>
+   804→
+   805→      {err && <div className="mt-2 text-[11px] text-[#E05050]">⚠ {err}</div>}
+   806→
+   807→      <div className="flex justify-end mt-3">
+   808→        <Btn variant="gold" onClick={submit} disabled={submitting}>
+   809→          {submitting ? 'Submitting…' : '✓ Submit Review'}
+   810→        </Btn>
+   811→      </div>
+   812→    </div>
+   813→  )
+   814→}
+   815→
