@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFetch, apiPost, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
 import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
@@ -166,9 +166,9 @@ export function SalesDashboard({ user, activeTab, onTabChange }: {
   const nav = [
     { id: 'dashboard',   label: 'Dashboard',     icon: '📊' },
     { id: 'stock-check', label: 'Check Stock',   icon: '📦' },
-    { id: 'upload',      label: 'Upload Challan',icon: '📤' },
     { id: 'list',        label: 'My Challans',   icon: '🧾' },
     { id: 'hold',        label: 'Stock Hold',    icon: '🔒' },
+    { id: 'upload',      label: 'Upload Challan',icon: '📤' },
   ]
 
   return (
@@ -579,6 +579,13 @@ type ItemRow = {
 }
 
 function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) {
+  // Auto-extract state (PDF upload → VLM analysis → autofill A/B/C)
+  const [extracting, setExtracting] = useState(false)
+  const [extractErr, setExtractErr] = useState('')
+  const [extractSuccess, setExtractSuccess] = useState('')
+  const [extractedFileName, setExtractedFileName] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   // Section A: Client details
   const [challanNumber, setChallanNumber] = useState('')
   const [quotationNumber, setQuotationNumber] = useState('')
@@ -708,6 +715,77 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
     setItems([{ category: '', itemName: '', itemNumber: '', model: '', colour: '', quantity: 1, unitPrice: 0 }])
     setPdfFileName('')
     setResult(null); setErr(''); setPaymentMode(null); setAdvanceInput('')
+    setExtractSuccess(''); setExtractErr(''); setExtractedFileName('')
+  }
+
+  /* ---------- Auto-extract from PDF (VLM) ---------- */
+  const handleExtract = async (file: File) => {
+    setExtracting(true)
+    setExtractErr('')
+    setExtractSuccess('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/challans/extract', { method: 'POST', body: fd })
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : null
+      if (!res.ok) throw new Error(data?.error || `Extraction failed (${res.status})`)
+      const d = data?.data
+      if (!d) throw new Error('Empty extraction response')
+
+      // Section A: Client details
+      if (d.challanNumber) setChallanNumber(d.challanNumber)
+      if (d.quotationNumber) setQuotationNumber(d.quotationNumber)
+      if (d.clientName) setClientName(d.clientName)
+      if (d.clientCity) setClientCity(d.clientCity)
+      if (d.clientMobile) setClientMobile(d.clientMobile)
+      if (d.billingName) setBillingName(d.billingName)
+      if (d.billingAddress) setBillingAddress(d.billingAddress)
+      if (d.shippingAddress) setShippingAddress(d.shippingAddress)
+      if (d.gstNumber) setGstNumber(d.gstNumber)
+      if (d.expectedDeliveryDate) setExpectedDate(d.expectedDeliveryDate)
+
+      // Section B: Financial details
+      if (typeof d.amountWithoutGst === 'number') setAmountWithoutGst(String(d.amountWithoutGst))
+      if (typeof d.gstPercentage === 'number') setGstPercentage(String(d.gstPercentage))
+      if (typeof d.packingCharge === 'number') setPackingCharge(String(d.packingCharge))
+
+      // Section C: Items
+      if (Array.isArray(d.items) && d.items.length > 0) {
+        const mapped: ItemRow[] = d.items.map((it: {
+          category?: string | null
+          itemName?: string | null
+          itemNumber?: string | null
+          model?: string | null
+          colour?: string | null
+          quantity?: number
+          unitPrice?: number
+          totalPrice?: number
+        }) => ({
+          category: it.category || '',
+          itemName: it.itemName || it.model || '',
+          itemNumber: it.itemNumber || '',
+          model: it.model || '',
+          colour: it.colour || '',
+          quantity: Number(it.quantity) || 1,
+          unitPrice: Number(it.unitPrice) || 0,
+        }))
+        setItems(mapped)
+      }
+
+      // Section D: PDF filename
+      if (d.pdfFileName) setPdfFileName(d.pdfFileName)
+      setExtractedFileName(d.pdfFileName || file.name)
+
+      const itemCount = Array.isArray(d.items) ? d.items.length : 0
+      setExtractSuccess(
+        `✓ Challan analyzed! Auto-filled ${itemCount} item${itemCount === 1 ? '' : 's'} and all client/financial details from "${d.pdfFileName || file.name}". Review below and submit.`
+      )
+    } catch (e: unknown) {
+      setExtractErr(e instanceof Error ? e.message : 'PDF analysis failed. You can still fill the form manually below.')
+    } finally {
+      setExtracting(false)
+    }
   }
 
   /* ---------- Success view ---------- */
@@ -718,6 +796,58 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
   /* ---------- Form view ---------- */
   return (
     <div className="space-y-4">
+      {/* ── Auto-fill from Challan PDF (AI-powered) ── */}
+      <Card className="p-4 border-[#C8922A]/30 bg-gradient-to-br from-[#C8922A]/8 to-transparent">
+        <SectionTitle
+          icon="🤖"
+          title="Auto-fill from Challan PDF"
+          sub="Upload the customer challan — AI extracts all details below automatically"
+          right={extractedFileName ? (
+            <span className="text-[10px] text-[#3CB87A] font-mono truncate max-w-[180px]">📎 {extractedFileName}</span>
+          ) : undefined}
+        />
+        <div className="space-y-3">
+          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+            <div className="flex-1">
+              <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">Challan PDF (Laxree format)</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                disabled={extracting}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleExtract(f)
+                  e.target.value = ''
+                }}
+                className="w-full text-[12px] text-[#EDE4D0] file:mr-3 file:rounded-lg file:border-0 file:bg-[#C8922A] file:px-4 file:py-2 file:text-[#07101f] file:font-semibold hover:file:opacity-90 disabled:opacity-50"
+              />
+            </div>
+            {extracting && (
+              <div className="flex items-center gap-2 text-[12px] text-[#E4AF4A] bg-[#C8922A]/10 border border-[#C8922A]/25 rounded-lg px-3 py-2">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-[#E4AF4A] border-t-transparent animate-spin" />
+                Analyzing challan with AI… (~10–15s)
+              </div>
+            )}
+          </div>
+
+          {extractSuccess && (
+            <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2.5 text-[12px] text-[#3CB87A]">
+              {extractSuccess}
+            </div>
+          )}
+          {extractErr && (
+            <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2.5 text-[12px] text-[#E05050]">
+              ⚠ {extractErr}
+            </div>
+          )}
+
+          <div className="text-[10.5px] text-[#4E6180] leading-relaxed bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2">
+            💡 <strong className="text-[#96A8BF]">How it works:</strong> The AI reads your PDF and fills Sections A (client), B (financials) and C (items) automatically. You can review &amp; edit any field before submitting. The existing manual entry fields below remain fully editable.
+          </div>
+        </div>
+      </Card>
+
       {/* Section A: Client Details */}
       <Card className="p-4">
         <SectionTitle icon="👤" title="A · Client Details" sub="Customer & billing information" />

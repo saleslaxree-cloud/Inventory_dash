@@ -56,11 +56,11 @@ export function LoginScreen({ onLogin }: { onLogin: (u: SessionUser) => void }) 
         <div className="relative z-10 text-center max-w-md">
           <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#C8922A] overflow-hidden bg-white"
             style={{ boxShadow: '0 0 30px rgba(200,146,42,0.4), 0 0 60px rgba(200,146,42,0.15)' }}>
-            <img src="/laxree-logo.png" alt="LaxRee Hotel" className="h-full w-full object-cover" />
+            <img src="/laxree-logo.png" alt="Laxree" className="h-full w-full object-contain p-1" />
           </div>
           <h1 className="font-serif text-3xl lg:text-4xl font-bold mb-2"
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            LaxRee Hotel
+            Laxree
           </h1>
           <p className="text-[11px] uppercase tracking-[3px] text-[#4E6180] mb-6">Inventory Management System v4</p>
           <p className="text-sm text-[#96A8BF] leading-relaxed mb-8">

@@ -34,11 +34,11 @@ export function AppShell({
         <div className="px-4 py-5 border-b border-white/7 flex flex-col items-center gap-1.5">
           <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#C8922A] overflow-hidden bg-white"
             style={{ boxShadow: '0 0 20px rgba(200,146,42,0.35)' }}>
-            <img src="/laxree-logo.png" alt="LaxRee Hotel" className="h-full w-full object-cover" />
+            <img src="/laxree-logo.png" alt="Laxree" className="h-full w-full object-contain p-1" />
           </div>
           <div className="font-serif text-sm font-bold text-center leading-tight"
             style={{ background: 'linear-gradient(135deg, #E4AF4A, #F5D27A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            LaxRee Hotel
+            Laxree
           </div>
           <div className="text-[8px] uppercase tracking-[1.5px] text-[#4E6180]">Inventory MS</div>
         </div>
@@ -123,7 +123,7 @@ export function AppShell({
         {/* Footer */}
         <footer className="flex items-center justify-between px-4 lg:px-6 h-9 border-t border-white/7 bg-[#0c1928] flex-shrink-0 text-[10px] text-[#4E6180]">
           <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#3CB87A] animate-pulse" /> System Online</span>
-          <span>LaxRee IMS v4 • Multi-Role Workflow</span>
+          <span>Laxree IMS v4 • Multi-Role Workflow</span>
         </footer>
       </div>
 

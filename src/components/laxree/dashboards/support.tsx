@@ -71,7 +71,7 @@ Challan No: ${c.challanNumber}
 Freight Amount: ${fmtINR(c.freightAmount || 0)}
 Track your shipment: ${trackingLink || '[Tracking Link]'}
 
-Thank you for choosing LaxRee Hotel Supplies.`
+Thank you for choosing Laxree.`
 }
 
 function isDispatched(c: Challan) {

@@ -527,7 +527,7 @@ function PartialCard({ challan: c, daysSince }: { challan: Challan; daysSince: n
     const phone = (c.clientMobile || '').replace(/\D/g, '')
     const msg = `Dear ${c.billingName || c.clientName},
 
-This is a gentle reminder from LaxRee Hotel Supplies regarding the pending payment for challan ${c.challanNumber}.
+This is a gentle reminder from Laxree regarding the pending payment for challan ${c.challanNumber}.
 
 Payment Summary:
 • Total Amount: ${fmtINR(c.amountTotal)}

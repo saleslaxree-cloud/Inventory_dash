@@ -50,9 +50,11 @@ export default function Home() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#07101f]">
         <div className="text-center">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#C8922A] text-2xl animate-pulse"
-            style={{ boxShadow: '0 0 30px rgba(200,146,42,0.4)' }}>🏨</div>
-          <div className="font-serif text-lg font-bold text-[#E4AF4A]">LaxRee Hotel</div>
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#C8922A] overflow-hidden bg-white animate-pulse"
+            style={{ boxShadow: '0 0 30px rgba(200,146,42,0.4)' }}>
+            <img src="/laxree-logo.png" alt="Laxree" className="h-full w-full object-contain p-1" />
+          </div>
+          <div className="font-serif text-lg font-bold text-[#E4AF4A]">Laxree</div>
           <div className="text-[11px] text-[#4E6180] mt-1">Loading…</div>
         </div>
       </div>
@@ -85,9 +87,9 @@ export default function Home() {
     SALES: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },
       { id:'stock-check', label:'Check Stock', icon:'📦' },
-      { id:'upload', label:'Upload Challan', icon:'📤' },
       { id:'list', label:'My Challans', icon:'🧾' },
       { id:'hold', label:'Stock Hold', icon:'🔒' },
+      { id:'upload', label:'Upload Challan', icon:'📤' },
     ],
     ACCOUNT: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },

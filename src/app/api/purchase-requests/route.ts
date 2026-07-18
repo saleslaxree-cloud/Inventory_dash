@@ -19,7 +19,7 @@ export async function GET() {
 
 // POST /api/purchase-requests
 // Body: { challanId?, items: [{itemId?, itemName, model?, quantity, notes?}], notes? }
-// Auto-raises PR in name of "LaxRee Hotel"
+// Auto-raises PR in name of "Laxree"
 export async function POST(req: NextRequest) {
   const user = await getSession()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   const pr = await db.purchaseRequest.create({
     data: {
       prNumber,
-      raisedByName: 'LaxRee Hotel',
+      raisedByName: 'Laxree',
       raisedById: user.id,
       challanId: challanId || null,
       notes: notes || null,

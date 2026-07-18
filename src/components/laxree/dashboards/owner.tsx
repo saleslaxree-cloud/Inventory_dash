@@ -432,7 +432,7 @@ function PRTab({ user }: { user: SessionUser }) {
 
       <Card className="p-4">
         <SectionTitle icon="📋" title="Purchase Requests" sub={`${data.purchaseRequests.length} total`} />
-        {data.purchaseRequests.length === 0 ? <EmptyState icon="📋" title="No PRs yet" sub="Click 'Raise PR' to auto-generate one in LaxRee's name" /> : (
+        {data.purchaseRequests.length === 0 ? <EmptyState icon="📋" title="No PRs yet" sub="Click 'Raise PR' to auto-generate one in Laxree's name" /> : (
           <div className="space-y-2">
             {data.purchaseRequests.map((pr) => (
               <div key={pr.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
@@ -498,7 +498,7 @@ function PRForm({ open, onClose, userId, onCreated }: { open:boolean; onClose:()
     <Modal open={open} onClose={onClose} title="Raise Purchase Request" wide>
       <div className="space-y-4">
         <div className="rounded-lg border border-[#E4AF4A]/20 bg-[#E4AF4A]/5 p-3 text-[11px] text-[#E4AF4A]">
-          📝 PR will be auto-raised in the name of <strong>LaxRee Hotel</strong>. After creation, you can print it and hand over to the Purchase team.
+          📝 PR will be auto-raised in the name of <strong>Laxree</strong>. After creation, you can print it and hand over to the Purchase team.
         </div>
 
         <div className="space-y-2">
@@ -549,13 +549,13 @@ function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
         {/* Letterhead */}
         <div className="flex justify-between items-start border-b-[3px] border-[#C8922A] pb-4 mb-5">
           <div className="flex items-center gap-4">
-            <img src="/laxree-logo.png" alt="LaxRee" className="h-16 w-16 object-cover rounded-full border-2 border-[#C8922A]" />
+            <img src="/laxree-logo.png" alt="Laxree" className="h-16 w-16 object-contain rounded-full border-2 border-[#C8922A] bg-white p-1" />
             <div>
-              <h1 className="text-2xl font-bold text-[#07101f] leading-tight">LaxRee Hotel</h1>
-              <p className="text-[11px] text-gray-600 leading-snug">Hospitality Supplies &amp; Inventory</p>
+              <h1 className="text-2xl font-bold text-[#07101f] leading-tight">Laxree</h1>
+              <p className="text-[11px] text-gray-600 leading-snug">Hotel Supplies Redefined</p>
               <p className="text-[10px] text-gray-500 leading-snug mt-0.5">
-                LaxRee House, Hotel Supplies Marg &nbsp;·&nbsp; Jaipur, Rajasthan 302001<br/>
-                Tel: +91-141-XXX-XXXX &nbsp;·&nbsp; Email: purchase@laxreehotel.com &nbsp;·&nbsp; GSTIN: 08XXXXX1234X1ZX
+                Basement Floor, Plot No. 720, Udhyog Vihar, Phase V &nbsp;·&nbsp; Gurugram, Haryana 122016<br/>
+                Tel: +91-9251683657 &nbsp;·&nbsp; Email: purchase@laxree.com &nbsp;·&nbsp; GSTIN: 06AANCC2070Q1ZI
               </p>
             </div>
           </div>
@@ -572,7 +572,7 @@ function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
           <div className="border border-gray-300 rounded p-3">
             <div className="text-[9px] uppercase tracking-wider text-gray-500 font-bold mb-1">Raised By</div>
             <div className="font-semibold text-[#07101f]">{pr.raisedByName}</div>
-            <div className="text-gray-600 text-[10.5px]">LaxRee Hotel — Inventory Department</div>
+            <div className="text-gray-600 text-[10.5px]">Laxree — Inventory Department</div>
           </div>
           <div className="border border-gray-300 rounded p-3">
             <div className="text-[9px] uppercase tracking-wider text-gray-500 font-bold mb-1">Supplier / Vendor</div>
@@ -629,7 +629,7 @@ function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
 
         {/* Terms */}
         <div className="mt-4 text-[10px] text-gray-500 leading-relaxed">
-          <strong className="text-gray-600">Terms &amp; Conditions:</strong> Goods shall be supplied as per LaxRee quality standards. Payment terms: 30 days from invoice &amp; goods receipt. Please quote this PR number on all correspondence &amp; invoices.
+          <strong className="text-gray-600">Terms &amp; Conditions:</strong> Goods shall be supplied as per Laxree quality standards. Payment terms: 30 days from invoice &amp; goods receipt. Please quote this PR number on all correspondence &amp; invoices.
         </div>
 
         {/* Signatures */}
@@ -650,7 +650,7 @@ function PrintModal({ pr, onClose }: { pr: PR | null; onClose: () => void }) {
 
         {/* Footer */}
         <div className="mt-8 pt-2 border-t border-gray-300 text-center text-[9px] text-gray-400">
-          This is a system-generated Purchase Request from LaxRee Hotel Inventory Management System &nbsp;·&nbsp; {pr.prNumber} &nbsp;·&nbsp; Generated on {fmtDate(pr.createdAt)}
+          This is a system-generated Purchase Request from Laxree Inventory Management System &nbsp;·&nbsp; {pr.prNumber} &nbsp;·&nbsp; Generated on {fmtDate(pr.createdAt)}
         </div>
       </div>
       <div className="flex justify-end gap-2 mt-4">

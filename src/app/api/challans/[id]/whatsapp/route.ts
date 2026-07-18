@@ -38,7 +38,7 @@ Challan No: ${challan.challanNumber}
 Freight Amount: ₹${challan.freightAmount}
 ${trackingLink ? `Track your shipment: ${trackingLink}` : ''}
 
-Thank you for choosing LaxRee Hotel Supplies.`
+Thank you for choosing Laxree.`
 
   const whatsappUrl = phone
     ? `https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${encodeURIComponent(message)}`

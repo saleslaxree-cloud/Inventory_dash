@@ -38,7 +38,7 @@ Could you please take a moment to share your feedback about the items received? 
 ⭐ Rate from 1-5 and share your experience.
 
 Thank you!
-LaxRee Hotel Supplies`
+Laxree`
 
     const reviewUrl = phone
       ? `https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${encodeURIComponent(message)}`
