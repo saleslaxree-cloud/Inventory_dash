@@ -1,8 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// LaxRee Inventory Management System — Multi-Role Workflow Schema
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +9,220 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ═══════════════════════════════════════════
+// USERS & AUTH
+// ═══════════════════════════════════════════
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  name      String?
+  password  String
+  name      String
+  role      String   // OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
+  phone     String?
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  challans           Challan[]
+  purchaseRequests   PurchaseRequest[]
+  messagesSent       Message[]       @relation("MessageSender")
+  workflowActions    WorkflowStage[]
+  supportChecklists  SupportChecklist[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ═══════════════════════════════════════════
+// MASTER INVENTORY (managed by IT Manager)
+// ═══════════════════════════════════════════
+model Item {
+  id          String   @id @default(cuid())
+  category    String   // Room Amenities, Bathroom Amenities, Lobby Items, etc.
+  itemName    String
+  model       String
+  colour      String?
+  unit        String   @default("PCS")
+  currentStock Int     @default(0)
+  minStock    Int      @default(5)
+  fastMoving  Boolean  @default(false)
+  inwardCount Int      @default(0)
+  outwardCount Int     @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  challanItems ChallanItem[]
+  prItems      PurchaseRequestItem[]
+}
+
+// ═══════════════════════════════════════════
+// CHALLANS (uploaded by Sales, analyzed by system)
+// ═══════════════════════════════════════════
+model Challan {
+  id                  String   @id @default(cuid())
+  challanNumber       String   @unique
+  clientName          String
+  clientCity          String
+  clientMobile        String?
+  clientLocation      String?
+  expectedDeliveryDate DateTime?
+  date                DateTime @default(now())
+
+  // Payment
+  amountTotal         Float    @default(0)
+  amountAdvance       Float    @default(0)
+  amountReceived      Float    @default(0)
+  paymentType         String   @default("ADVANCE") // FULL | ADVANCE | NONE
+  paymentStatus       String   @default("PENDING") // PENDING | PARTIAL | PAID
+  accountVerified     Boolean  @default(false)
+  accountVerifiedById String?
+  accountVerifiedAt   DateTime?
+
+  // Status flow
+  status              String   @default("UPLOADED")
+  // UPLOADED -> PAYMENT_VERIFIED -> PACKING -> QC -> VEHICLE -> EWAY_BILL -> DISPATCHED -> IN_TRANSIT -> DELIVERED -> FEEDBACK -> CLOSED
+
+  uploadedById        String
+  uploadedBy          User     @relation(fields: [uploadedById], references: [id])
+
+  challanItems        ChallanItem[]
+  workflowStages      WorkflowStage[]
+  supportChecklist    SupportChecklist?
+  messages            Message[]
+  purchaseRequests    PurchaseRequest[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Items extracted/analyzed from challan upload
+model ChallanItem {
+  id          String   @id @default(cuid())
+  challanId   String
+  challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  itemName    String
+  itemNumber  String?
+  model       String?
+  colour      String?
+  quantity    Int      @default(1)
+
+  // Analysis result
+  status      String   @default("PENDING") // MATCHED | WRONG_MODEL | NOT_FOUND | PENDING
+  matchedItemId String?
+  matchedItem Item?    @relation(fields: [matchedItemId], references: [id])
+
+  // Admin correction
+  correctedItemId String?
+  corrected       Boolean @default(false)
+
+  createdAt   DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// PURCHASE REQUESTS (auto-raised by Owner)
+// ═══════════════════════════════════════════
+model PurchaseRequest {
+  id          String   @id @default(cuid())
+  prNumber    String   @unique
+  raisedByName String  @default("LaxRee Hotel")
+  raisedById  String
+  raisedBy    User     @relation(fields: [raisedById], references: [id])
+
+  challanId   String?
+  challan     Challan? @relation(fields: [challanId], references: [id])
+
+  status      String   @default("DRAFT") // DRAFT | PRINTED | SENT
+  notes       String?
+
+  items       PurchaseRequestItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PurchaseRequestItem {
+  id          String   @id @default(cuid())
+  prId        String
+  pr          PurchaseRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+  itemId      String?
+  item        Item?    @relation(fields: [itemId], references: [id])
+  itemName    String
+  model       String?
+  quantity    Int
+  notes       String?
+}
+
+// ═══════════════════════════════════════════
+// WORKFLOW STAGES / CHECKLIST (per challan)
+// ═══════════════════════════════════════════
+model WorkflowStage {
+  id          String   @id @default(cuid())
+  challanId   String
+  challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  stage       String   // PACKING | QC | VEHICLE_ARRANGEMENT | EWAY_BILL | ITEM_BILL | DISPATCH | PHOTOS_VIDEOS | ADMIN_VERIFY
+  assignedRole String  // ACCOUNT | COORDINATOR | SUPPORT
+  status      String   @default("PENDING") // PENDING | IN_PROGRESS | DONE | SKIPPED
+  data        String   // JSON string for stage-specific data
+  notes       String?
+
+  doneById    String?
+  doneBy      User?    @relation(fields: [doneById], references: [id])
+  doneAt      DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// MESSAGES (between roles)
+// ═══════════════════════════════════════════
+model Message {
+  id          String   @id @default(cuid())
+  challanId   String?
+  challan     Challan? @relation(fields: [challanId], references: [id])
+
+  fromRole    String
+  toRole      String
+  fromUserId  String
+  fromUser    User     @relation("MessageSender", fields: [fromUserId], references: [id])
+
+  subject     String
+  body        String
+  attachments String?  // JSON array of file names/urls
+  read        Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// SUPPORT TEAM DISPATCH CHECKLIST
+// ═══════════════════════════════════════════
+model SupportChecklist {
+  id                    String   @id @default(cuid())
+  challanId             String   @unique
+  challan               Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  clientName            String
+  mobileNo              String?
+  location              String?
+  invoiceNo             String?
+  challanNo             String?
+  noOfBoxes             Int?
+  transporterName       String?
+  vehicleTrackingNo     String?
+  driverDetails         String?
+  dispatchDate          DateTime?
+  leadTime              String?
+
+  acknowledgementMessage String?
+  successfulDeliveryMessage String?
+  googleReview          String?
+  generalFeedback       String?
+
+  createdById           String
+  createdBy             User     @relation(fields: [createdById], references: [id])
+
+  status                String   @default("DRAFT") // DRAFT | DISPATCHED | DELIVERED | COMPLETED
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
