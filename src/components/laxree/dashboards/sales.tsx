@@ -131,6 +131,10 @@ type UploadResponse = {
   challan: Challan
   stockSummary: StockSummary
   message: string
+  autoPR?: {
+    prNumber: string
+    items: { itemName: string; model: string | null; quantity: number }[]
+  } | null
 }
 
 const STOCK_STATUS_COLOR: Record<string, string> = {
@@ -1072,6 +1076,33 @@ function UploadResult({ result, onDone, onUploadAnother }: {
       </>
         )
       })()}
+
+      {/* ── Auto-raised Purchase Request banner ──
+          When some items were Not Available, the system auto-raised an URGENT
+          Purchase Request in Laxree's name. The Owner (Sir) gets an urgent
+          popup to check, sign & process it — because the client has paid. */}
+      {result.autoPR && (
+        <div className="rounded-xl border-2 border-[#E05050]/40 bg-gradient-to-r from-[#E05050]/15 to-[#E05050]/5 px-4 py-3 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#E05050]/20 text-lg">🚨</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-bold text-[#FF6B6B]">
+                Purchase Request {result.autoPR.prNumber} auto-raised — Owner notified urgently
+              </div>
+              <div className="text-[11.5px] text-[#EDE4D0]/90 mt-0.5">
+                {result.autoPR.items.length} item(s) were not available in stock. Since the client has paid in advance, an <strong>URGENT PR</strong> was raised automatically in Laxree's name. Sir just has to check, sign &amp; process it.
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {result.autoPR.items.map((it, i) => (
+                  <span key={i} className="text-[10px] rounded-md bg-white/8 border border-white/10 px-2 py-0.5 text-[#EDE4D0]">
+                    {it.itemName}{it.model ? ` (${it.model})` : ''} <span className="text-[#E4AF4A]">×{it.quantity}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Per-item inventory status — clear Available / Not Available per model */}
       <SectionTitle icon="🔍" title="Per-Item Inventory Status" sub={`Challan ${challan.challanNumber} — model-wise availability`} />

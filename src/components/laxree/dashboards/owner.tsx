@@ -9,7 +9,14 @@ import { StockLookupCard } from '../stock-lookup'
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number; minStock:number; fastMoving:boolean }
 type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:string|null; quantity:number; status:string; matchedItem: Item|null }
 type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number; paymentStatus:string; status:string; createdAt:string; challanItems:ChallanItem[] }
-type PR = { id:string; prNumber:string; raisedByName:string; status:string; notes:string|null; createdAt:string; items:{id:string;itemName:string;model:string|null;quantity:number;item:Item|null}[] }
+type PR = {
+  id:string; prNumber:string; raisedByName:string; status:string; notes:string|null; createdAt:string
+  autoRaised?: boolean; priority?: string; advanceReceived?: number
+  clientName?: string | null; challanNumber?: string | null; reason?: string | null
+  signedByName?: string | null; signedAt?: string | null; processedAt?: string | null
+  challan?: { challanNumber:string; clientName:string } | null
+  items:{id:string;itemName:string;model:string|null;quantity:number;item:Item|null}[]
+}
 
 type StockRow = {
   id:string; category:string; itemName:string; model:string; colour:string|null;
@@ -376,12 +383,45 @@ function PRTab({ user }: { user: SessionUser }) {
   const { data, loading, refresh } = useFetch<{ purchaseRequests: PR[] }>('/api/purchase-requests')
   const [show, setShow] = useState(false)
   const [printPR, setPrintPR] = useState<PR | null>(null)
+  const [signPR, setSignPR] = useState<PR | null>(null)
 
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading PRs…</div>
   if (!data) return null
 
+  // Urgent auto-raised PRs awaiting Sir's signature → show banner + sort first
+  const pendingUrgent = data.purchaseRequests.filter(
+    (p) => p.autoRaised && p.priority === 'URGENT' && p.status === 'PENDING_APPROVAL',
+  )
+  const sorted = [...data.purchaseRequests].sort((a, b) => {
+    // PENDING_APPROVAL URGENT first, then other pending, then the rest
+    const rank = (p: PR) => {
+      if (p.status === 'PENDING_APPROVAL' && p.priority === 'URGENT') return 0
+      if (p.status === 'PENDING_APPROVAL') return 1
+      if (p.status === 'SIGNED') return 2
+      return 3
+    }
+    return rank(a) - rank(b) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
+
   return (
     <div className="space-y-4">
+      {/* ── URGENT banner ── */}
+      {pendingUrgent.length > 0 && (
+        <div className="rounded-xl border-2 border-[#E05050]/40 bg-gradient-to-r from-[#E05050]/15 to-[#E05050]/5 p-4 animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[#E05050]/20 text-xl">🚨</div>
+            <div className="flex-1">
+              <div className="text-[14px] font-bold text-[#FF6B6B]">
+                {pendingUrgent.length} Urgent Purchase Request{pendingUrgent.length > 1 ? 's' : ''} awaiting your signature
+              </div>
+              <div className="text-[12px] text-[#EDE4D0]/85 mt-0.5">
+                Client has paid the required payment in advance. PR raised automatically — Sir just has to check, sign &amp; process.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-end">
         <Btn variant="gold" onClick={() => setShow(true)}>+ Raise Purchase Request</Btn>
       </div>
@@ -390,40 +430,223 @@ function PRTab({ user }: { user: SessionUser }) {
         <SectionTitle icon="📋" title="Purchase Requests" sub={`${data.purchaseRequests.length} total`} />
         {data.purchaseRequests.length === 0 ? <EmptyState icon="📋" title="No PRs yet" sub="Click 'Raise PR' to auto-generate one in Laxree's name" /> : (
           <div className="space-y-2">
-            {data.purchaseRequests.map((pr) => (
-              <div key={pr.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[#E4AF4A] font-semibold text-[13px]">{pr.prNumber}</span>
-                      <Badge label={pr.status} color={STATUS_COLORS[pr.status]} />
+            {sorted.map((pr) => {
+              const isUrgentPending = pr.autoRaised && pr.priority === 'URGENT' && pr.status === 'PENDING_APPROVAL'
+              const isProcessed = pr.status === 'PROCESSED'
+              const isSigned = pr.status === 'SIGNED'
+              return (
+                <div
+                  key={pr.id}
+                  className={`rounded-lg border p-3 transition-all ${
+                    isUrgentPending
+                      ? 'border-[#E05050]/40 bg-[#E05050]/[0.06] shadow-[0_0_24px_-8px_rgba(224,80,80,0.5)]'
+                      : 'border-white/7 bg-white/[0.02]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-[#E4AF4A] font-semibold text-[13px]">{pr.prNumber}</span>
+                        <Badge label={pr.status.replace(/_/g, ' ')} color={STATUS_COLORS[pr.status] || '#96A8BF'} />
+                        {pr.autoRaised && pr.priority === 'URGENT' && (
+                          <Badge label="🚨 URGENT" color="#E05050" />
+                        )}
+                        {pr.autoRaised && <Badge label="AUTO-RAISED" color="#4A9EE0" />}
+                      </div>
+                      <div className="text-[11px] text-[#96A8BF] mt-0.5">
+                        Raised by {pr.raisedByName} • {fmtDate(pr.createdAt)}
+                        {pr.challanNumber && <> • Challan <span className="text-[#E4AF4A] font-mono">{pr.challanNumber}</span></>}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-[#96A8BF] mt-0.5">Raised by {pr.raisedByName} • {fmtDate(pr.createdAt)}</div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <Btn size="sm" onClick={() => setPrintPR(pr)}>🖨 Print</Btn>
+                      {pr.status === 'PENDING_APPROVAL' && (
+                        <Btn size="sm" variant="success" onClick={() => setSignPR(pr)}>✍️ Sign &amp; Process</Btn>
+                      )}
+                      {pr.status === 'DRAFT' && (
+                        <Btn size="sm" variant="success" onClick={async () => { await apiPatch('/api/purchase-requests', { id: pr.id, status: 'PRINTED' }); refresh() }}>Mark Printed</Btn>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex gap-1.5">
-                    <Btn size="sm" onClick={() => setPrintPR(pr)}>🖨 Print</Btn>
-                    {pr.status === 'DRAFT' && (
-                      <Btn size="sm" variant="success" onClick={async () => { await apiPatch('/api/purchase-requests', { id: pr.id, status: 'PRINTED' }); refresh() }}>Mark Printed</Btn>
-                    )}
+
+                  {/* ── Auto-raised context (client + advance) ── */}
+                  {pr.autoRaised && (pr.clientName || (pr.advanceReceived ?? 0) > 0) && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
+                      {pr.clientName && (
+                        <div className="rounded-md bg-white/[0.03] border border-white/7 px-2.5 py-1.5">
+                          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Client</div>
+                          <div className="text-[12px] text-[#EDE4D0] font-medium truncate">{pr.clientName}</div>
+                        </div>
+                      )}
+                      {(pr.advanceReceived ?? 0) > 0 && (
+                        <div className="rounded-md bg-[#3CB87A]/10 border border-[#3CB87A]/25 px-2.5 py-1.5">
+                          <div className="text-[9px] uppercase tracking-wide text-[#3CB87A]">Advance Paid ✓</div>
+                          <div className="text-[12px] text-[#3CB87A] font-semibold">{fmtINR(pr.advanceReceived || 0)}</div>
+                        </div>
+                      )}
+                      {pr.reason && (
+                        <div className="rounded-md bg-white/[0.03] border border-white/7 px-2.5 py-1.5">
+                          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Reason</div>
+                          <div className="text-[12px] text-[#E05050] font-medium truncate">{pr.reason}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Items ── */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {pr.items.map((it) => (
+                      <span key={it.id} className="text-[10.5px] rounded-md bg-white/5 border border-white/7 px-2 py-1 text-[#96A8BF]">
+                        {it.itemName} <span className="text-[#E4AF4A]">×{it.quantity}</span>
+                        {it.model && <span className="text-[#4E6180] ml-1">({it.model})</span>}
+                      </span>
+                    ))}
                   </div>
+
+                  {/* ── Signature status ── */}
+                  {(isProcessed || isSigned) && pr.signedByName && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px]">
+                      <span className="text-[#3CB87A]">✓ Signed by</span>
+                      <span className="text-[#EDE4D0] font-medium">{pr.signedByName}</span>
+                      {pr.signedAt && <span className="text-[#4E6180]">on {fmtDate(pr.signedAt)}</span>}
+                      {isProcessed && pr.processedAt && <span className="text-[#3CB87A]">• Processed {fmtDate(pr.processedAt)}</span>}
+                    </div>
+                  )}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {pr.items.map((it) => (
-                    <span key={it.id} className="text-[10.5px] rounded-md bg-white/5 border border-white/7 px-2 py-1 text-[#96A8BF]">
-                      {it.itemName} <span className="text-[#E4AF4A]">×{it.quantity}</span>
-                      {it.model && <span className="text-[#4E6180] ml-1">({it.model})</span>}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </Card>
 
       <PRForm open={show} onClose={() => setShow(false)} userId={user.id} onCreated={() => { setShow(false); refresh() }} />
       <PrintModal pr={printPR} onClose={() => setPrintPR(null)} />
+      <SignProcessModal pr={signPR} onClose={() => setSignPR(null)} onDone={() => { setSignPR(null); refresh() }} />
     </div>
+  )
+}
+
+// ═══════════════════════════════════════════
+// SIGN & PROCESS MODAL — Owner reviews + signs the auto-raised URGENT PR
+// ═══════════════════════════════════════════
+function SignProcessModal({ pr, onClose, onDone }: { pr: PR | null; onClose: () => void; onDone: () => void }) {
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState<'process' | 'sign' | 'reject' | null>(null)
+  const [err, setErr] = useState('')
+
+  if (!pr) return null
+
+  const totalQty = pr.items.reduce((s, it) => s + it.quantity, 0)
+
+  const submit = async (action: 'process' | 'sign' | 'reject') => {
+    setErr('')
+    setBusy(action)
+    try {
+      const res = await fetch(`/api/purchase-requests/${pr.id}/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, notes: notes.trim() || undefined }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to sign PR')
+      }
+      onDone()
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Modal open={!!pr} onClose={onClose} title={`Review & Sign — ${pr.prNumber}`} wide>
+      <div className="space-y-4">
+        {/* Urgent context banner */}
+        <div className="rounded-lg border-2 border-[#E05050]/40 bg-[#E05050]/10 p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-lg">🚨</span>
+            <div className="text-[12px] text-[#EDE4D0]">
+              <div className="font-bold text-[#FF6B6B] mb-0.5">URGENT — Client has paid in advance</div>
+              The client has already paid the required payment. This Purchase Request was auto-raised because the item(s) are not available in stock. Sir just has to check, sign &amp; process it so procurement can begin.
+            </div>
+          </div>
+        </div>
+
+        {/* PR meta */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+            <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">PR Number</div>
+            <div className="text-[12px] text-[#E4AF4A] font-mono font-semibold">{pr.prNumber}</div>
+          </div>
+          <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+            <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Client</div>
+            <div className="text-[12px] text-[#EDE4D0] font-medium truncate">{pr.clientName || pr.challan?.clientName || '—'}</div>
+          </div>
+          <div className="rounded-md bg-[#3CB87A]/10 border border-[#3CB87A]/25 px-3 py-2">
+            <div className="text-[9px] uppercase tracking-wide text-[#3CB87A]">Advance Paid</div>
+            <div className="text-[12px] text-[#3CB87A] font-semibold">{fmtINR(pr.advanceReceived || 0)}</div>
+          </div>
+          <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+            <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Challan</div>
+            <div className="text-[12px] text-[#E4AF4A] font-mono truncate">{pr.challanNumber || pr.challan?.challanNumber || '—'}</div>
+          </div>
+        </div>
+
+        {/* Items table */}
+        <div>
+          <h4 className="text-[12px] font-semibold text-[#E4AF4A] mb-2">Items to Procure ({pr.items.length})</h4>
+          <div className="rounded-lg border border-white/7 overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-[10px] uppercase text-[#4E6180] bg-white/[0.02]">
+                  <th className="py-2 px-3">Item Name</th>
+                  <th className="py-2 px-3">Model</th>
+                  <th className="py-2 px-3 text-right">Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pr.items.map((it) => (
+                  <tr key={it.id} className="border-t border-white/5">
+                    <td className="py-2 px-3 text-[#EDE4D0]">{it.itemName}</td>
+                    <td className="py-2 px-3 text-[#96A8BF] font-mono text-[11px]">{it.model || '—'}</td>
+                    <td className="py-2 px-3 text-right text-[#E4AF4A] font-bold">{it.quantity}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-[#C8922A]/40 bg-[#C8922A]/5">
+                  <td colSpan={2} className="py-2 px-3 text-right text-[10px] uppercase tracking-wide text-[#E4AF4A] font-bold">Total Quantity</td>
+                  <td className="py-2 px-3 text-right text-[#E4AF4A] font-bold text-[14px]">{totalQty}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {pr.notes && (
+          <div className="rounded-md bg-white/[0.03] border border-white/7 p-2.5 text-[11px] text-[#96A8BF]">
+            <span className="font-semibold text-[#4E6180]">Note: </span>{pr.notes}
+          </div>
+        )}
+
+        <Input label="Remarks (optional)" value={notes} onChange={setNotes} placeholder="Any note for the purchase team…" />
+
+        {err && <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">{err}</div>}
+
+        {/* Action buttons */}
+        <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-white/7">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="danger" onClick={() => submit('reject')} disabled={!!busy}>
+            {busy === 'reject' ? 'Rejecting…' : '✕ Reject'}
+          </Btn>
+          <Btn variant="gold" onClick={() => submit('sign')} disabled={!!busy}>
+            {busy === 'sign' ? 'Signing…' : '✍️ Sign Only'}
+          </Btn>
+          <Btn variant="success" onClick={() => submit('process')} disabled={!!busy}>
+            {busy === 'process' ? 'Processing…' : '✅ Sign & Process'}
+          </Btn>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

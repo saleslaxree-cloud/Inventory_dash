@@ -345,6 +345,143 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── 6b. Auto-raise URGENT Purchase Request for NOT-AVAILABLE items ──
+  // When a client has paid in advance but some items are not in stock, the
+  // system auto-raises a Purchase Request in Laxree's name. The Owner ("Sir")
+  // just needs to check, sign and process it — an URGENT popup is sent.
+  //
+  // "Not available" = stockStatus is WILL_BE_AVAILABLE (out of stock) or
+  // PENDING/NOT_FOUND (item not in master inventory). For ON_HOLD (partial),
+  // we raise a PR for only the shortage quantity.
+  const notAvailableRows = matchedItemRows.filter(
+    (r) => r.stockStatus !== 'AVAILABLE',
+  )
+
+  let autoPR: {
+    prNumber: string
+    items: { itemName: string; model: string | null; quantity: number }[]
+  } | null = null
+
+  if (notAvailableRows.length > 0) {
+    // Find the Owner (there is a single OWNER user — Ashish Agarwal)
+    const owner = await db.user.findFirst({ where: { role: 'OWNER', active: true } })
+
+    // Generate a unique PR number (max existing suffix + 1)
+    const lastPR = await db.purchaseRequest.findFirst({
+      orderBy: { createdAt: 'desc' },
+      select: { prNumber: true },
+    })
+    let nextSuffix = 1
+    if (lastPR) {
+      const m = lastPR.prNumber.match(/(\d+)$/)
+      if (m) nextSuffix = parseInt(m[1], 10) + 1
+    }
+    const prNumber = `PR-2026-${String(nextSuffix).padStart(4, '0')}`
+
+    const prItems = notAvailableRows.map((r) => {
+      // For ON_HOLD (partial), order only the shortage; otherwise full qty
+      const shortage =
+        r.stockStatus === 'ON_HOLD'
+          ? Math.max(0, r.quantity - (r.availableQty ?? 0))
+          : r.quantity
+      return {
+        itemId: r.matchedItemId || null,
+        itemName: r.itemName,
+        model: r.model || null,
+        quantity: shortage,
+        notes: r.stockRemark || null,
+      }
+    })
+
+    const pr = await db.purchaseRequest.create({
+      data: {
+        prNumber,
+        raisedByName: 'Laxree',
+        raisedById: owner?.id || user.id, // system auto-raise; fall back to uploader
+        challanId: challan.id,
+        status: 'PENDING_APPROVAL',
+        notes: `Auto-raised — client ${clientName} paid ₹${amountAdvance.toLocaleString('en-IN')} advance. Items not available in stock. Sir to check, sign & process.`,
+        autoRaised: true,
+        priority: 'URGENT',
+        advanceReceived: amountAdvance,
+        clientName,
+        challanNumber: challanNumber,
+        reason: 'Out of stock / not in master inventory',
+        items: { create: prItems },
+      },
+      include: { items: true },
+    })
+
+    autoPR = {
+      prNumber: pr.prNumber,
+      items: pr.items.map((it) => ({ itemName: it.itemName, model: it.model, quantity: it.quantity })),
+    }
+
+    // ── 6c. URGENT notification popup to OWNER ──
+    const itemsList = pr.items
+      .map((it) => `${it.itemName}${it.model ? ` (${it.model})` : ''} ×${it.quantity}`)
+      .join(', ')
+
+    const ownerNotifBody =
+      `Client has paid the required payment in advance. PR raised automatically — Sir just has to check, sign & process.\n\n` +
+      `PR Number: ${pr.prNumber}\n` +
+      `Client Name: ${clientName}\n` +
+      `Advance Paid: ₹${amountAdvance.toLocaleString('en-IN')}\n` +
+      `Items Not Available: ${itemsList}\n` +
+      `Challan No: ${challanNumber} · ${clientCity}`
+
+    const ownerNotif = await db.notification.create({
+      data: {
+        toRole: 'OWNER',
+        fromRole: user.role,
+        fromUserId: user.id,
+        type: 'PR_RAISED_URGENT',
+        title: '🚨 URGENT: Purchase Request Auto-Raised — Sign & Process',
+        body: ownerNotifBody,
+        icon: '🚨',
+        challanId: challan.id,
+        read: false,
+      },
+    })
+
+    // Best-effort socket.io push for the OWNER popup
+    try {
+      await fetch('http://127.0.0.1:3003/emit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toRole: 'OWNER',
+          notification: {
+            id: ownerNotif.id,
+            toRole: 'OWNER',
+            fromRole: user.role,
+            type: 'PR_RAISED_URGENT',
+            title: ownerNotif.title,
+            body: ownerNotif.body,
+            icon: ownerNotif.icon,
+            challanId: challan.id,
+            createdAt: ownerNotif.createdAt,
+            read: false,
+          },
+        }),
+      })
+    } catch {
+      // Non-fatal — polling will still deliver the notification
+    }
+
+    // Also leave an inline message for the Owner on the challan thread
+    await db.message.create({
+      data: {
+        challanId: challan.id,
+        fromRole: 'SYSTEM',
+        toRole: 'OWNER',
+        fromUserId: user.id,
+        subject: `URGENT PR ${pr.prNumber} — ${notAvailableRows.length} item(s) out of stock`,
+        body: `Client ${clientName} has paid ₹${amountAdvance.toLocaleString('en-IN')} in advance against challan ${challanNumber}, but ${notAvailableRows.length} item(s) are not available in stock. Purchase Request ${pr.prNumber} has been auto-raised. Please check, sign and process it so procurement can begin.\n\nItems: ${itemsList}`,
+      },
+    })
+  }
+
   // ── 7. Build response ───────────────────────────────────────
   const stockSummary = {
     available: matchedItemRows.filter((r) => r.stockStatus === 'AVAILABLE').length,
@@ -355,6 +492,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     challan,
     stockSummary,
+    autoPR,
     message: `Challan ${challanNumber} uploaded successfully. ${stockSummary.available} item(s) available, ${stockSummary.onHold} partial, ${stockSummary.willBeAvailable} on back-order.`,
   })
 }

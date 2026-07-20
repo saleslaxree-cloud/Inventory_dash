@@ -55,6 +55,11 @@ export const STATUS_COLORS: Record<string, string> = {
   DRAFT: '#96A8BF',
   PRINTED: '#4A9EE0',
   SENT: '#3CB87A',
+  // Purchase Request lifecycle
+  PENDING_APPROVAL: '#E05050',
+  SIGNED: '#4A9EE0',
+  PROCESSED: '#3CB87A',
+  REJECTED: '#E05050',
 }
 
 export function fmtINR(n: number) {

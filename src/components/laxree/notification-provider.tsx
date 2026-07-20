@@ -222,8 +222,10 @@ function BigNotificationModal({
   onDismiss: () => void
 }) {
   const color = NOTIF_COLORS[n.type] || NOTIF_COLORS.INFO
+  const isUrgent = n.type === 'PR_RAISED_URGENT'
   const [progress, setProgress] = useState(100)
-  const DURATION = 20000 // 20s — it's a modal, give the user time to read
+  // Urgent PR popups stay longer (30s) so Sir has time to read & act.
+  const DURATION = isUrgent ? 30000 : 20000
 
   useEffect(() => {
     const start = Date.now()
@@ -329,8 +331,8 @@ function BigNotificationModal({
               className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black tracking-wider uppercase"
               style={{ background: `${color.border}22`, color: color.accent, border: `1px solid ${color.border}55` }}
             >
-              <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: color.accent }} />
-              New Notification
+              <span className={`h-1.5 w-1.5 rounded-full ${isUrgent ? 'animate-ping' : 'animate-pulse'}`} style={{ background: color.accent }} />
+              {isUrgent ? '⚠ Urgent Action Required' : 'New Notification'}
             </span>
           </div>
         </div>
@@ -457,6 +459,9 @@ function getAction(n: AppNotification): { label: string; icon: string; tab: stri
   switch (n.type) {
     case 'NEW_CHALLAN':
       return { label: 'Check Payment Now', icon: '💰', tab: 'pending' }
+    case 'PR_RAISED_URGENT':
+      // Owner must check, sign & process the auto-raised PR
+      return { label: 'Review & Sign PR', icon: '✍️', tab: 'pr' }
     case 'PAYMENT_VERIFIED':
       // Coordinator should start audit; Sales just views
       if (n.toRole === 'COORDINATOR') return { label: 'Start Audit', icon: '🔍', tab: 'process' }
@@ -479,6 +484,7 @@ function getAction(n: AppNotification): { label: string; icon: string; tab: stri
 
 const NOTIF_COLORS: Record<string, { border: string; accent: string; glow: string }> = {
   NEW_CHALLAN:          { border: '#4A9EE0', accent: '#7AB8F0', glow: 'rgba(74,158,224,0.45)' },
+  PR_RAISED_URGENT:     { border: '#E05050', accent: '#FF6B6B', glow: 'rgba(224,80,80,0.55)' },
   PAYMENT_VERIFIED:     { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
   COORDINATOR_APPROVED: { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
   WAREHOUSE_DONE:       { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },

@@ -31,6 +31,7 @@ model User {
 
   challans          Challan[]
   purchaseRequests  PurchaseRequest[]
+  prSigned          PurchaseRequest[] @relation("PRSigner")
   messagesSent      Message[]         @relation("MessageSender")
   workflowActions   WorkflowStage[]
   supportChecklists SupportChecklist[]
@@ -236,7 +237,25 @@ model PurchaseRequest {
   challan     Challan? @relation(fields: [challanId], references: [id])
 
   status      String   @default("DRAFT")
+  // DRAFT | PENDING_APPROVAL | SIGNED | PROCESSED | PRINTED | REJECTED
   notes       String?
+
+  // ── Auto-raised PR (when Sales uploads a challan with not-available items)
+  // The system auto-raises a PR in Laxree's name; the Owner just checks,
+  // signs and processes it because the client has already paid in advance.
+  autoRaised      Boolean  @default(false)
+  priority        String   @default("NORMAL")  // URGENT | NORMAL
+  advanceReceived Float    @default(0)          // advance paid by client (₹)
+  clientName      String?
+  challanNumber   String?
+  reason          String?  // why it was raised (e.g. "Out of stock")
+
+  // ── Owner sign-off
+  signedById      String?
+  signedBy        User?    @relation("PRSigner", fields: [signedById], references: [id])
+  signedByName    String?
+  signedAt        DateTime?
+  processedAt     DateTime?
 
   items       PurchaseRequestItem[]
   createdAt   DateTime @default(now())

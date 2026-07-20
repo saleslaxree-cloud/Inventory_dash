@@ -6,10 +6,18 @@ import { getSession } from '@/lib/auth'
 export async function GET() {
   const user = await getSession()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Owner sees all PRs (incl. auto-raised URGENT ones for them to sign).
+  // IT_MANAGER / ADMIN can also see all. Others (e.g. SALES) see only their
+  // own challan-linked PRs so they can track procurement status.
+  const where = ['OWNER', 'IT_MANAGER', 'ADMIN'].includes(user.role)
+    ? {}
+    : { raisedById: user.id }
   const prs = await db.purchaseRequest.findMany({
+    where,
     include: {
       items: { include: { item: true } },
       raisedBy: { select: { name: true, role: true } },
+      signedBy: { select: { name: true, role: true } },
       challan: { select: { challanNumber: true, clientName: true } },
     },
     orderBy: { createdAt: 'desc' },
