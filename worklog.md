@@ -1675,3 +1675,29 @@ Stage Summary:
   4. Owner clicks "Sign & Process" → reviews items in a modal → clicks "✅ Sign & Process" → PR becomes PROCESSED, signed by Ashish Agarwal, urgent banner clears.
 - The Sales side also sees a red banner on the upload result confirming "PR auto-raised — Owner notified urgently" so they know procurement is in motion.
 - Schema reverted to postgresql for Vercel/Neon deploy (local sqlite testing done). All lint clean. Ready to commit & push.
+
+---
+Task ID: push-all-codes
+Agent: main (Z.ai Code)
+Task: Push all codes (commit + push the auto-PR/urgent-owner feature work to origin so Vercel deploys it to production).
+
+Work Log:
+- Checked git status: branch was 2 commits ahead of origin/main (the auto-pr-urgent-owner implementation + a stray commit).
+- Verified prisma/schema.prisma datasource is `postgresql` (correct for Neon/Vercel production) — the local sqlite testing had already been reverted.
+- Noticed two local-only artifacts had been accidentally tracked in a previous commit: `db/custom.db` (local sqlite test database) and `.zscripts/dev.pid` (dev server process id file). These are sandbox-only and should not live in the repo.
+- Updated `.gitignore` to ignore `/db/*.db`, `/db/*.db-journal`, and `.zscripts/*.pid`.
+- `git rm --cached db/custom.db .zscripts/dev.pid` to untrack them (files remain locally for sandbox use).
+- Committed cleanup: "chore: stop tracking local sqlite db and dev pid file" (b6ec062).
+- Ran `bun run lint` → 0 errors, clean.
+- Confirmed dev server (port 3000) healthy — recent dev.log shows 200s on / and /api/notifications.
+- `git push origin main` → pushed 3 commits (fd7f60c, 72532f0, b6ec062) to GitHub. Branch now up to date with origin/main.
+- Vercel will auto-deploy from origin/main; production DATABASE_URL points to Neon Postgres so the new PurchaseRequest fields (autoRaised, priority, advanceReceived, clientName, challanNumber, reason, signedById, signedByName, signedAt, processedAt) will be applied via Vercel's postinstall `prisma db push`.
+
+Stage Summary:
+- ALL code pushed to origin/main (https://github.com/saleslaxree-cloud/Inventory_dash.git).
+- 3 commits delivered:
+  1. fd7f60c — misc (challan delete-bulk + [id] routes placeholders)
+  2. 72532f0 — feat: auto-raise Purchase Request + urgent Owner popup when a Sales challan has not-available items (schema + upload route + PR sign API + Owner dashboard PR/sign UI + Sales upload-result banner + notification-provider urgent styling + types)
+  3. b6ec062 — chore: stop tracking local sqlite db and dev pid file
+- Production (https://inventory-dash-eight.vercel.app) will redeploy automatically. After deploy, the full Owner PR workflow will be live: Sales uploads challan with not-available item → auto PR-2026-XXXX raised → Owner gets big red URGENT popup → Owner clicks "Review & Sign PR" → signs & processes.
+- Repo is now clean (nothing to commit, working tree clean; branch up to date with origin/main).
