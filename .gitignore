@@ -58,3 +58,10 @@ server.log
 /skills/tool-results/
 /tool-results/
 agent-ctx/
+
+# local sqlite database (sandbox testing only — production uses Neon Postgres)
+/db/*.db
+/db/*.db-journal
+
+# local dev process id files
+.zscripts/*.pid
