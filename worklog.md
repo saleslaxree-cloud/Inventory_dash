@@ -1534,3 +1534,40 @@ Stage Summary:
 - The action button navigates the user to the right tab (e.g. Account → Pending Approval, Coordinator → Process Challan, Support → Dispatch).
 - The full workflow chain still triggers these popups: Sales upload → Account (NEW_CHALLAN), Account verify → Coordinator (PAYMENT_VERIFIED) + Sales, Coordinator warehouse → Support + Sales + Account, Vehicle arranged → Support + Sales, Dispatched → Support + Sales + Account.
 - Production is clean — Tanvi's test challans deleted, ready for fresh testing.
+
+---
+Task ID: popup-initial-load-fix
+Agent: main (Z.ai Code)
+Task: User logged in as Account on production but the big popup didn't appear. Fix so the popup shows immediately on login if there are unread notifications.
+
+Work Log:
+- Diagnosed root cause: notification-provider.tsx only showed the popup for notifications that arrived AFTER the first fetch. On initial load, existing unread notifications were loaded into the bell badge/panel silently — no popup. So when Account logged in with 1 unread notification, they saw the badge "1" but not the big popup.
+- Also confirmed production socket.io mini-service isn't available (sandbox-only), so production relies on polling — was 10s, reduced to 5s for faster feedback.
+- Fix in src/components/laxree/notification-provider.tsx:
+  * On INITIAL load: if there are unread notifications, show the big popup for the MOST RECENT unread one (so the user immediately sees pending work when they open/refresh the page). All other existing notifications are marked as seen (no popup) but stay visible in the bell panel.
+  * On SUBSEQUENT polls: any notification with a new ID = newly arrived → show popup (unchanged behavior).
+  * Reduced polling interval from 10s → 5s.
+- Committed (f03c68e), pushed to Vercel.
+
+Production verification (after deploy):
+- Opened fresh Account browser session on https://inventory-dash-eight.vercel.app
+- Logged in as account@laxree.com
+- Within 6 seconds the BIG CENTERED MODAL popup appeared automatically (initial-load unread notification):
+  * Bell icon (📤) + "NEW NOTIFICATION" badge
+  * Title: "New Challan Uploaded — Action Required"
+  * Intro: "Sales team processed the challan — check it."
+  * Structured body: CLIENT NAME: TANVIR HUSSAIN, BILLING NAME: CASACONNECT INNOVATIONS PRIVATE LIMITED, AMOUNT: ₹2,293.75 (Advance ₹2,293.75), CHALLAN NO: LC-VISIBLE-TEST-001 · JAMMU
+  * Action button: "💰 Check Payment Now"
+  * Dismiss button
+- Screenshot saved: /tmp/prod-popup-final.png
+
+Local verification (before push):
+- Submitted challan LC-INITPOP-001 as Sales → created unread notification for Account
+- Opened FRESH Account browser session on http://127.0.0.1:3000
+- Big popup appeared immediately on login with all content confirmed via JS eval.
+- Cleaned up test challan after verification.
+
+Stage Summary:
+- FIXED: The big popup now shows immediately when an Account/Coordinator/Support user logs in if they have unread notifications — no need to wait for a new challan submission.
+- Polling reduced to 5s so new challan submissions appear within 5 seconds on production.
+- Verified on BOTH local sandbox and production (inventory-dash-eight.vercel.app).
