@@ -400,3 +400,22 @@ model StockHold {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
+
+// ═══════════════════════════════════════════
+// NOTIFICATIONS (real-time popups per role)
+// ═══════════════════════════════════════════
+model Notification {
+  id          String   @id @default(cuid())
+  toRole      String                       // ACCOUNT | OWNER | SALES | COORDINATOR | SUPPORT | IT_MANAGER | ADMIN | '*'
+  fromRole    String?                      // Role that triggered the notification
+  fromUserId  String?
+  type        String                       // NEW_CHALLAN | PAYMENT_VERIFIED | COORDINATOR_APPROVED | WAREHOUSE_DONE | VEHICLE_ARRANGED | DISPATCHED | BILLS_UPLOADED | REJECTED | INFO
+  title       String
+  body        String
+  icon        String   @default("🔔")
+  challanId   String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([toRole, read, createdAt])
+}

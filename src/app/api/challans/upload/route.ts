@@ -264,6 +264,57 @@ export async function POST(req: NextRequest) {
     },
   })
 
+  // ── 5b. Create a real-time Notification for ACCOUNT (big popup) ─
+  // The frontend polls /api/notifications every 10s and shows a big toast.
+  // We also try to push it via the socket.io notify-service (sandbox only —
+  // on Vercel the emit silently fails and the 10s polling fallback catches it).
+  const billingDisplay = (body.billingName || clientName)
+  const notifBody =
+    `Sales team processed the challan — check it.\n\n` +
+    `Client Name: ${clientName}\n` +
+    `Billing Name: ${billingDisplay}\n` +
+    `Amount: ₹${amountTotal.toLocaleString('en-IN')} (Advance ₹${amountAdvance.toLocaleString('en-IN')})\n` +
+    `Challan No: ${challanNumber} · ${clientCity}`
+
+  const notification = await db.notification.create({
+    data: {
+      toRole: 'ACCOUNT',
+      fromRole: user.role,
+      fromUserId: user.id,
+      type: 'NEW_CHALLAN',
+      title: 'New Challan Uploaded — Action Required',
+      body: notifBody,
+      icon: '📤',
+      challanId: challan.id,
+      read: false,
+    },
+  })
+
+  // Best-effort socket.io push (works in sandbox; silently skipped on Vercel)
+  try {
+    await fetch('http://127.0.0.1:3003/emit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        toRole: 'ACCOUNT',
+        notification: {
+          id: notification.id,
+          toRole: 'ACCOUNT',
+          fromRole: user.role,
+          type: 'NEW_CHALLAN',
+          title: notification.title,
+          body: notification.body,
+          icon: notification.icon,
+          challanId: challan.id,
+          createdAt: notification.createdAt,
+          read: false,
+        },
+      }),
+    })
+  } catch {
+    // Non-fatal — polling will still deliver the notification
+  }
+
   // ── 6. Stock-hold for matched AVAILABLE items when advance is paid ─
   if (amountAdvance > 0) {
     for (const row of matchedItemRows) {
