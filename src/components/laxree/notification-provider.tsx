@@ -51,13 +51,25 @@ export function NotificationProvider({ user, children }: {
       if (!text) return
       const data = JSON.parse(text)
       if (data.notifications) {
-        // Detect NEW notifications (not in seenIds) to show as modal
         const newOnes: AppNotification[] = []
-        for (const n of data.notifications) {
-          if (!seenIds.current.has(n.id)) {
-            seenIds.current.add(n.id)
-            // Only show modal on subsequent fetches (not the initial load)
-            if (firstFetchDone.current) {
+        if (!firstFetchDone.current) {
+          // ── INITIAL LOAD ──
+          // Show the big popup for the most recent UNREAD notification so the
+          // user immediately sees pending work when they open/refresh the page.
+          // Older unread ones go into seenIds (no popup) but stay in the panel.
+          const unreadNotifs = data.notifications.filter((n: AppNotification) => !n.read)
+          if (unreadNotifs.length > 0) {
+            const latest = unreadNotifs[0]
+            newOnes.push(latest)
+          }
+          // Mark ALL as seen so polling doesn't re-toast them
+          for (const n of data.notifications) seenIds.current.add(n.id)
+        } else {
+          // ── SUBSEQUENT POLLS ──
+          // Any notification with a new ID = newly arrived → show popup
+          for (const n of data.notifications) {
+            if (!seenIds.current.has(n.id)) {
+              seenIds.current.add(n.id)
               newOnes.push(n)
             }
           }
@@ -65,7 +77,6 @@ export function NotificationProvider({ user, children }: {
         firstFetchDone.current = true
         setNotifications(data.notifications)
         setUnread(data.unreadCount || 0)
-        // Show modal for newly-poll-detected notifications
         if (newOnes.length > 0) {
           setQueue((prev) => [...prev, ...newOnes])
         }
@@ -113,9 +124,9 @@ export function NotificationProvider({ user, children }: {
     return () => { sock.disconnect() }
   }, [user.role])
 
-  // ── Polling fallback every 10s ──
+  // ── Polling fallback every 5s (catches notifications even if socket.io is down) ──
   useEffect(() => {
-    const interval = setInterval(fetchNotifications, 10000)
+    const interval = setInterval(fetchNotifications, 5000)
     return () => clearInterval(interval)
   }, [fetchNotifications])
 
