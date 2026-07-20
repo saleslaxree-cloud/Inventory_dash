@@ -1571,3 +1571,47 @@ Stage Summary:
 - FIXED: The big popup now shows immediately when an Account/Coordinator/Support user logs in if they have unread notifications — no need to wait for a new challan submission.
 - Polling reduced to 5s so new challan submissions appear within 5 seconds on production.
 - Verified on BOTH local sandbox and production (inventory-dash-eight.vercel.app).
+
+---
+Task ID: inventory-status-per-item
+Agent: main (Z.ai Code)
+Task: When Sales uploads a challan, show clear inventory status per item model — Available if the model is in inventory, Not Available if not.
+
+Work Log:
+- The backend already matches each challan item's model number against the master inventory (src/app/api/challans/upload/route.ts) and returns per-item stockStatus (AVAILABLE / ON_HOLD / WILL_BE_AVAILABLE / PENDING) + match status (MATCHED / NOT_FOUND / WRONG_MODEL). But the Sales UI displayed raw technical labels.
+- Added stockStatusInfo() helper in sales.tsx that maps internal status → friendly label:
+  * AVAILABLE → '✅ Available' (green) with detail 'N in stock'
+  * ON_HOLD → '🔶 Partial Available' (orange) with back-order detail
+  * WILL_BE_AVAILABLE → '❌ Not Available' (red) with 'Out of stock — 25-30 days'
+  * PENDING/NOT_FOUND → '❌ Not Available' (red) with 'Item not found in master inventory — IT team will add it'
+- Updated UploadResult screen:
+  * Big 2-card summary: '✅ X Available' (green) vs '❌ X Not Available' (red)
+  * '🤖 Inventory Agent checked N item(s)' line with color-coded counts
+  * Per-item table with 'Inventory Status' column showing clear badges + detail
+  * Columns relabeled: Model #, Need, In Stock, Inventory Status
+  * Counts computed from items array (includes NOT_FOUND as Not Available)
+- Updated My Challans list:
+  * Collapsed row: '🔍 Inventory: ✅ N Available · 🔶 N Partial · ❌ N Not Available · N items total'
+  * Fixed stockCounts to count PENDING/NOT_FOUND as Not Available (previously fell through)
+  * Expanded view: 'Per-Item Inventory Status' table with same clear badges
+- Lint clean. Dev server compiled clean.
+
+Verification (local sandbox, sqlite):
+- Temporarily switched schema to sqlite, pushed schema, seeded DB (308 master items).
+- Uploaded challan LC-INV-001 with item 'Banquet Chair' model 'LRBF-544' (exists, 260 stock):
+  → Backend: stockStatus=AVAILABLE, status=MATCHED, availableQty=260
+  → UI: '✅ Available' badge with '260 in stock (after 0 on hold)'
+- Uploaded challan LC-INV-002 with item 'Random Widget' model 'XYZ-999' (not in inventory):
+  → Backend: stockStatus=PENDING, status=NOT_FOUND, availableQty=null
+  → UI: '❌ Not Available' badge with 'Item not found in master inventory — IT Manager to add it'
+- My Challans list confirmed:
+  * LC-INV-001: '🔍 Inventory: ✅ 1 Available · 🔶 0 Partial · ❌ 0 Not Available · 1 items total'
+  * LC-INV-002: '🔍 Inventory: ✅ 0 Available · 🔶 0 Partial · ❌ 1 Not Available · 1 items total'
+- Expanded views showed correct per-item badges.
+- Reverted schema back to postgresql before committing.
+
+Stage Summary:
+- Sales users now see a clear '✅ Available' / '❌ Not Available' inventory status for EACH item model when they upload a challan or view My Challans.
+- The 'internal agent' (backend model-matching) checks each item's model number against the 308-item master inventory and reports back.
+- Items not in inventory are clearly marked 'Not Available' with an actionable note ('IT team will add it').
+- Committed (9f7a9c2), pushed to Vercel for production deploy.
