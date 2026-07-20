@@ -1458,3 +1458,48 @@ Stage Summary:
   Notification table — the bell icon shows an unread badge and the
   notification panel (click bell) lists all past notifications.
 - Commits: c0b157e (notification feature), b119dcc (auto db push on deploy)
+
+---
+Task ID: delete-tanvir-challans
+Agent: main (Z.ai Code)
+Task: Delete all TANVIR HUSSAIN challans so the user can test fresh from the start.
+
+Work Log:
+- No DELETE route existed for challans. Created three pieces:
+  1. DELETE /api/challans/[id] (src/app/api/challans/[id]/route.ts):
+     - Auth: ADMIN / IT_MANAGER can delete any; SALES can delete own only
+     - Deletes the challan + ALL related records in a transaction:
+       Notifications, Messages, WorkflowStages, StockHolds,
+       PurchaseRequestItems, PurchaseRequests, SupportChecklist,
+       ChallanItems, then the Challan itself.
+  2. POST /api/challans/delete-bulk (src/app/api/challans/delete-bulk/route.ts):
+     - Auth: ADMIN / IT_MANAGER only
+     - Body: { clientName?: string, ids?: string[] }
+     - clientName uses case-insensitive "contains" match
+     - Returns { deleted, challans: [{challanNumber, clientName}] }
+  3. UI: "Delete Challan" button on Sales > My Challans screen
+     (src/components/laxree/dashboards/sales.tsx):
+     - Shown only for challans where accountVerified=false AND
+       dispatchDate is null (can't delete already-verified/dispatched)
+     - Asks confirm() before deleting
+     - Shows "Deleting…" while in flight
+     - Calls apiDelete('/api/challans/[id]') then refreshes list
+- Lint clean. Committed (28d2bb1), pushed to Vercel.
+
+Production bulk-delete:
+- Logged in as Admin on inventory-dash-eight.vercel.app
+- Called POST /api/challans/delete-bulk with { clientName: "TANVIR HUSSAIN" }
+- Response: deleted 5 challans
+  * LC-GGMP/26-27/0027 (TANVIR HUSSAIN)
+  * LC-GGMP/26-27/0028 (TANVIR HUSSAIN)
+  * LC-GGMP/26-27/0028LC-GGMP/26-27/0099 (TANVIR HUSSAIN) — concatenated number from a test
+  * LC-GGMP/26-27/0029 (TANVIR HUSSAIN)
+  * LC-PROD-NOTIF-001 (TANVIR HUSSAIN)
+- Verified: All Challans screen now shows only LC-JPRL/26-27/0008 (P HOSPITALITY seed)
+- Verified: /api/challans?role=SALES returns count=0 (Sales user has no challans)
+
+Stage Summary:
+- All TANVIR HUSSAIN challans are DELETED from production.
+- Sales "My Challans" screen is now empty — user can test fresh from the start.
+- New delete capability is permanent: Sales can delete their own unverified
+  challans from the UI; Admin/IT can bulk-delete by client name via API.
