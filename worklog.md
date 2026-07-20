@@ -1503,3 +1503,34 @@ Stage Summary:
 - Sales "My Challans" screen is now empty — user can test fresh from the start.
 - New delete capability is permanent: Sales can delete their own unverified
   challans from the UI; Admin/IT can bulk-delete by client name via API.
+
+---
+Task ID: big-popup-redesign
+Agent: main (Z.ai Code)
+Task: Redesign the notification popup as a BIG, BEAUTIFUL, CENTERED MODAL (like the reference image with bell illustration + button) so it's clearly visible on a big screen, and delete Tanvi's challans from production so user can test fresh.
+
+Work Log:
+- Reviewed existing notification-provider.tsx — it showed a small bottom-right toast (520px). User wanted a big centered popup like the reference image (bell + button).
+- Completely rewrote src/components/laxree/notification-provider.tsx:
+  * Replaced the bottom-right Toast stack with a single BIG CENTERED MODAL popup.
+  * Modal has: dark backdrop with blur, animated bell illustration with concentric pulsing rings + ring-shake animation, "New Notification" badge, large colored title, parsed structured key/value body rows in a bordered card, from-role + time chips, and TWO action buttons (primary gradient button + dismiss).
+  * The primary action button label/icon/tab auto-derives from notification type (NEW_CHALLAN→"Check Payment Now"→pending tab, PAYMENT_VERIFIED→"Start Audit"→process tab, etc.).
+  * Clicking the action button dispatches a `laxree:notification-action` CustomEvent with the target tab.
+  * Modal auto-dismisses after 20s (longer than before since it's a modal with more content), with a progress bar at the bottom.
+  * Queue support: if multiple notifications arrive, shows "+N more" badge and displays them one at a time.
+  * Kept the bell icon (top-right) + notification panel for history.
+- Updated src/app/page.tsx: added a useEffect that listens for `laxree:notification-action` events and calls setActiveTab() so the action button navigates the user to the right screen.
+- Lint passes cleanly (bun run lint — no errors).
+- Dev server recompiled successfully (no errors in dev.log).
+
+Production cleanup (delete-tanvir-prod-2):
+- Logged in as admin@laxree.com on https://inventory-dash-eight.vercel.app.
+- Before: 2 challans (1 TANVIR HUSSAIN LC-GGMP/26-27/0027 unverified, 1 P HOSPITALITY seed verified).
+- Called POST /api/challans/delete-bulk { clientName: "TANVIR HUSSAIN" } → deleted 1.
+- After: 1 challan remains (only P HOSPITALITY seed). 0 TANVIR challans.
+
+Stage Summary:
+- Notification popup is now a BIG BEAUTIFUL CENTERED MODAL matching the reference design: bell illustration at top (with pulsing rings + shake animation), colored title, structured body card with Client Name / Billing Name / Amount / Challan No rows, and a prominent gradient action button.
+- The action button navigates the user to the right tab (e.g. Account → Pending Approval, Coordinator → Process Challan, Support → Dispatch).
+- The full workflow chain still triggers these popups: Sales upload → Account (NEW_CHALLAN), Account verify → Coordinator (PAYMENT_VERIFIED) + Sales, Coordinator warehouse → Support + Sales + Account, Vehicle arranged → Support + Sales, Dispatched → Support + Sales + Account.
+- Production is clean — Tanvi's test challans deleted, ready for fresh testing.

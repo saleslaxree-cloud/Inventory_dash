@@ -30,6 +30,17 @@ export default function Home() {
       .finally(() => setChecking(false))
   }, [])
 
+  // Listen for notification action events (from the big modal's action button)
+  // and switch to the requested tab so the user lands on the right screen.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { tab?: string } | undefined
+      if (detail?.tab) setActiveTab(detail.tab)
+    }
+    window.addEventListener('laxree:notification-action', handler)
+    return () => window.removeEventListener('laxree:notification-action', handler)
+  }, [])
+
   const logout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
     setUser(null)
