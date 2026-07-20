@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFetch, apiPost } from '../use-fetch'
+import { useFetch, apiPost, apiDelete } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
 import { fmtDate, fmtINR, STATUS_COLORS, SessionUser } from '../types'
 
@@ -1067,6 +1067,22 @@ function MyChallansTab({ user }: { user: SessionUser }) {
   const url = `/api/challans?role=SALES&userId=${user.id}`
   const { data, loading, error, refresh } = useFetch<{ challans: Challan[] }>(url)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteErr, setDeleteErr] = useState('')
+
+  const handleDelete = async (id: string, challanNumber: string) => {
+    if (!confirm(`Delete challan "${challanNumber}"? This will remove all its items, workflow stages, messages, and notifications. This cannot be undone.`)) return
+    setDeletingId(id)
+    setDeleteErr('')
+    try {
+      await apiDelete(`/api/challans/${id}`)
+      refresh()
+    } catch (e: unknown) {
+      setDeleteErr(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading…</div>
   if (error) return (
@@ -1084,6 +1100,10 @@ function MyChallansTab({ user }: { user: SessionUser }) {
         sub={`${challans.length} uploaded by you`}
         right={<Btn size="sm" onClick={refresh}>↻ Refresh</Btn>}
       />
+
+      {deleteErr && (
+        <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050] mb-3">{deleteErr}</div>
+      )}
 
       {challans.length === 0 ? (
         <EmptyState icon="🧾" title="No challans yet" sub="Upload your first challan to begin" />
@@ -1231,6 +1251,19 @@ function MyChallansTab({ user }: { user: SessionUser }) {
 
                     {c.pdfFileName && (
                       <div className="text-[11px] text-[#96A8BF]">📎 PDF: <span className="font-mono text-[#E4AF4A]">{c.pdfFileName}</span></div>
+                    )}
+
+                    {/* Delete button — only available before Account verifies */}
+                    {!c.accountVerified && !c.dispatchDate && (
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={() => handleDelete(c.id, c.challanNumber)}
+                          disabled={deletingId === c.id}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-1.5 text-[11px] font-semibold text-[#E05050] hover:bg-[#E05050]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {deletingId === c.id ? 'Deleting…' : '🗑 Delete Challan'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
