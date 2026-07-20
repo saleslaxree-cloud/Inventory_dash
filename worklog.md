@@ -1302,3 +1302,61 @@ Stage Summary:
 - Gemini is completely irrelevant now (text-regex primary, OCR secondary,
   Gemini suppressed)
 - All 3 extraction methods gracefully degrade: text-regex → partial → OCR → manual
+
+---
+Task ID: challan-upload-404-fix
+Agent: main (Z.ai Code)
+Task: Fix "Request failed (404)" when Sales submits challan after PDF upload on Vercel production
+
+Work Log:
+- Reproduced: Sales user uploads PDF → form auto-fills → clicks "Submit Challan" → "Confirm & Upload" → "Request failed (404)".
+- Root cause: Frontend (src/components/laxree/dashboards/sales.tsx, line 594) calls `apiPost('/api/challans/upload', ...)` but the route file `src/app/api/challans/upload/route.ts` did NOT EXIST. The `/api/challans/` folder only had route.ts (GET) and extract/route.ts (POST). Next.js returned 404 for the missing POST endpoint.
+- Fix: Created src/app/api/challans/upload/route.ts implementing the full POST handler:
+  1. Authenticates Sales/Admin users (getSession)
+  2. Validates input (challanNumber, clientName, clientCity, items with name+qty required)
+  3. Checks challanNumber uniqueness (409 on conflict)
+  4. Matches each ChallanItem against master Item inventory
+     (priority: itemNumber → itemName+model → itemName only)
+  5. Computes per-item stock status factoring in active StockHolds:
+     - AVAILABLE  (netAvailable >= qty)
+     - ON_HOLD    (0 < netAvailable < qty)
+     - WILL_BE_AVAILABLE (out of stock)
+     - NOT_FOUND  (no master match)
+  6. Creates the Challan record with all client/financial fields
+  7. Creates ChallanItem rows with matchedItemId, status, stockStatus, stockRemark,
+     availableQty, expectedAvailabilityDays
+  8. Creates 8 initial WorkflowStages (PAYMENT_VERIFY, PACKING, QC,
+     VEHICLE_ARRANGEMENT, PHOTOS_VIDEOS, EWAY_BILL, ITEM_BILL, DISPATCH)
+  9. Sends a message to the ACCOUNT team about the advance payment received
+  10. Auto-creates a StockHold for matched AVAILABLE/ON_HOLD items when
+      advance > 0 (so the stock is reserved against the advance)
+  11. Returns { challan, stockSummary: {available,onHold,willBeAvailable}, message }
+      — exactly the shape UploadResult.tsx expects.
+- Testing (local):
+  * Temporarily switched prisma/schema.prisma to sqlite (no local postgres available),
+    ran db:push + seed, verified upload returned 200, success screen showed with
+    per-item stock analysis. REVERTED schema back to postgresql before committing
+    (only the new upload route file was committed).
+- Testing (production, inventory-dash-eight.vercel.app):
+  * Logged in as Sales → Upload Challan → uploaded sample PDF
+    (challan - CASACONNECT INNOVATIONS PRIVATE LIMITED.pdf)
+  * PDF extracted all fields (text-regex, no API key)
+  * Changed challan number from 0027 → 0028 (0027 already in DB)
+  * Clicked Submit → Confirm Payment → Full Amount Paid → Confirm & Upload
+  * First attempt: HTTP 409 (0028 already existed from a previous test)
+  * Changed to 0099 → Submit → Confirm & Upload → HTTP 200
+  * Success screen showed: "Challan Uploaded & Analyzed!" with per-item
+    stock analysis (item LRWA-382, qty 5, available 159, AVAILABLE)
+- Pushed commit 1973532 to origin/main → Vercel auto-deployed
+
+Stage Summary:
+- The "Request failed (404)" error on challan submit is FIXED on production
+- Full Sales flow now works end-to-end on Vercel:
+  Login → Upload Challan → PDF auto-extract → Submit → Confirm Payment →
+  Confirm & Upload → Success screen with stock analysis
+- The new upload route also handles:
+  * Duplicate challan number detection (409)
+  * Per-item stock matching against master inventory
+  * Auto stock-hold on advance payment
+  * ACCOUNT team notification
+  * Initial 8-stage workflow creation
