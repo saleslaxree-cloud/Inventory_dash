@@ -140,6 +140,55 @@ const STOCK_STATUS_COLOR: Record<string, string> = {
   PENDING: '#96A8BF',
 }
 
+// ── Clear inventory status for the Sales user ──
+// Maps the internal stockStatus + match status to a simple, friendly label:
+//   ✅ Available        — model found in inventory AND enough stock
+//   🔶 Partial Available — model found but not enough stock (back-order needed)
+//   ❌ Not Available    — model NOT in inventory, or out of stock (25–30 days)
+// This is what the "internal agent" reports back per item model number.
+type StockInfo = { label: string; icon: string; color: string; detail: string }
+function stockStatusInfo(stockStatus: string, matchStatus?: string, remark?: string | null, availableQty?: number | null): StockInfo {
+  // NOT_FOUND = the model wasn't found in master inventory at all
+  if (matchStatus === 'NOT_FOUND' || stockStatus === 'PENDING') {
+    return {
+      label: 'Not Available',
+      icon: '❌',
+      color: '#E05050',
+      detail: remark || 'This model is not in our inventory — IT team will add it',
+    }
+  }
+  switch (stockStatus) {
+    case 'AVAILABLE':
+      return {
+        label: 'Available',
+        icon: '✅',
+        color: '#3CB87A',
+        detail: remark || `${availableQty ?? 0} in stock`,
+      }
+    case 'ON_HOLD':
+      return {
+        label: 'Partial Available',
+        icon: '🔶',
+        color: '#E09E3C',
+        detail: remark || `Only ${availableQty ?? 0} available — rest on back-order`,
+      }
+    case 'WILL_BE_AVAILABLE':
+      return {
+        label: 'Not Available',
+        icon: '❌',
+        color: '#E05050',
+        detail: remark || 'Out of stock — will be available in 25–30 days',
+      }
+    default:
+      return {
+        label: 'Not Available',
+        icon: '❌',
+        color: '#96A8BF',
+        detail: remark || 'Status unknown',
+      }
+  }
+}
+
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 /* ============================================================ */
@@ -991,62 +1040,79 @@ function UploadResult({ result, onDone, onUploadAnother }: {
         </p>
       </div>
 
-      {/* Stock summary */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="rounded-lg border border-[#3CB87A]/25 bg-[#3CB87A]/8 px-3 py-2.5 text-center">
-          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Available</div>
-          <div className="font-serif text-xl font-bold text-[#3CB87A]">{stockSummary.available}</div>
+      {/* Compute real counts including NOT_FOUND items (backend stockSummary
+          only counts AVAILABLE/ON_HOLD/WILL_BE_AVAILABLE — PENDING/NOT_FOUND
+          items must be counted as Not Available here). */}
+      {(() => {
+        const available = items.filter((ci) => ci.stockStatus === 'AVAILABLE').length
+        const partial = items.filter((ci) => ci.stockStatus === 'ON_HOLD').length
+        const notAvailable = items.filter((ci) => ci.stockStatus !== 'AVAILABLE' && ci.stockStatus !== 'ON_HOLD').length
+        return (
+      <>
+      {/* Inventory status summary — clear Available vs Not Available */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">✅ Available</div>
+          <div className="font-serif text-2xl font-bold text-[#3CB87A]">{available}</div>
+          <div className="text-[9px] text-[#4E6180] mt-0.5">in stock now</div>
         </div>
-        <div className="rounded-lg border border-[#E09E3C]/25 bg-[#E09E3C]/8 px-3 py-2.5 text-center">
-          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">Partial</div>
-          <div className="font-serif text-xl font-bold text-[#E09E3C]">{stockSummary.onHold}</div>
-        </div>
-        <div className="rounded-lg border border-[#E05050]/25 bg-[#E05050]/8 px-3 py-2.5 text-center">
-          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">25–30 Days</div>
-          <div className="font-serif text-xl font-bold text-[#E05050]">{stockSummary.willBeAvailable}</div>
+        <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">❌ Not Available</div>
+          <div className="font-serif text-2xl font-bold text-[#E05050]">{partial + notAvailable}</div>
+          <div className="text-[9px] text-[#4E6180] mt-0.5">partial / out of stock / not in inventory</div>
         </div>
       </div>
 
       <div className="rounded-lg border border-[#C8922A]/25 bg-[#C8922A]/8 px-3 py-2 text-[12px] text-[#E4AF4A] mb-4">
-        📝 <strong>{stockSummary.available}</strong> item(s) available,{' '}
-        <strong>{stockSummary.onHold}</strong> partial,{' '}
-        <strong>{stockSummary.willBeAvailable}</strong> will be available in 25–30 days.
+        🤖 <strong>Inventory Agent checked {items.length} item(s)</strong> against master stock:{' '}
+        <strong className="text-[#3CB87A]">{available} Available</strong>,{' '}
+        <strong className="text-[#E09E3C]">{partial} Partial</strong>,{' '}
+        <strong className="text-[#E05050]">{notAvailable} Not Available</strong>.
       </div>
+      </>
+        )
+      })()}
 
-      {/* Per-item stock status */}
-      <SectionTitle icon="📋" title="Per-Item Stock Analysis" sub={`Challan ${challan.challanNumber}`} />
+      {/* Per-item inventory status — clear Available / Not Available per model */}
+      <SectionTitle icon="🔍" title="Per-Item Inventory Status" sub={`Challan ${challan.challanNumber} — model-wise availability`} />
       <div className="rounded-lg border border-white/7 overflow-hidden">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
               <th className="py-2 px-3">Item</th>
-              <th className="py-2 px-3">Model</th>
-              <th className="py-2 px-3 text-right">Qty</th>
-              <th className="py-2 px-3 text-right">Available</th>
-              <th className="py-2 px-3">Stock Status</th>
+              <th className="py-2 px-3">Model #</th>
+              <th className="py-2 px-3 text-right">Need</th>
+              <th className="py-2 px-3 text-right">In Stock</th>
+              <th className="py-2 px-3">Inventory Status</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((ci) => (
-              <tr key={ci.id} className="border-b border-white/5">
-                <td className="py-2 px-3 text-[#EDE4D0]">
-                  {ci.itemName}
-                  {ci.category && <div className="text-[10px] text-[#4E6180]">{ci.category}</div>}
-                </td>
-                <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
-                <td className="py-2 px-3 text-right text-[#EDE4D0] font-semibold">{ci.quantity}</td>
-                <td className="py-2 px-3 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
-                <td className="py-2 px-3">
-                  <Badge
-                    label={ci.stockStatus.replace(/_/g, ' ')}
-                    color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
-                  />
-                  {ci.stockRemark && (
-                    <div className="text-[10px] text-[#4E6180] mt-0.5">{ci.stockRemark}</div>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {items.map((ci) => {
+              const info = stockStatusInfo(ci.stockStatus, ci.status, ci.stockRemark, ci.availableQty)
+              return (
+                <tr key={ci.id} className="border-b border-white/5">
+                  <td className="py-2 px-3 text-[#EDE4D0]">
+                    {ci.itemName}
+                    {ci.category && <div className="text-[10px] text-[#4E6180]">{ci.category}</div>}
+                  </td>
+                  <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || ci.itemNumber || '—'}</td>
+                  <td className="py-2 px-3 text-right text-[#EDE4D0] font-semibold">{ci.quantity}</td>
+                  <td className="py-2 px-3 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+                  <td className="py-2 px-3">
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"
+                      style={{ background: `${info.color}1a`, color: info.color, border: `1px solid ${info.color}44` }}
+                    >
+                      <span className="text-[13px]">{info.icon}</span>
+                      {info.label}
+                    </span>
+                    {info.detail && (
+                      <div className="text-[10px] text-[#4E6180] mt-0.5">{info.detail}</div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -1115,7 +1181,7 @@ function MyChallansTab({ user }: { user: SessionUser }) {
               (acc, ci) => {
                 if (ci.stockStatus === 'AVAILABLE') acc.available += 1
                 else if (ci.stockStatus === 'ON_HOLD') acc.partial += 1
-                else if (ci.stockStatus === 'WILL_BE_AVAILABLE') acc.willBe += 1
+                else acc.willBe += 1 // WILL_BE_AVAILABLE + PENDING (NOT_FOUND) = Not Available
                 return acc
               },
               { available: 0, partial: 0, willBe: 0 },
@@ -1148,10 +1214,10 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-2 text-[10px]">
-                    <span className="text-[#4E6180]">Stock:</span>
-                    <span className="text-[#3CB87A]">{stockCounts.available} available</span>
-                    <span className="text-[#E09E3C]">· {stockCounts.partial} partial</span>
-                    <span className="text-[#E05050]">· {stockCounts.willBe} 25–30 days</span>
+                    <span className="text-[#4E6180]">🔍 Inventory:</span>
+                    <span className="text-[#3CB87A] font-semibold">✅ {stockCounts.available} Available</span>
+                    <span className="text-[#E09E3C]">· 🔶 {stockCounts.partial} Partial</span>
+                    <span className="text-[#E05050]">· ❌ {stockCounts.willBe} Not Available</span>
                     <span className="text-[#4E6180]">· {c.challanItems.length} items total</span>
                   </div>
                 </button>
@@ -1183,33 +1249,45 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                       </div>
                     )}
 
-                    {/* Per-item stock status */}
+                    {/* Per-item inventory status — clear Available / Not Available per model */}
                     <div className="rounded-lg border border-white/7 overflow-hidden">
+                      <div className="px-2.5 py-1.5 bg-white/[0.02] border-b border-white/7 text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold flex items-center gap-1.5">
+                        <span>🔍</span> Per-Item Inventory Status
+                      </div>
                       <table className="w-full text-[12px]">
                         <thead>
                           <tr className="text-left text-[10px] uppercase tracking-wider text-[#4E6180] bg-white/[0.02] border-b border-white/7">
                             <th className="py-2 px-2.5">Item</th>
-                            <th className="py-2 px-2.5">Model</th>
-                            <th className="py-2 px-2.5 text-right">Qty</th>
-                            <th className="py-2 px-2.5 text-right">Avail.</th>
-                            <th className="py-2 px-2.5">Stock Status</th>
+                            <th className="py-2 px-2.5">Model #</th>
+                            <th className="py-2 px-2.5 text-right">Need</th>
+                            <th className="py-2 px-2.5 text-right">In Stock</th>
+                            <th className="py-2 px-2.5">Inventory Status</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {c.challanItems.map((ci) => (
-                            <tr key={ci.id} className="border-b border-white/5">
-                              <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
-                              <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || '—'}</td>
-                              <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
-                              <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
-                              <td className="py-1.5 px-2.5">
-                                <Badge
-                                  label={ci.stockStatus.replace(/_/g, ' ')}
-                                  color={STOCK_STATUS_COLOR[ci.stockStatus] || '#96A8BF'}
-                                />
-                              </td>
-                            </tr>
-                          ))}
+                          {c.challanItems.map((ci) => {
+                            const info = stockStatusInfo(ci.stockStatus, ci.status, ci.stockRemark, ci.availableQty)
+                            return (
+                              <tr key={ci.id} className="border-b border-white/5">
+                                <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
+                                <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || ci.itemNumber || '—'}</td>
+                                <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
+                                <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
+                                <td className="py-1.5 px-2.5">
+                                  <span
+                                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"
+                                    style={{ background: `${info.color}1a`, color: info.color, border: `1px solid ${info.color}44` }}
+                                  >
+                                    <span className="text-[13px]">{info.icon}</span>
+                                    {info.label}
+                                  </span>
+                                  {info.detail && (
+                                    <div className="text-[10px] text-[#4E6180] mt-0.5">{info.detail}</div>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
