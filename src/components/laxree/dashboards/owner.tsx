@@ -8,7 +8,23 @@ import { StockLookupCard } from '../stock-lookup'
 
 type Item = { id:string; category:string; itemName:string; model:string; colour:string|null; currentStock:number; minStock:number; fastMoving:boolean }
 type ChallanItem = { id:string; itemName:string; itemNumber:string|null; model:string|null; quantity:number; status:string; matchedItem: Item|null }
-type Challan = { id:string; challanNumber:string; clientName:string; clientCity:string; expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number; paymentStatus:string; status:string; createdAt:string; challanItems:ChallanItem[] }
+type Challan = {
+  id:string; challanNumber:string; clientName:string; clientCity:string; clientMobile?:string|null;
+  expectedDeliveryDate:string|null; amountTotal:number; amountAdvance:number; amountReceived:number;
+  paymentStatus:string; paymentMode?:string|null; paymentType?:string;
+  status:string; createdAt:string; challanItems:ChallanItem[]
+  uploadedBy?: { id:string; name:string; role:string } | null
+  // Special dispatch approval workflow
+  specialDispatchRequested?: boolean
+  specialDispatchRequestedAt?: string | null
+  specialDispatchReason?: string | null
+  specialDispatchRequestedById?: string | null
+  specialDispatchApproved?: boolean
+  specialDispatchApprovedAt?: string | null
+  specialDispatchApprovedById?: string | null
+  specialDispatchRejected?: boolean
+  specialDispatchRejectedAt?: string | null
+}
 type PR = {
   id:string; prNumber:string; raisedByName:string; status:string; notes:string|null; createdAt:string
   autoRaised?: boolean; priority?: string; advanceReceived?: number
@@ -67,9 +83,11 @@ export function OwnerDashboard({ user, activeTab, onTabChange }: { user: Session
       {activeTab === 'fast' && <FastTab />}
       {activeTab === 'challans' && <ChallansTab />}
       {activeTab === 'pr' && <PRTab user={user} />}
+      {activeTab === 'special' && <SpecialApprovalsTab user={user} />}
       {activeTab === 'register' && <StockRegisterTab />}
       {activeTab === 'forecast' && <ForecastTab />}
       {activeTab === 'activity' && <ActivityLogTab />}
+      {activeTab === 'reports' && <ReportsTab role="OWNER" />}
     </div>
   )
 }
@@ -83,14 +101,69 @@ function OverviewTab({ onTabChange }: { onTabChange: (id: string) => void }) {
     byCategory: Record<string,number>
   }>('/api/overview')
 
+  // Pending items for the Owner's "Action Needed" card (special approvals + unsigned PRs)
+  const { data: challansData } = useFetch<{ challans: Challan[] }>('/api/challans')
+  const { data: prData } = useFetch<{ purchaseRequests: PR[] }>('/api/purchase-requests')
+
   if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading overview…</div>
   if (!data) return null
 
   const healthColor = (score: number) => score >= 80 ? '#3CB87A' : score >= 50 ? '#E09E3C' : '#E05050'
   const healthLabel = (score: number) => score >= 80 ? 'Healthy' : score >= 50 ? 'Needs Attention' : 'Critical'
 
+  // Compute role-specific pending counts (since the bell badge is in a shared component,
+  // surface them here so the Owner sees the queue)
+  const pendingSpecialApprovals = (challansData?.challans || []).filter(
+    (c) => c.specialDispatchRequested && !c.specialDispatchApproved && !c.specialDispatchRejected,
+  ).length
+  const pendingUnsignedPRs = (prData?.purchaseRequests || []).filter(
+    (p) => p.status === 'PENDING_APPROVAL',
+  ).length
+  const actionNeededCount = pendingSpecialApprovals + pendingUnsignedPRs
+
   return (
     <div className="space-y-4">
+      {/* ── Action Needed (Owner-specific pending queue — special approvals + unsigned PRs) ── */}
+      {actionNeededCount > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            onClick={() => onTabChange('special')}
+            className="text-left rounded-xl border-2 border-[#E05050]/40 bg-gradient-to-br from-[#E05050]/12 to-[#E05050]/3 p-4 transition-all hover:from-[#E05050]/20 hover:to-[#E05050]/5 hover:border-[#E05050]/60"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[#E05050]/20 text-xl">🚨</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-serif text-2xl font-bold text-[#FF6B6B]">{pendingSpecialApprovals}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-[#E05050] font-semibold">Pending</span>
+                </div>
+                <div className="text-[12.5px] text-[#EDE4D0] font-medium">Special Dispatch Approvals</div>
+                <div className="text-[11px] text-[#96A8BF] mt-0.5">Coordinator needs your approval to dispatch partial-payment challans</div>
+                <div className="text-[10.5px] text-[#E4AF4A] mt-1.5 font-medium">Review now →</div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onTabChange('pr')}
+            className="text-left rounded-xl border-2 border-[#E09E3C]/40 bg-gradient-to-br from-[#E09E3C]/12 to-[#E09E3C]/3 p-4 transition-all hover:from-[#E09E3C]/20 hover:to-[#E09E3C]/5 hover:border-[#E09E3C]/60"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[#E09E3C]/20 text-xl">✍️</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-serif text-2xl font-bold text-[#E09E3C]">{pendingUnsignedPRs}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-[#E09E3C] font-semibold">Awaiting Signature</span>
+                </div>
+                <div className="text-[12.5px] text-[#EDE4D0] font-medium">Unsigned Purchase Requests</div>
+                <div className="text-[11px] text-[#96A8BF] mt-0.5">Auto-raised PRs needing your review, signature & processing</div>
+                <div className="text-[10.5px] text-[#E4AF4A] mt-1.5 font-medium">Sign & process →</div>
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* ── System Health Score (cross-cutting metric, not duplicated anywhere) ── */}
       <Card className="p-4">
         <SectionTitle icon="🩺" title="System Health" sub="Composite score across stock, payments & workflow" />
@@ -159,11 +232,12 @@ function OverviewTab({ onTabChange }: { onTabChange: (id: string) => void }) {
           {Object.entries(data.byCategory)
             .sort((a, b) => b[1] - a[1])
             .map(([cat, qty]) => {
+              const label = cat && cat !== 'undefined' && cat !== 'null' ? cat : 'Uncategorized'
               const max = Math.max(...Object.values(data.byCategory), 1)
               const pct = Math.round((qty / max) * 100)
               return (
-                <div key={cat} className="flex items-center gap-3">
-                  <div className="w-36 text-[11px] text-[#96A8BF] truncate">{cat}</div>
+                <div key={cat || 'Uncategorized'} className="flex items-center gap-3">
+                  <div className="w-36 text-[11px] text-[#96A8BF] truncate">{label}</div>
                   <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #C8922A, #E4AF4A)' }} />
                   </div>
@@ -1204,6 +1278,399 @@ function ActivityLogTab() {
             </div>
           </div>
         )}
+      </Card>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════
+// SPECIAL APPROVALS — Owner reviews Coordinator's special-dispatch requests
+// for partial-payment challans
+// ═══════════════════════════════════════════
+function SpecialApprovalsTab({ user }: { user: SessionUser }) {
+  const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans')
+  const [deciding, setDeciding] = useState<string | null>(null)
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [err, setErr] = useState('')
+  const [lastDecision, setLastDecision] = useState<{ challanNo: string; decision: string } | null>(null)
+
+  if (loading) return <div className="text-center py-10 text-[#96A8BF] text-sm">Loading special approvals…</div>
+  if (!data) return null
+
+  const pending = data.challans.filter(
+    (c) => c.specialDispatchRequested && !c.specialDispatchApproved && !c.specialDispatchRejected,
+  )
+  const recentlyDecided = data.challans
+    .filter((c) => c.specialDispatchApproved || c.specialDispatchRejected)
+    .sort((a, b) => {
+      const aT = new Date(a.specialDispatchApprovedAt || a.specialDispatchRejectedAt || 0).getTime()
+      const bT = new Date(b.specialDispatchApprovedAt || b.specialDispatchRejectedAt || 0).getTime()
+      return bT - aT
+    })
+    .slice(0, 8)
+
+  const decide = async (challan: Challan, action: 'approve' | 'reject') => {
+    setErr('')
+    setDeciding(challan.id)
+    try {
+      const res = await fetch(`/api/challans/${challan.id}/special-dispatch/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          notes: notes[challan.id]?.trim() || undefined,
+        }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'Failed to record decision')
+      setLastDecision({ challanNo: challan.challanNumber, decision: action === 'approve' ? 'APPROVED' : 'REJECTED' })
+      setNotes((n) => { const next = { ...n }; delete next[challan.id]; return next })
+      refresh()
+      setTimeout(() => setLastDecision(null), 4000)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setDeciding(null)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ── URGENT banner ── */}
+      {pending.length > 0 && (
+        <div className="rounded-xl border-2 border-[#E05050]/45 bg-gradient-to-r from-[#E05050]/18 via-[#E05050]/8 to-transparent p-4 animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[#E05050]/25 text-xl">🚨</div>
+            <div className="flex-1">
+              <div className="text-[14.5px] font-bold text-[#FF6B6B]">
+                {pending.length} special dispatch request{pending.length > 1 ? 's' : ''} awaiting your approval
+              </div>
+              <div className="text-[12px] text-[#EDE4D0]/85 mt-0.5">
+                Coordinator needs to dispatch partial-payment challans — review the client overview below and approve or reject.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {err && (
+        <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-xs text-[#E05050]">⚠ {err}</div>
+      )}
+      {lastDecision && (
+        <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-xs text-[#3CB87A]">
+          ✓ Decision recorded for <span className="font-mono">{lastDecision.challanNo}</span> — {lastDecision.decision}. Coordinator &amp; Sales have been notified.
+        </div>
+      )}
+
+      {/* ── Pending requests ── */}
+      <Card className="p-4">
+        <SectionTitle icon="🚨" title="Pending Special Dispatch Approvals" sub={`${pending.length} awaiting your decision`} />
+        {pending.length === 0 ? (
+          <EmptyState icon="✅" title="No pending requests" sub="Coordinator's special dispatch approval requests will appear here with full client overview" />
+        ) : (
+          <div className="space-y-4">
+            {pending.map((c) => (
+              <SpecialApprovalCard
+                key={c.id}
+                challan={c}
+                ownerName={user.name}
+                deciding={deciding === c.id}
+                notes={notes[c.id] || ''}
+                onNotesChange={(v) => setNotes((n) => ({ ...n, [c.id]: v }))}
+                onApprove={() => decide(c, 'approve')}
+                onReject={() => decide(c, 'reject')}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ── Recently decided ── */}
+      {recentlyDecided.length > 0 && (
+        <Card className="p-4">
+          <SectionTitle icon="📜" title="Recently Decided" sub={`${recentlyDecided.length} recent decisions`} />
+          <div className="space-y-2">
+            {recentlyDecided.map((c) => {
+              const approved = !!c.specialDispatchApproved
+              const date = c.specialDispatchApprovedAt || c.specialDispatchRejectedAt
+              return (
+                <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-white/7 bg-white/[0.02] p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-[#E4AF4A] text-[12px] font-semibold">{c.challanNumber}</span>
+                      <Badge
+                        label={approved ? '✓ APPROVED' : '✕ REJECTED'}
+                        color={approved ? '#3CB87A' : '#E05050'}
+                      />
+                    </div>
+                    <div className="text-[12px] text-[#EDE4D0] mt-0.5">{c.clientName} · {c.clientCity}</div>
+                    <div className="text-[10.5px] text-[#4E6180] mt-0.5">
+                      {approved ? 'Dispatch allowed' : 'Dispatch blocked'} · Decided {fmtDate(date)}
+                    </div>
+                  </div>
+                  <div className="text-right text-[11px] text-[#96A8BF]">
+                    <div>Total {fmtINR(c.amountTotal)}</div>
+                    <div style={{ color: '#E05050' }}>Balance {fmtINR(c.amountTotal - c.amountReceived)}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function SpecialApprovalCard({ challan, ownerName, deciding, notes, onNotesChange, onApprove, onReject }: {
+  challan: Challan
+  ownerName: string
+  deciding: boolean
+  notes: string
+  onNotesChange: (v: string) => void
+  onApprove: () => void
+  onReject: () => void
+}) {
+  const balance = challan.amountTotal - challan.amountReceived
+  const balancePct = challan.amountTotal > 0 ? Math.round((balance / challan.amountTotal) * 100) : 0
+
+  return (
+    <div className="rounded-xl border-2 border-[#E05050]/35 bg-gradient-to-br from-[#E05050]/[0.05] to-transparent p-4">
+      {/* ── Header: challan no + status ── */}
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-[#E4AF4A] font-bold text-[14px]">{challan.challanNumber}</span>
+            <Badge label="🚨 SPECIAL DISPATCH REQUESTED" color="#E05050" />
+            <Badge label={challan.paymentStatus} color={STATUS_COLORS[challan.paymentStatus] || '#E09E3C'} />
+            <Badge label={challan.status.replace(/_/g, ' ')} color={STATUS_COLORS[challan.status] || '#96A8BF'} />
+          </div>
+          <div className="text-[11px] text-[#4E6180] mt-1">
+            Requested {fmtDate(challan.specialDispatchRequestedAt)} · Uploaded by {challan.uploadedBy?.name || 'Sales'}
+            <span className="text-[#4E6180]"> · Reviewing Owner: {ownerName}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Client overview ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Client Name</div>
+          <div className="text-[12px] text-[#EDE4D0] font-medium truncate" title={challan.clientName}>{challan.clientName}</div>
+        </div>
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">City</div>
+          <div className="text-[12px] text-[#EDE4D0] font-medium">{challan.clientCity || '—'}</div>
+        </div>
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Mobile</div>
+          <div className="text-[12px] text-[#EDE4D0] font-mono">{challan.clientMobile || '—'}</div>
+        </div>
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Payment Mode</div>
+          <div className="text-[12px] text-[#EDE4D0] font-medium">{challan.paymentMode || challan.paymentType || '—'}</div>
+        </div>
+      </div>
+
+      {/* ── Amount summary ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Total Amount</div>
+          <div className="text-[13px] text-[#EDE4D0] font-semibold">{fmtINR(challan.amountTotal)}</div>
+        </div>
+        <div className="rounded-md bg-[#3CB87A]/10 border border-[#3CB87A]/25 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#3CB87A]">Received</div>
+          <div className="text-[13px] text-[#3CB87A] font-semibold">{fmtINR(challan.amountReceived)}</div>
+        </div>
+        <div className="rounded-md bg-[#E05050]/10 border border-[#E05050]/30 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#E05050]">Balance Pending</div>
+          <div className="text-[13px] text-[#E05050] font-bold">{fmtINR(balance)}</div>
+          <div className="text-[9px] text-[#E05050]/80">{balancePct}% unpaid</div>
+        </div>
+        <div className="rounded-md bg-white/[0.03] border border-white/7 px-3 py-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#4E6180]">Expected Delivery</div>
+          <div className="text-[13px] text-[#EDE4D0] font-medium">{fmtDate(challan.expectedDeliveryDate)}</div>
+        </div>
+      </div>
+
+      {/* ── Items list ── */}
+      <div className="rounded-md border border-white/7 bg-[#0c1928] p-3 mb-3">
+        <div className="text-[10px] uppercase tracking-wide text-[#E4AF4A] font-semibold mb-2">📋 Items ({challan.challanItems.length})</div>
+        <div className="flex flex-wrap gap-1.5">
+          {challan.challanItems.map((ci) => (
+            <span key={ci.id} className="text-[10.5px] rounded-md bg-white/5 border border-white/7 px-2 py-1 text-[#EDE4D0]">
+              {ci.itemName}
+              {ci.model && <span className="text-[#96A8BF] font-mono ml-1">{ci.model}</span>}
+              <span className="text-[#E4AF4A] font-semibold ml-1">×{ci.quantity}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Coordinator's reason ── */}
+      <div className="rounded-md border-l-2 border-[#E05050]/50 bg-[#E05050]/[0.05] p-3 mb-3">
+        <div className="text-[10px] uppercase tracking-wide text-[#E05050] font-bold mb-1">💬 Coordinator's Reason for Requesting Special Approval</div>
+        <div className="text-[12px] text-[#EDE4D0] leading-relaxed">
+          {challan.specialDispatchReason || 'Coordinator requests special approval to dispatch this partial-payment challan.'}
+        </div>
+      </div>
+
+      {/* ── Owner notes ── */}
+      <Input
+        label="Your note (optional — sent to Coordinator & Sales)"
+        value={notes}
+        onChange={onNotesChange}
+        placeholder="e.g. Approved verbally over phone. Follow up on balance by month-end."
+      />
+
+      {/* ── Action buttons ── */}
+      <div className="flex flex-wrap justify-end gap-2 mt-3 pt-3 border-t border-white/7">
+        <Btn variant="danger" onClick={onReject} disabled={deciding}>
+          {deciding ? 'Rejecting…' : '🚫 Reject'}
+        </Btn>
+        <Btn variant="success" onClick={onApprove} disabled={deciding}>
+          {deciding ? 'Approving…' : '✅ Approve & Allow Dispatch'}
+        </Btn>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════
+// REPORTS — Period-based CSV export + summary
+// ═══════════════════════════════════════════
+const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+export function ReportsTab({ role }: { role: 'OWNER' | 'ADMIN' | 'SUPPORT' }) {
+  const now = new Date()
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly'>('monthly')
+  const [month, setMonth] = useState(String(now.getMonth() + 1))
+  const [year, setYear] = useState(String(now.getFullYear()))
+  const [downloading, setDownloading] = useState(false)
+
+  // Preview: fetch challans for the selected period (count only)
+  const params = new URLSearchParams()
+  if (period === 'monthly') { params.set('month', month); params.set('year', year) }
+  if (period === 'yearly') { params.set('year', year) }
+  const { data, loading } = useFetch<{ challans: Array<{ id:string; amountTotal:number; amountReceived:number; paymentStatus:string }> }>(
+    `/api/challans?${params.toString()}`,
+    [period, month, year],
+  )
+
+  const challans = data?.challans || []
+  const previewCount = challans.length
+  const previewTotal = challans.reduce((s, c) => s + c.amountTotal, 0)
+  const previewReceived = challans.reduce((s, c) => s + c.amountReceived, 0)
+  const previewBalance = previewTotal - previewReceived
+  const partialCount = challans.filter((c) => c.paymentStatus === 'PARTIAL').length
+
+  const periodLabel = period === 'weekly'
+    ? 'This Week (Mon–Sun)'
+    : period === 'yearly'
+      ? `Year ${year}`
+      : `${MONTH_LABELS[Number(month) - 1]} ${year}`
+
+  const handleExport = async () => {
+    setDownloading(true)
+    try {
+      const url = `/api/reports/export?role=${role}&period=${period}&month=${month}&year=${year}`
+      // Use a hidden anchor to trigger the CSV download (preserves session cookies)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } finally {
+      setTimeout(() => setDownloading(false), 800)
+    }
+  }
+
+  const accent = role === 'OWNER' ? '#E4AF4A' : role === 'ADMIN' ? '#E05050' : '#E09E3C'
+
+  return (
+    <div className="space-y-4">
+      {/* ── Gold-gradient hero card ── */}
+      <div
+        className="rounded-2xl p-5 relative overflow-hidden"
+        style={{
+          background: 'linear-gradient(135deg, rgba(200,146,42,0.18) 0%, rgba(228,175,74,0.08) 50%, rgba(7,16,31,0.4) 100%)',
+          border: '1px solid rgba(228,175,74,0.35)',
+        }}
+      >
+        <div className="absolute -top-8 -right-8 text-7xl opacity-10">📑</div>
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">📑</span>
+            <h2 className="font-serif text-lg font-bold text-[#E4AF4A]">Reports &amp; Exports</h2>
+            <Badge label={role} color={accent} />
+          </div>
+          <p className="text-[12px] text-[#96A8BF] max-w-xl">
+            Generate a detailed CSV report of all challans for the selected period. The report includes challan number, client, items, amounts, payment &amp; dispatch status, vehicle, freight, and totals — opens directly in Excel.
+          </p>
+
+          {/* Period selector */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <Select
+              label="Period"
+              value={period}
+              onChange={(v) => setPeriod(v as 'weekly' | 'monthly' | 'yearly')}
+              options={[
+                { value: 'weekly', label: '📅 Weekly (this week)' },
+                { value: 'monthly', label: '🗓️ Monthly' },
+                { value: 'yearly', label: '📆 Yearly' },
+              ]}
+            />
+            {period === 'monthly' && (
+              <Select
+                label="Month"
+                value={month}
+                onChange={setMonth}
+                options={MONTH_LABELS.map((m, i) => ({ value: String(i + 1), label: m }))}
+              />
+            )}
+            {(period === 'monthly' || period === 'yearly') && (
+              <Select
+                label="Year"
+                value={year}
+                onChange={setYear}
+                options={Array.from({ length: 6 }, (_, i) => String(now.getFullYear() - i))}
+              />
+            )}
+          </div>
+
+          {/* Export button */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Btn variant="gold" onClick={handleExport} disabled={downloading || previewCount === 0}>
+              {downloading ? '⏳ Preparing CSV…' : '⬇ Export to Excel (CSV)'}
+            </Btn>
+            <span className="text-[11px] text-[#96A8BF]">
+              Period: <span className="text-[#EDE4D0] font-medium">{periodLabel}</span>
+            </span>
+            {previewCount === 0 && !loading && (
+              <span className="text-[11px] text-[#E09E3C]">No challans in this period — CSV will be empty.</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Preview summary ── */}
+      <Card className="p-4">
+        <SectionTitle icon="📊" title="Period Preview" sub={`Summary of challans for ${periodLabel}`} />
+        {loading ? (
+          <div className="text-center py-8 text-[#96A8BF] text-sm">Loading preview…</div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <StatCard label="Challans" value={previewCount} sub="In selected period" accent={accent} icon="🧾" />
+            <StatCard label="Total Amount" value={fmtINR(previewTotal)} sub="Sum of all challans" accent="#E4AF4A" icon="💰" />
+            <StatCard label="Received" value={fmtINR(previewReceived)} sub="Collected so far" accent="#3CB87A" icon="✅" />
+            <StatCard label="Balance" value={fmtINR(previewBalance)} sub="Yet to collect" accent="#E05050" icon="⏳" />
+            <StatCard label="Partial Paid" value={partialCount} sub="Awaiting full payment" accent="#E09E3C" icon="🔶" />
+          </div>
+        )}
+        <div className="mt-3 rounded-md border border-white/7 bg-[#0c1928] p-2.5 text-[10.5px] text-[#4E6180] leading-relaxed">
+          💡 The exported CSV contains a full breakdown of every challan — including item list, account verification, coordinator approval, warehouse status, vehicle details, freight, dispatch date, and special-dispatch flags. Use it for accounting, audits, or monthly MIS reports.
+        </div>
       </Card>
     </div>
   )

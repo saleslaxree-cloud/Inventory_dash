@@ -6,12 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider  = "sqlite"
   url       = env("DATABASE_URL")
-  // directUrl uses the UNPOOLED connection (required for migrations; the
-  // pooled `url` is used for runtime queries). On Vercel this is provided
-  // as DATABASE_URL_UNPOOLED. Locally, set DIRECT_URL in .env if needed.
-  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 // ═══════════════════════════════════════════
@@ -156,6 +152,21 @@ model Challan {
   reviewReceived      String?
   reviewRating        Int?
   reviewReceivedAt    DateTime?
+
+  // ── Special dispatch approval (partial-payment workflow)
+  // When a challan has PARTIAL payment and is otherwise ready to dispatch,
+  // the Coordinator can request "special approval" to dispatch despite the
+  // pending balance. The Owner receives an urgent popup with the client's
+  // overview and can approve or reject. Until then, dispatch is blocked.
+  specialDispatchRequested   Boolean   @default(false)
+  specialDispatchRequestedAt DateTime?
+  specialDispatchRequestedById String?
+  specialDispatchReason      String?
+  specialDispatchApproved    Boolean   @default(false)
+  specialDispatchApprovedAt  DateTime?
+  specialDispatchApprovedById String?
+  specialDispatchRejected    Boolean   @default(false)
+  specialDispatchRejectedAt  DateTime?
 
   // PDF uploaded by sales
   pdfFileName         String?

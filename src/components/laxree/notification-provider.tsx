@@ -222,7 +222,7 @@ function BigNotificationModal({
   onDismiss: () => void
 }) {
   const color = NOTIF_COLORS[n.type] || NOTIF_COLORS.INFO
-  const isUrgent = n.type === 'PR_RAISED_URGENT'
+  const isUrgent = n.type === 'PR_RAISED_URGENT' || n.type === 'SPECIAL_DISPATCH_REQUEST'
   const [progress, setProgress] = useState(100)
   // Urgent PR popups stay longer (30s) so Sir has time to read & act.
   const DURATION = isUrgent ? 30000 : 20000
@@ -462,6 +462,13 @@ function getAction(n: AppNotification): { label: string; icon: string; tab: stri
     case 'PR_RAISED_URGENT':
       // Owner must check, sign & process the auto-raised PR
       return { label: 'Review & Sign PR', icon: '✍️', tab: 'pr' }
+    case 'SPECIAL_DISPATCH_REQUEST':
+      // Owner must approve/reject the Coordinator's special dispatch request
+      return { label: 'Review Special Approval', icon: '🚨', tab: 'special' }
+    case 'SPECIAL_DISPATCH_APPROVED':
+      return { label: 'View Dispatch', icon: '🚚', tab: 'vehicle' }
+    case 'SPECIAL_DISPATCH_REJECTED':
+      return { label: 'View Challan', icon: '📋', tab: 'process' }
     case 'PAYMENT_VERIFIED':
       // Coordinator should start audit; Sales just views
       if (n.toRole === 'COORDINATOR') return { label: 'Start Audit', icon: '🔍', tab: 'process' }
@@ -483,16 +490,19 @@ function getAction(n: AppNotification): { label: string; icon: string; tab: stri
 }
 
 const NOTIF_COLORS: Record<string, { border: string; accent: string; glow: string }> = {
-  NEW_CHALLAN:          { border: '#4A9EE0', accent: '#7AB8F0', glow: 'rgba(74,158,224,0.45)' },
-  PR_RAISED_URGENT:     { border: '#E05050', accent: '#FF6B6B', glow: 'rgba(224,80,80,0.55)' },
-  PAYMENT_VERIFIED:     { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
-  COORDINATOR_APPROVED: { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
-  WAREHOUSE_DONE:       { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
-  VEHICLE_ARRANGED:     { border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' },
-  DISPATCHED:           { border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' },
-  BILLS_UPLOADED:       { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
-  REJECTED:             { border: '#E05050', accent: '#F07070', glow: 'rgba(224,80,80,0.45)' },
-  INFO:                 { border: '#C8922A', accent: '#E4AF4A', glow: 'rgba(200,146,42,0.45)' },
+  NEW_CHALLAN:               { border: '#4A9EE0', accent: '#7AB8F0', glow: 'rgba(74,158,224,0.45)' },
+  PR_RAISED_URGENT:          { border: '#E05050', accent: '#FF6B6B', glow: 'rgba(224,80,80,0.55)' },
+  SPECIAL_DISPATCH_REQUEST:  { border: '#E05050', accent: '#FF6B6B', glow: 'rgba(224,80,80,0.55)' },
+  SPECIAL_DISPATCH_APPROVED: { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
+  SPECIAL_DISPATCH_REJECTED: { border: '#E05050', accent: '#F07070', glow: 'rgba(224,80,80,0.45)' },
+  PAYMENT_VERIFIED:          { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
+  COORDINATOR_APPROVED:      { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
+  WAREHOUSE_DONE:            { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
+  VEHICLE_ARRANGED:          { border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' },
+  DISPATCHED:                { border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' },
+  BILLS_UPLOADED:            { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
+  REJECTED:                  { border: '#E05050', accent: '#F07070', glow: 'rgba(224,80,80,0.45)' },
+  INFO:                      { border: '#C8922A', accent: '#E4AF4A', glow: 'rgba(200,146,42,0.45)' },
 }
 
 function fmtRelative(iso: string): string {

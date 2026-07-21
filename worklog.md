@@ -1701,3 +1701,301 @@ Stage Summary:
   3. b6ec062 — chore: stop tracking local sqlite db and dev pid file
 - Production (https://inventory-dash-eight.vercel.app) will redeploy automatically. After deploy, the full Owner PR workflow will be live: Sales uploads challan with not-available item → auto PR-2026-XXXX raised → Owner gets big red URGENT popup → Owner clicks "Review & Sign PR" → signs & processes.
 - Repo is now clean (nothing to commit, working tree clean; branch up to date with origin/main).
+
+---
+Task ID: backend-special-approval-reports
+Agent: main (Z.ai Code)
+Task: Backend foundation for the big Sales/Coordinator/Owner update — special dispatch approval workflow + reports export + nav updates.
+
+Work Log:
+- Discovered & fixed critical regression: /api/challans/upload route (498 lines) was accidentally deleted in a prior commit. Restored it + the PR sign route. Reset local main to origin/main (which already had both intact) for a clean base.
+- prisma/schema.prisma: added 8 special-dispatch fields to Challan — specialDispatchRequested/RequestedAt/RequestedById/Reason, specialDispatchApproved/ApprovedAt/ApprovedById, specialDispatchRejected/RejectedAt. Switched datasource to sqlite locally, ran db:push + db:seed (293 items, 7 users, sample challan, 10 PRs).
+- New API: src/app/api/challans/[id]/special-dispatch/route.ts — POST (Coordinator requests special approval to dispatch a partial-payment challan). Creates URGENT notification to OWNER (type SPECIAL_DISPATCH_REQUEST) + inline message + socket.io push.
+- New API: src/app/api/challans/[id]/special-dispatch/approve/route.ts — POST (Owner approves/rejects). Notifies COORDINATOR + SALES of the decision.
+- New API: src/app/api/reports/export/route.ts — GET, generates CSV report (weekly/monthly/yearly + month selection) with full challan details + totals row. Returns text/csv with attachment header. Role-aware (SALES sees own, others see all).
+- page.tsx: added 'reports' tab to ADMIN/OWNER/SALES/ACCOUNT/COORDINATOR/SUPPORT nav. Added 'special' (Special Approvals) tab to OWNER nav.
+- notification-provider.tsx: added SPECIAL_DISPATCH_REQUEST/APPROVED/REJECTED to getAction() (tab='special' for request) and NOTIF_COLORS (red urgent for request, green for approved, red for rejected). isUrgent now includes SPECIAL_DISPATCH_REQUEST (30s auto-dismiss).
+- Dev server running on port 3000 (sqlite local). Lint clean.
+
+Stage Summary:
+- Backend is ready for the 3 frontend subagents:
+  * Subagent A → sales.tsx (Check Stock qty logic, auto-category, upload result, bills msg, calendar, reports tab)
+  * Subagent B → coordinator.tsx (audit cleanup, reports tab, warehouse polish, payment gate, special-dispatch request UI)
+  * Subagent C → owner.tsx (special-approvals tab, chart undefined fix, bell badge, reports tab) + admin.tsx/support.tsx bug fixes
+- Special-dispatch workflow contract:
+  * Coordinator calls POST /api/challans/[id]/special-dispatch {reason} when a PARTIAL challan is ready to dispatch
+  * Owner gets urgent popup → clicks "Review Special Approval" → lands on 'special' tab → sees client overview + approve/reject
+  * Owner calls POST /api/challans/[id]/special-dispatch/approve {action:'approve'|'reject', notes}
+  * Coordinator + Sales get notified of the decision
+- Reports export contract: GET /api/reports/export?period=weekly|monthly|yearly&month=N&year=YYYY&role=ROLE → CSV download
+
+---
+Task ID: sales-updates
+Agent: full-stack-developer (Sales)
+Task: Six Sales dashboard updates in src/components/laxree/dashboards/sales.tsx — (1) Check Stock: add Required Qty input + smart availability (no stock-qty disclosure); (2) Upload Challan: auto-fetch category from master inventory; (3) Upload Result: smart availability (no qty disclosure); (4) Bills: "Kindly share with client" banner; (5) Dashboard: month calendar view; (6) Reports tab: CSV/Excel export.
+
+Work Log:
+- Read /home/z/my-project/worklog.md (1700+ lines) to learn prior context: previous agents built the Laxree IMS (Next.js 16 + TS + Tailwind + shadcn/ui) with 7 roles, sqlite local DB seeded, /api/reports/export endpoint already exists (CSV with role=SALES filtering to own challans), /api/challans/dashboard returns {total,totalAmount,totalAdvance,totalReceived,byStatus,byPaymentStatus,monthly,challans:latest 10}, page.tsx already added 'reports' tab to SALES nav.
+- Read entire sales.tsx (~2075 lines) to map structure: SalesDashboard switch (line ~202), DashboardTab (~223), StockCheckTab (~332), UploadTab (~558), UploadResult (~1029), MyChallansTab (~1163), BillsTab (~1401), BillCard (~1512), ClientStatusTab (~1923). Confirmed Item type already at top of file. Confirmed StockCheckItem type has availableStock field. Confirmed useFetch + apiPost + apiDelete from ../use-fetch and Badge/Btn/Card/EmptyState/Input/Modal/SectionTitle/Select/StatCard/Textarea from ../ui.
+
+Task 1 — Check Stock tab (Required Qty + smart availability, NO qty disclosure):
+- Added `requiredQtys` state (Record<string, number>) and getRequiredQty/setRequiredQty helpers in StockCheckTab. Default = 1 per item.
+- Added new helper `stockCheckAvailability(availableStock, requiredQty)` returning {icon,color,label,message}:
+  * availableStock <= 0 → ❌ red "Not Available — Will be available soon once order is finalized"
+  * availableStock >= requiredQty → ✅ green "Available" (no number)
+  * 0 < availableStock < requiredQty → 🔶 orange "{availableStock} available, remaining {shortage} will take 24-30 days once order is finalized" (partial case explicitly shows numbers per user request)
+- Replaced the entire 5-stat grid (Current Stock / Held Qty / Available Stock / Min Stock / Unit) and the LOW/OUT/IN STOCK badge with a single smart-availability badge + message next to a "Required Qty" number input.
+- Removed the old "⚠ Will be available in 25-30 days" warning banner (the smart availability message handles this case now).
+- Kept cascading dropdowns (Category → Item → Model → Colour) 100% unchanged.
+
+Task 2 — Upload Challan tab (auto-fetch category):
+- Added `useFetch<{ items: Item[] }>('/api/items')` at top of UploadTab; memoized `masterItems`.
+- Added a debounced useEffect (350ms) that watches `itemsSignature = items.map(i => i.itemName+'||'+i.model).join('::')` so it only fires when itemName/model change (not when category/itemNumber/colour change, which avoids infinite loops).
+- Match logic: if both itemName & model provided, both must contain-match; otherwise match on whichever is provided. On match → auto-fill `category` (always), `itemNumber` (if empty), `colour` (if empty). On no-match with text typed → clear category. Both empty → leave category alone.
+- Replaced the manual Category Input field with a read-only display: shows "🔍 auto" badge + matched category name (gold-tinted box) when matched; shows italic "— not in master inventory —" hint when user typed but no match; shows "auto-filled from item name" hint when fields are empty.
+
+Task 3 — Upload Result (smart availability, no qty disclosure):
+- Added new helper `smartStockInfo(stockStatus, matchStatus, availableQty, requiredQty)` returning {icon,color,label,message}:
+  * NOT_FOUND / PENDING / WILL_BE_AVAILABLE → ❌ red "Not Available — Will be available soon once order is finalized"
+  * AVAILABLE → ✅ green "Available" (no number)
+  * ON_HOLD with avail<=0 → ❌ red (same as above)
+  * ON_HOLD with avail>=need → ✅ green "Available"
+  * ON_HOLD partial → 🔶 orange "{avail} available, remaining {shortage} will take 24-30 days once order is finalized"
+- Replaced per-item table: removed "In Stock" column header and the raw `ci.availableQty` cell; replaced with single "Availability" column showing the smart badge + message.
+- Kept the Item / Model # / Need (quantity) columns intact. Kept the auto-PR banner above the table.
+- Updated summary cards sub-text: "in stock now" → "item(s) ready to ship" (no implication of stock qty).
+- The Inventory Agent summary line ("N Available, N Partial, N Not Available") is kept since it shows counts of items per bucket, not stock quantities.
+
+Task 4 — Bills tab ("Kindly share with client" banner):
+- Inserted an eye-catching banner at the top of the withBills section (before BillCard list). It uses a gold/green gradient border (border-2 border-[#3CB87A]/45 + bg-gradient from green via gold to green), a 📨 icon in a gold gradient circle, bold gold title "Kindly share these bills with the client", a description mentioning the count of challans with bills ready, a READY badge + "{N} pending share" hint on the right. Glow shadow for eye-catching effect.
+- Kept existing View PDF links in BillCard intact.
+
+Task 5 — Dashboard tab (calendar view):
+- Added new CalendarView component rendered below the Status Breakdown card.
+- Builds a 7-col Sun-Sat month grid: calculates firstWeekday (0-6), daysInMonth, prepends leading blanks, appends day cells, pads trailing blanks to multiple of 7.
+- Groups `data.challans` by createdAt day-of-month (only those within the selected month/year).
+- Each day cell shows the day number; if count > 0, shows a small gold gradient badge with the count.
+- Today's date is highlighted with a gold border + glow + "TODAY" badge in the section title.
+- Added a legend at the bottom (Today / Has challans / No activity).
+- Uses the existing dark theme (#0c1928 bg, #C8922A/#E4AF4A gold accents) — no new colors introduced.
+- Falls back gracefully to no dots when data.challans is empty (which happens for non-current months since backend only returns latest 10).
+
+Task 6 — Reports tab (CSV/Excel export):
+- Added new ReportsTab component rendered when activeTab === 'reports' (added to SalesDashboard switch).
+- Card has gold gradient background (border-[#C8922A]/35 bg-gradient-to-br from-[#C8922A]/10) matching the AI auto-fill card style.
+- Period selector: 3 buttons (📅 Weekly / 🗓️ Monthly / 📆 Yearly) with gold gradient when active.
+- Conditional selects: Monthly → Month (Jan-Dec full names) + Year; Yearly → Year; Weekly → no extra (info banner showing the current Mon-Sun week range).
+- Big "⬇ Export to Excel (CSV)" button calls GET /api/reports/export?period=...&month=...&year=...&role=SALES&userId={user.id} via a hidden <a download> link clicked programmatically (works with the text/csv Content-Disposition: attachment response).
+- Preview summary card: fetches count from /api/challans/dashboard (same URL pattern as DashboardTab) and shows "{N} challans will be included for {period label}" + Total Amount / Advance / Received mini-stats when count > 0.
+- Warning shown when count = 0 ("export will contain only header row").
+- Note at bottom explaining CSV opens directly in Excel and is filtered to own challans only.
+
+Lint & verification:
+- `bun run lint` → 0 errors, 0 warnings (after removing one unused eslint-disable directive).
+- Dev server log shows clean compile (GET / 200).
+- All new code stays within src/components/laxree/dashboards/sales.tsx (the only file touched).
+- All existing dark theme colors preserved (#0c1928 bg, #E4AF4A gold, #3CB87A green, #E05050 red, #E09E3C orange, #EDE4D0 text, #96A8BF muted, #4E6180 dim).
+- Used existing UI components (Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea) and existing hooks (useFetch, apiPost, apiDelete) and existing types (fmtDate, fmtINR, STATUS_COLORS, SessionUser, MONTH_NAMES) — no new imports needed.
+- The StockStat helper component is now unused (was previously used by the old StockCheckTab 5-stat grid); left in place since `no-unused-vars` is off and removing it would add risk for no functional gain. The existing `stockStatusInfo` helper is still used by MyChallansTab's expanded per-item table.
+
+Stage Summary:
+- All 6 Sales dashboard updates implemented in src/components/laxree/dashboards/sales.tsx (file grew from ~2075 to ~2568 lines).
+- Sales users now never see raw stock quantities (currentStock / heldQty / minStock / availableStock) — only smart availability badges (Available / Partial / Not Available). The ONLY exception is the partial case where the user explicitly asked to see "X available, Y remaining will take 24-30 days".
+- Check Stock tab: Required Qty input + smart badge per result item.
+- Upload Challan tab: Category auto-fetched from master inventory (/api/items) with debounce; manual entry removed; "🔍 auto" badge when matched; "— not in master inventory —" hint when no match.
+- Upload Result: smart availability per item (no In Stock column); summary cards show counts only.
+- Bills tab: prominent "Kindly share these bills with the client" banner above ready-bill cards.
+- Dashboard tab: professional month calendar grid with per-day challan count badges + today highlight.
+- Reports tab: Weekly/Monthly/Yearly period selector, Month/Year selects as needed, big gold Export button → CSV download via /api/reports/export?role=SALES&userId={user.id}, live preview count from /api/challans/dashboard.
+- Lint clean (0 errors, 0 warnings). Dev server compiles clean.
+
+---
+Task ID: coordinator-updates
+Agent: full-stack-developer (Coordinator)
+Task: Five Coordinator dashboard updates in src/components/laxree/dashboards/coordinator.tsx — (1) Audit tab: challan disappears after submit + auto-advance to next; (2) Reports tab with Audit/Dispatched/Bills sub-sections + Full Report; (3) Warehouse workflow polish (horizontal stepper, summary header); (4) Partial-payment warning + special-approval modal; (5) Full-payment gate for vehicle arrangement & dispatch.
+
+Work Log:
+- Read /home/z/my-project/worklog.md (1800+ lines) to learn prior context: backend already shipped /api/challans/[id]/special-dispatch + approve routes, /api/reports/export CSV route, schema has the 9 special-dispatch fields on Challan, page.tsx already added 'reports' tab to COORDINATOR nav. /api/challans GET returns all challans with full Prisma include (so the new fields are already in the response).
+- Read entire coordinator.tsx (~1133 lines) to map structure: CoordinatorDashboard switch (line ~107), DashboardTab (~130), ProcessTab (~194), AuditTab (~282) + AuditDetail (~438), WarehouseTab (~584) + WarehouseItemRow (~679), VehicleTab (~743), ReviewTab (~909), BillsTab (~1071). Confirmed Challan type at line 40-84.
+- Confirmed UI components (Badge/Btn/Card/EmptyState/Input/Modal/SectionTitle/Select/StatCard/Textarea) and hooks (useFetch/apiPost/apiPatch) and types (fmtDate/fmtINR/STATUS_COLORS/SessionUser) are all importable from ../ui, ../use-fetch, ../types.
+
+Task 1 — Challan type extended:
+- Added 7 new fields to the Challan type after the existing `challanItems` field: specialDispatchRequested (boolean), specialDispatchRequestedAt (string | null), specialDispatchReason (string | null), specialDispatchApproved (boolean), specialDispatchApprovedAt (string | null), specialDispatchRejected (boolean), specialDispatchRejectedAt (string | null). These mirror the Prisma schema.
+
+Task 2 — Audit tab auto-advance + clear success toast:
+- Root cause: submitAudit called refresh + onChanged but never cleared selectedChallanId, so after submit the same challan (now coordinatorApproved=true) was still found in data.challans and stayed selected. The user wanted it to "visibly disappear" and advance.
+- Fix: submitAudit now captures submittedNo/submittedClient before the API call, then calls setSelectedChallanId(null) after a successful PATCH. Because `selectedChallan = selectedChallanId ? find(...) : eligible[0]`, clearing the id makes the next-in-queue challan auto-load.
+- Set a prominent success toast: `✓ {challanNo} ({client}) audited & sent to warehouse — moved out of audit queue` and auto-clear it after 6s via setTimeout so the newly-loaded challan's UI is clean.
+- Restructured AuditTab return: wrapped the grid in an outer `<div className="space-y-4">` and added a top-of-tab success/error toast (gradient bg, animate-in fade-in) that stays visible across the auto-advance transition.
+- Also updated the "all audited" empty-state path to render the same top-of-tab toast (so the success message persists into the empty state when the last challan was just submitted) with a clearer EmptyState message: "All audited — All account-verified challans have been audited — nothing left in the audit queue".
+- Confirmed: PATCH /api/challans/[id]/audit sets coordinatorApproved=true + status=COORDINATOR_AUDITED; the eligible filter `c.accountVerified && !c.coordinatorApproved` correctly excludes the just-submitted challan on refresh, so it visibly disappears from the left picker. Verified the filter excludes non-audited (accountVerified=false) challans from the audit queue.
+
+Task 3 — Reports tab (Audit / Dispatched / Bills / Full):
+- Added ReportsTab component, wired into CoordinatorDashboard switch via `activeTab === 'reports' && <ReportsTab refreshKey={refreshKey} />`.
+- Stat header: 4 StatCards (Audited #9B6ED4, Dispatched #3CB87A, With Bills #E4AF4A, Total #E09E3C) at the top.
+- Sub-section switcher: 4 segmented buttons (Audit Report / Dispatched / Bills / Full Report) with active state colored by section accent (gradient bg, dark text). Each shows a count chip.
+- Audit sub-section: table of all coordinatorApproved=true challans. Columns: Challan No / Client / Audit Date / Items / Approved / Flagged / Amount. Approved count = items where auditStatus==='APPROVED'; Flagged count = REJECTED + ON_HOLD. Header has "⬇ Export Audit (CSV)" button → client-side downloadCsv helper generates Laxree_Audit_Report_YYYY-MM-DD.csv.
+- Dispatched sub-section: table of all dispatchDate!=null challans. Columns: Challan No / Client / Dispatch Date / Vehicle / Transporter / Freight. "⬇ Export Dispatched (CSV)" button.
+- Bills sub-section: table of all challans with ewayBillNo or invoiceNo. Columns: Challan No / Client / E-Way No / Invoice No / Uploaded By / Date. "⬇ Export Bills (CSV)" button.
+- Full Report sub-section: purple-tinted card with period selector (📅 Weekly / 🗓️ Monthly / 📆 Yearly), conditional Month+Year selects for monthly, Year select for yearly, info banner for weekly. "⬇ Download Full Report (CSV)" button → builds URL `/api/reports/export?role=COORDINATOR&period=...&month=...&year=...` and triggers downloadFromUrl helper (hidden <a download> click). The server returns text/csv with Content-Disposition: attachment.
+- All tables use scrollable container with `max-h-[60vh] overflow-y-auto`, dark header bg (#0c1928), monospace challan numbers in gold (#E4AF4A), approved/flagged counts color-coded green/red.
+
+Task 4 — Warehouse workflow polish:
+- Added summary header above the warehouse list: 4 StatCards (In Progress #E09E3C, Completed #3CB87A, Items In QC #9B6ED4, Items Packing #E4AF4A) computed from pending challans' per-item warehouseStatus.
+- Rewrote WarehouseItemRow's step tracker into a proper polished horizontal stepper:
+  * 4 stages (Pending → QC → Packaging → Done), each as a 36px circle with the step number (or ✓ checkmark when complete) inside.
+  * Completed circles: solid green (#3CB87A) bg + border, dark text, green glow shadow.
+  * Current circle: purple (#9B6ED4) bg/border with glow.
+  * Future circles: subtle white/5 bg.
+  * Connector lines between circles, horizontally aligned with circle center (mt-[17px]), colored green when complete, gradient purple→transparent when current, empty when future.
+  * Stage label below each circle, color-coded (green/purple/dim).
+- Confirmed WarehouseTab filter (`coordinatorApproved=true && !warehouseCompleted`) correctly excludes non-audited challans from appearing in the warehouse — they only arrive here AFTER the audit step submits them.
+- Confirmed VehicleTab filter (`warehouseCompleted=true && !vehicleArranged`) — once all warehouse items are DONE, warehouseCompleted becomes true (set by the warehouse PATCH route) and the challan moves out of Warehouse and into Vehicle Arrangement.
+- Updated SectionTitle subs to make the audit-gating explicit: "Only audited challans appear here — once all items are DONE, the challan moves to Vehicle Arrangement".
+
+Task 5 — Partial-payment warning + special approval (KEY feature):
+- Added 3 helpers + 2 components in a new section right before VehicleTab:
+  * `canDispatch(challan)` — returns true if paymentStatus==='PAID' OR specialDispatchApproved===true.
+  * `getSpecialDispatchState(c)` — returns 'initial' | 'awaiting' | 'approved' | 'rejected' based on the 3 boolean flags.
+  * `SpecialApprovalModal` — Modal with urgent red context banner (challan no, client, total, received, balance pending), explanation text, required Textarea for "Reason for special dispatch", error display, and a danger-variant "🚨 Send Request to Owner" button that calls POST /api/challans/[id]/special-dispatch {reason}. On success, calls onSuccess (which triggers refresh) and closes.
+  * `PartialPaymentGate` — Card-level component rendered inside each challan card. Returns null when paymentStatus==='PAID' (no gate needed). Otherwise:
+    - Always renders an orange warning banner: "⚠ Partial payment is still pending — ₹{balance} remaining. Dispatch requires full payment or special Owner approval."
+    - state==='initial': renders 2 option cards side-by-side:
+      ① "🚨 Process on Special Approval" — purple-bordered clickable card that opens SpecialApprovalModal. Subtext: "Sends an urgent popup to the Owner with this challan's overview. Dispatch stays blocked until approved."
+      ② "💰 Approve Full Payment" — gold-bordered informational card. Subtext: "Waiting for full payment verification by the Account team. The challan will be auto-unblocked once PAID."
+    - state==='awaiting': orange banner with ⏳ animate-pulse icon, "Awaiting Owner approval — special dispatch request sent", shows the requested date + reason quote, Pending badge.
+    - state==='approved': green banner with ✅, "Special dispatch approved by Owner — you may proceed", shows approval date + balance reminder, Approved badge.
+    - state==='rejected': red banner with 🚫, "Special dispatch rejected by Owner — dispatch blocked", shows rejection date + balance reminder + "contact Owner", Rejected badge.
+- All state panels use rounded-lg border + gradient bg in the state's accent color, flex layout with icon + message + badge.
+
+Task 6 — Full-payment gate wired into VehicleTab + ReviewTab:
+- VehicleTab:
+  * Compute `dispatchAllowed = canDispatch(c)` per challan.
+  * Card border/bg color shifts from purple-tinted (Ready) to orange-tinted (Payment Gate) when blocked.
+  * Header Badge: "Ready" (green) when allowed, "Payment Gate" (orange) when blocked.
+  * Render `<PartialPaymentGate challan={c} onChanged={() => { refresh(); onChanged() }} />` inside each card (returns null if PAID).
+  * Items summary shows "• balance ₹X pending" when blocked.
+  * "🚛 Arrange Vehicle" button is `disabled={busy === c.id || !dispatchAllowed}`.
+  * Inline hint "🔒 Resolve payment or get Owner approval to arrange vehicle" shows when blocked.
+  * The arrange() function already calls POST /api/challans/[id]/vehicle which itself requires warehouseCompleted (server-side check).
+- ReviewTab:
+  * Same pattern — `dispatchAllowed = canDispatch(c)` per challan.
+  * Card border/bg shifts to orange when blocked. Badge shows "Payment Gate" instead of image-count when blocked.
+  * Render `<PartialPaymentGate challan={c} onChanged={...} />` inside each card.
+  * "📦 Dispatch Challan" button is `disabled={busy || !allImaged || !dispatchAllowed}`.
+  * Two inline hints: "🔒 Resolve payment or get Owner approval before dispatch" (when blocked) and "📷 Upload all dispatch images first" (when images incomplete but payment OK).
+  * The dispatch() function calls POST /api/challans/[id]/dispatch which requires vehicleArranged (server-side check).
+
+CSV helpers:
+- `downloadCsv(filename, rows)` — escapes values (quotes doubled, BOM prefix for Excel UTF-8), builds a Blob, creates a hidden <a download> with object URL, clicks it, revokes after 1s.
+- `downloadFromUrl(url)` — for server-side CSVs: creates a hidden <a href=url> with empty download attr (lets server's Content-Disposition filename win), clicks it.
+
+Lint & verification:
+- `bun run lint` → 0 errors, 0 warnings.
+- Started dev server briefly: GET / returns HTTP 200 (page compiles cleanly, no JSX errors). File grew from 1133 → 1828 lines.
+- All new code stays within src/components/laxree/dashboards/coordinator.tsx (the ONLY file touched per task spec).
+- Existing dark theme preserved (#0c1928 bg, #9B6ED4 coordinator purple, #E4AF4A gold, #3CB87A green, #E05050 red, #E09E3C orange, #EDE4D0 text, #96A8BF muted, #4E6180 dim).
+- Used only existing UI components (Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea) and existing hooks (useFetch, apiPost, apiPatch) and existing types (fmtDate, fmtINR, STATUS_COLORS, SessionUser). No new imports needed.
+
+Stage Summary:
+- All 5 Coordinator updates implemented in src/components/laxree/dashboards/coordinator.tsx (file grew from ~1133 to ~1828 lines):
+  1. Audit tab — after submit, the challan visibly disappears from the eligible list, the right panel auto-advances to the next-in-queue challan (or shows "All audited" empty state), and a prominent green success toast with the submitted challan number is shown at the top of the tab (auto-clears after 6s).
+  2. Reports tab — 4 StatCards + 4 sub-sections (Audit / Dispatched / Bills / Full Report). Each sub-section has a scrollable dark table and an "Export (CSV)" button. Audit/Dispatched/Bills build the CSV client-side; Full Report uses the period selector (Weekly/Monthly/Yearly + month/year selects) and calls /api/reports/export?role=COORDINATOR.
+  3. Warehouse tab — added a 4-card summary header (In Progress / Completed / Items In QC / Items Packing) and rewrote the per-item step tracker as a polished horizontal stepper with 36px checkmark circles, gradient connector lines, and color-coded labels. Confirmed non-audited challans never appear in Warehouse, and warehouse-completed challans correctly move to Vehicle Arrangement.
+  4. Partial-payment workflow — added a reusable PartialPaymentGate component that renders an orange warning banner + 2 option cards (🚨 Process on Special Approval / 💰 Approve Full Payment). Clicking the special-approval option opens a modal where the Coordinator enters a reason; submitting calls POST /api/challans/[id]/special-dispatch which fires an URGENT popup to the Owner. While waiting (specialDispatchRequested && !approved && !rejected), the gate shows an orange "⏳ Awaiting Owner approval" badge. If approved, green "✅ Special dispatch approved by Owner — you may proceed". If rejected, red "🚫 Special dispatch rejected by Owner — dispatch blocked".
+  5. Full-payment gate — `canDispatch(challan)` helper returns true only when paymentStatus==='PAID' OR specialDispatchApproved===true. VehicleTab's "🚛 Arrange Vehicle" button and ReviewTab's "📦 Dispatch Challan" button are both disabled when !canDispatch(c), with inline "🔒 Resolve payment or get Owner approval…" hints. Card border + badge also reflect the gate state.
+- Lint clean (0 errors, 0 warnings). Dev server compiles clean (GET / 200). Ready for end-to-end browser verification by user.
+
+---
+Task ID: owner-admin-support-updates
+Agent: full-stack-developer (Owner/Admin/Support)
+Task: Owner dashboard updates (Special Approvals tab, Reports tab, Stock Distribution "undefined" label bug fix, notification bell pending-count surfacing) + Admin dashboard differentiation from Owner (System & User Management overview) + Admin Reports tab + Support Reports tab + Support Client Dispatch excess-space bug fix.
+
+Work Log:
+
+**Files edited (only these three):**
+- `src/components/laxree/dashboards/owner.tsx`
+- `src/components/laxree/dashboards/admin.tsx`
+- `src/components/laxree/dashboards/support.tsx`
+
+**OWNER dashboard (owner.tsx):**
+1. Extended the `Challan` type with all new special-dispatch fields (`specialDispatchRequested`, `specialDispatchRequestedAt`, `specialDispatchReason`, `specialDispatchRequestedById`, `specialDispatchApproved`, `specialDispatchApprovedAt`, `specialDispatchApprovedById`, `specialDispatchRejected`, `specialDispatchRejectedAt`) plus `clientMobile`, `paymentMode`, `paymentType`, and `uploadedBy` for the approvals UI.
+2. Wired `activeTab === 'special'` → new `<SpecialApprovalsTab>` and `activeTab === 'reports'` → new `<ReportsTab role="OWNER" />` in the `OwnerDashboard` switch.
+3. Added `SpecialApprovalsTab` — fetches `/api/challans`, filters to `specialDispatchRequested && !approved && !rejected`, shows a red animated urgent banner ("🚨 N special dispatch request(s) awaiting your approval"), and for each pending request renders a `SpecialApprovalCard` with full **client overview** (Challan No, Client Name, City, Mobile, Payment Mode, Total/Received/Balance-Pending highlighted red with % unpaid, Expected Delivery, Items list, Uploaded By = salesperson, Coordinator's reason, Requested At date), an optional Owner-notes input, and two action buttons: green "✅ Approve & Allow Dispatch" and red "🚫 Reject" — both POST to `/api/challans/[id]/special-dispatch/approve` with `{action, notes}`. Shows a success toast after decision. Below pending, a "Recently Decided" card lists the last 8 approved/rejected requests with the decision badge + date.
+4. Added `ReportsTab` (exported so Admin & Support can reuse it) — period selector (Weekly/Monthly/Yearly) + month/year selects, a "⬇ Export to Excel (CSV)" button that builds the URL `/api/reports/export?role=…&period=…&month=…&year=…` and triggers download via a hidden `<a download>` (preserves session cookies), a 5-stat preview summary (challan count, total amount, received, balance, partial-paid count) fetched from `/api/challans?month=&year=`, and a gold-gradient hero card with role badge.
+5. Fixed the **Stock Distribution "undefined" label bug**: when `byCategory` had an `undefined`/`null` key (items with missing category), the chart rendered "undefined" as the bar label. Now computes `label = cat && cat !== 'undefined' && cat !== 'null' ? cat : 'Uncategorized'` before rendering, and uses `cat || 'Uncategorized'` as the React key.
+6. Fixed the **notification bell inconsistency**: since the bell is in a shared `app-shell.tsx` component (off-limits), I added role-specific "Action Needed" cards at the top of the Owner Overview tab. They fetch `/api/challans` and `/api/purchase-requests` in parallel and surface two prominent gradient cards (red for pending special approvals, amber for unsigned PRs) — each is clickable and navigates to the `special` or `pr` tab. They only appear when there's at least one pending item.
+
+**ADMIN dashboard (admin.tsx) — full rewrite of OverviewTab:**
+7. Replaced the duplicated Owner-style overview with an Admin-specific "System & User Management" overview:
+   - **Admin identity banner** — gold-tinted card explaining what the Admin manages (N users, N challans, N items, N messages, with disabled-account warning).
+   - **System KPIs** (4 StatCards) — Total Users / Total Challans / Total Items / Total Messages (replaces Owner's stock-focused KPIs).
+   - **Recent User Accounts** card — newest 6 users with avatar, name, email, role badge, and "Joined {date}" — links to User Management.
+   - **Pending User Approvals** card — lists users with `forcePasswordChange=true` (and disabled-account count), prompting admin to take action.
+   - **Users by Role** card — 7-tile grid showing the count per role (Admin, Owner, Sales, Account, Coordinator, Support, IT Manager) using `ROLE_META` colors.
+   - **System Health KPIs** — Collection Rate, Pending Amount, Stock Holds, Dispatches (30d).
+   - **System Alerts** card — admin-specific alerts (pending pw changes, disabled accounts) on top of the standard system alerts, each clickable.
+   - **Audit Trail** card — last 10 transactions from `/api/activity-log` (Date, Type IN/OUT badge, Item, Qty, Party, Entered By) with link to All Challans.
+   - Removed the unused `Select` import (was triggering lint warning).
+8. Added `activeTab === 'reports'` → `<ReportsTab role="ADMIN" />` to the AdminDashboard switch.
+
+**SUPPORT dashboard (support.tsx):**
+9. Wired `activeTab === 'reports'` → `<ReportsTab role="SUPPORT" />` in the `SupportDashboard` switch (imported from `./owner`).
+10. Fixed the **excess empty vertical space on the Client Dispatch page**: when both "Newly Dispatched" and "In Transit" lists are empty, the page previously showed two tiny empty-state cards floating at the top with a huge blank gap below. Now, when `allDispatched.length === 0`, a single full-height `Card` with `min-h-[55vh] flex flex-col justify-center` is rendered instead, containing a 2-column grid of larger vertically-centered dashed-border empty states (green "No new dispatches" + amber "None in transit") — making the page look complete and balanced on large screens. When there's at least one item, the original two-card layout is preserved.
+
+**Verification:**
+- `bun run lint` → 0 errors (after removing unused `Select` import from admin.tsx).
+- Dev server compiles cleanly for `/`, `/api/challans`, `/api/users`, `/api/messages`, `/api/reports/export`.
+- End-to-end test: logged in as Coordinator → created special-dispatch request via `POST /api/challans/[id]/special-dispatch` (200 OK) → logged in as Owner → verified `/api/challans` returns `specialDispatchRequested=true`, `specialDispatchApproved=false` → approved via `POST /api/challans/[id]/special-dispatch/approve` (200 OK, decision=APPROVED) → re-requested to leave one pending for visual verification.
+- CSV export endpoint returns 200 with proper Content-Disposition attachment and a valid BOM-prefixed CSV containing the challan, items, financials, dispatch info, and special-dispatch flags.
+
+Stage Summary:
+- Owner dashboard now has working `special` and `reports` tabs; Stock Distribution chart no longer shows "undefined"; Overview surfaces pending special approvals + unsigned PRs as Action-Needed cards.
+- Admin dashboard's Overview is now distinctly about Users & System management (not inventory) — recent logins, pending approvals, users-by-role, audit trail.
+- Admin and Support dashboards now have a working `reports` tab that exports CSV via the existing `/api/reports/export` endpoint.
+- Support Client Dispatch page no longer has the large blank gap when both lists are empty — uses a single full-height card with vertically-centered empty states.
+- All changes confined to the three assigned files (owner.tsx, admin.tsx, support.tsx); lint passes with 0 errors; no runtime errors in dev log.
+
+---
+Task ID: sales-checkstock-fix-final
+Agent: main
+Task: Fix two Check Stock issues per user feedback — (1) Required Qty not added as a proper COLUMN (was a card input); (2) remaining qty still showing despite user's full logic (no stock numbers should be disclosed anywhere).
+
+Work Log:
+- Read worklog.md (prior context: StockCheckTab had per-item card grid with Required Qty input + smartStockInfo showing "X available, Y remaining" in partial case).
+- Read src/components/laxree/dashboards/sales.tsx to find:
+  * stockCheckAvailability() at line ~256 — showed `${availableStock} available, remaining ${shortage}` in partial case.
+  * smartStockInfo() at line ~207 — showed `${avail} available, remaining ${shortage}` in partial case.
+  * stockStatusInfo() at line ~154 — showed `${availableQty ?? 0} in stock` and `Only ${availableQty ?? 0} available`.
+  * StockCheckTab results (line ~666) — per-item card grid, not a table column.
+  * MyChallansTab per-item table (line ~1572) — had "In Stock" column disclosing ci.availableQty.
+
+Fix 1 — stockCheckAvailability(): removed all numeric disclosure from partial case. New message: "Partial stock available — remaining quantity will be available in 24-30 days once order is finalized". Full-available label changed to "Yes Available" per user spec.
+
+Fix 2 — smartStockInfo(): removed `${avail} available, remaining ${shortage}` from ON_HOLD partial case. Now shows "Partial stock available — remaining quantity will be available in 24-30 days once order is finalized".
+
+Fix 3 — stockStatusInfo(): removed `${availableQty ?? 0} in stock` → "In stock — ready to ship"; removed `Only ${availableQty ?? 0} available` → "Partial stock — remaining will be available in 24-30 days once order is finalized".
+
+Fix 4 — StockCheckTab results: converted from per-item card grid to a proper TABLE with columns: # | Item | Model | Colour | Required Qty (centered input + unit) | Availability (badge + message). Required Qty is now a real column as the user demanded. min-w-[760px] with overflow-x-auto for mobile.
+
+Fix 5 — MyChallansTab per-item table: removed the "In Stock" column header and the ci.availableQty cell entirely. Now only shows Item | Model # | Need | Inventory Status.
+
+Verification (Agent Browser):
+- Logged in as Sales → Check Stock tab.
+- Selected Banquet Furniture → Banquet Chair → LRBF-542 → WHITE → table appeared with all 6 columns including "REQUIRED QTY" column with number input (default 1, unit "PCS").
+- Entered 100 → badge showed "✅ Yes Available" (no numbers).
+- Switched to Banquet Furniture → Stage → LRBF-534 → 8*4 FT → entered 99999 → badge showed "🔶 Partial Available" + "Partial stock available — remaining quantity will be available in 24-30 days once order is finalized" — NO numbers disclosed.
+- Screenshot saved at /tmp/check-stock-fixed.png and /tmp/check-stock-partial.png.
+
+Lint & dev server:
+- bun run lint → 0 errors, 0 warnings.
+- Dev server compiles clean (GET / 200).
+
+Stage Summary:
+- Both issues fully fixed in src/components/laxree/dashboards/sales.tsx (only file touched).
+- Required Qty is now a proper table COLUMN (was a card input).
+- No stock numbers are disclosed ANYWHERE in the Sales dashboard — not in Check Stock, not in Upload Result, not in My Challans per-item table.
+- Partial case shows only "Partial stock available — remaining quantity will be available in 24-30 days once order is finalized".
+- Full-available case shows "Yes Available".
+- None-available case shows "Will be available soon once order is finalized".
+- Ready to push to GitHub + Vercel.

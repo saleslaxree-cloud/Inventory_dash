@@ -167,14 +167,14 @@ function stockStatusInfo(stockStatus: string, matchStatus?: string, remark?: str
         label: 'Available',
         icon: '✅',
         color: '#3CB87A',
-        detail: remark || `${availableQty ?? 0} in stock`,
+        detail: remark || 'In stock — ready to ship',
       }
     case 'ON_HOLD':
       return {
         label: 'Partial Available',
         icon: '🔶',
         color: '#E09E3C',
-        detail: remark || `Only ${availableQty ?? 0} available — rest on back-order`,
+        detail: remark || 'Partial stock — remaining will be available in 24-30 days once order is finalized',
       }
     case 'WILL_BE_AVAILABLE':
       return {
@@ -194,6 +194,87 @@ function stockStatusInfo(stockStatus: string, matchStatus?: string, remark?: str
 }
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+/* ── Smart availability (NO raw stock-qty disclosure) ──
+   Used in Upload Result per-item table and Stock Check tab.
+   Shows friendly status without exposing stock numbers, EXCEPT in the
+   partial case where the user explicitly asked to show "X available,
+   Y remaining" so they can plan around the back-order. */
+type SmartInfo = { icon: string; color: string; label: string; message: string }
+
+// For UploadResult: uses ci.stockStatus + ci.availableQty + requiredQty(=quantity)
+function smartStockInfo(
+  stockStatus: string,
+  matchStatus?: string,
+  availableQty?: number | null,
+  requiredQty?: number,
+): SmartInfo {
+  const need = Math.max(1, Number(requiredQty) || 0)
+  // NOT_FOUND / PENDING / WILL_BE_AVAILABLE → not available
+  if (matchStatus === 'NOT_FOUND' || stockStatus === 'PENDING' || stockStatus === 'WILL_BE_AVAILABLE') {
+    return {
+      icon: '❌',
+      color: '#E05050',
+      label: 'Not Available',
+      message: 'Will be available soon once order is finalized',
+    }
+  }
+  if (stockStatus === 'AVAILABLE') {
+    return { icon: '✅', color: '#3CB87A', label: 'Available', message: '' }
+  }
+  if (stockStatus === 'ON_HOLD') {
+    const avail = Math.max(0, Number(availableQty) || 0)
+    if (avail <= 0) {
+      return {
+        icon: '❌',
+        color: '#E05050',
+        label: 'Not Available',
+        message: 'Will be available soon once order is finalized',
+      }
+    }
+    if (avail >= need) {
+      return { icon: '✅', color: '#3CB87A', label: 'Available', message: '' }
+    }
+    // Partial: do NOT disclose actual stock numbers — only say remaining will follow.
+    return {
+      icon: '🔶',
+      color: '#E09E3C',
+      label: 'Partial Available',
+      message: 'Partial stock available — remaining quantity will be available in 24-30 days once order is finalized',
+    }
+  }
+  return {
+    icon: '❌',
+    color: '#96A8BF',
+    label: 'Not Available',
+    message: 'Will be available soon once order is finalized',
+  }
+}
+
+// For StockCheckTab: uses availableStock + requiredQty
+// IMPORTANT: never disclose actual stock numbers — only Available / Partial / Not Available.
+function stockCheckAvailability(availableStock: number, requiredQty: number): SmartInfo {
+  const need = Math.max(1, Number(requiredQty) || 1)
+  if (availableStock <= 0) {
+    return {
+      icon: '❌',
+      color: '#E05050',
+      label: 'Not Available',
+      message: 'Will be available soon once order is finalized',
+    }
+  }
+  if (availableStock >= need) {
+    return { icon: '✅', color: '#3CB87A', label: 'Yes Available', message: '' }
+  }
+  // Partial: no numbers — only say remaining will follow once order is finalized.
+  return {
+    icon: '🔶',
+    color: '#E09E3C',
+    label: 'Partial Available',
+    message: 'Partial stock available — remaining quantity will be available in 24-30 days once order is finalized',
+  }
+}
 
 /* ============================================================ */
 /* Main Dashboard                                               */
@@ -212,6 +293,7 @@ export function SalesDashboard({ user, activeTab, onTabChange }: {
       {activeTab === 'bills'          && <BillsTab user={user} />}
       {activeTab === 'list'           && <MyChallansTab user={user} />}
       {activeTab === 'dashboard'      && <DashboardTab user={user} />}
+      {activeTab === 'reports'        && <ReportsTab user={user} />}
     </div>
   )
 }
@@ -292,6 +374,9 @@ function DashboardTab({ user }: { user: SessionUser }) {
               </div>
             )}
           </Card>
+
+          {/* Calendar view — daily challan counts */}
+          <CalendarView challans={data.challans} month={Number(month)} year={Number(year)} />
         </>
       )}
     </div>
@@ -325,6 +410,104 @@ function MonthlyBars({ monthly }: { monthly: DashboardData['monthly'] }) {
   )
 }
 
+/* Calendar view — month grid with per-day challan counts */
+function CalendarView({ challans, month, year }: { challans: Challan[]; month: number; year: number }) {
+  const today = new Date()
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+
+  // Group challans by day-of-month for the selected month
+  const countsByDay = useMemo(() => {
+    const map: Record<number, number> = {}
+    for (const c of challans) {
+      const d = new Date(c.createdAt)
+      if (d.getFullYear() === year && d.getMonth() + 1 === month) {
+        const day = d.getDate()
+        map[day] = (map[day] || 0) + 1
+      }
+    }
+    return map
+  }, [challans, month, year])
+
+  const totalThisMonth = useMemo(() => Object.values(countsByDay).reduce((s, n) => s + n, 0), [countsByDay])
+
+  const firstWeekday = new Date(year, month - 1, 1).getDay() // 0=Sun, 1=Mon, …, 6=Sat
+  const daysInMonth = new Date(year, month, 0).getDate()
+
+  // Build 7-col grid: leading blanks + day cells + trailing blanks (so rows are full)
+  const cells: (number | null)[] = []
+  for (let i = 0; i < firstWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+  return (
+    <Card className="p-4">
+      <SectionTitle
+        icon="📅"
+        title={`Calendar — ${monthLabel}`}
+        sub={`${totalThisMonth} challan${totalThisMonth === 1 ? '' : 's'} created this month`}
+        right={
+          isCurrentMonth
+            ? <Badge label="TODAY" color="#E4AF4A" />
+            : undefined
+        }
+      />
+      <div className="grid grid-cols-7 gap-1.5 mt-3">
+        {weekdays.map((w) => (
+          <div key={w} className="text-center text-[10px] uppercase tracking-wider text-[#4E6180] font-bold py-1">{w}</div>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) {
+            return <div key={i} className="aspect-square rounded-md bg-white/[0.01] border border-white/5" />
+          }
+          const count = countsByDay[day] || 0
+          const isToday = isCurrentMonth && day === today.getDate()
+          return (
+            <div
+              key={i}
+              className={`aspect-square rounded-md border flex flex-col items-center justify-center gap-1 transition-all ${
+                isToday
+                  ? 'border-[#E4AF4A]/60 bg-[#C8922A]/15 shadow-[0_0_0_1px_rgba(228,175,74,0.35)]'
+                  : count > 0
+                    ? 'border-[#C8922A]/25 bg-[#C8922A]/8 hover:bg-[#C8922A]/15 cursor-default'
+                    : 'border-white/7 bg-[#0c1928]/40'
+              }`}
+              title={count > 0 ? `${count} challan${count === 1 ? '' : 's'} on ${day} ${monthLabel}` : undefined}
+            >
+              <span className={`text-[12px] font-bold ${
+                isToday ? 'text-[#E4AF4A]'
+                : count > 0 ? 'text-[#EDE4D0]'
+                : 'text-[#4E6180]'
+              }`}>{day}</span>
+              {count > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-bold bg-gradient-to-br from-[#C8922A] to-[#E4AF4A] text-[#07101f]">
+                  {count}
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-3 flex items-center gap-3 text-[10px] text-[#4E6180]">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-3 rounded border border-[#E4AF4A]/60 bg-[#C8922A]/15" />
+          Today
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-3 rounded border border-[#C8922A]/25 bg-[#C8922A]/8" />
+          Has challans
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-3 rounded border border-white/7 bg-[#0c1928]/40" />
+          No activity
+        </span>
+      </div>
+    </Card>
+  )
+}
+
 /* ============================================================ */
 /* Tab 2: Check Stock — cascading dropdowns                     */
 /* ============================================================ */
@@ -343,6 +526,14 @@ function StockCheckTab() {
   const [nameLoading, setNameLoading] = useState(false)
   const [modelLoading, setModelLoading] = useState(false)
   const [colourLoading, setColourLoading] = useState(false)
+
+  // Per-item "Required Qty" — what the user needs for this client.
+  // We DON'T disclose actual stock numbers; we only show smart availability
+  // (Available / Partial / Not Available) based on requiredQty vs availableStock.
+  const [requiredQtys, setRequiredQtys] = useState<Record<string, number>>({})
+  const getRequiredQty = (id: string) => requiredQtys[id] ?? 1
+  const setRequiredQty = (id: string, v: number) =>
+    setRequiredQtys((prev) => ({ ...prev, [id]: Math.max(1, Number(v) || 1) }))
 
   // Step 1: fetch categories on mount
   const { data: catData, loading: catInitLoading } = useFetch<{ categories: string[] }>('/api/stock-check')
@@ -473,55 +664,78 @@ function StockCheckTab() {
           ) : result.length === 0 ? (
             <EmptyState icon="❓" title="No matching item" sub="Try a different combination" />
           ) : (
-            <div className="space-y-3">
-              {result.map((it) => {
-                const out = it.availableStock <= 0
-                return (
-                  <div key={it.id} className="rounded-lg border border-white/7 bg-[#0c1928]/60 p-3.5">
-                    <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
-                      <div>
-                        <div className="font-serif text-sm font-bold text-[#EDE4D0]">{it.itemName}</div>
-                        <div className="text-[11px] text-[#96A8BF] mt-0.5">
-                          {it.category} · Model <span className="font-mono text-[#E4AF4A]">{it.model}</span>
-                          {it.colour && <> · Colour <span className="text-[#EDE4D0]">{it.colour}</span></>}
-                        </div>
-                      </div>
-                      <div className="flex gap-1.5">
-                        {it.fastMoving && <Badge label="⚡ Fast Moving" color="#E4AF4A" />}
-                        <Badge
-                          label={
-                            it.availableStock <= it.minStock ? 'LOW STOCK' :
-                            it.availableStock <= 0 ? 'OUT OF STOCK' : 'IN STOCK'
-                          }
-                          color={
-                            it.availableStock <= 0 ? '#E05050' :
-                            it.availableStock <= it.minStock ? '#E09E3C' : '#3CB87A'
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 text-[12px]">
-                      <StockStat label="Current Stock" value={it.currentStock} color="#EDE4D0" />
-                      <StockStat label="Held Qty" value={it.heldQty} color="#E09E3C" />
-                      <StockStat
-                        label="Available Stock"
-                        value={it.availableStock}
-                        color="#E4AF4A"
-                        highlight
-                      />
-                      <StockStat label="Min Stock" value={it.minStock} color="#96A8BF" />
-                      <StockStat label="Unit" value={it.unit || 'pcs'} color="#96A8BF" />
-                    </div>
-
-                    {out && (
-                      <div className="mt-3 rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-2 text-[12px] text-[#E05050]">
-                        ⚠ Will be available in <strong>25–30 days</strong>. Plan accordingly before committing to client.
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+            <div className="overflow-x-auto rounded-lg border border-white/8">
+              <table className="w-full text-left border-collapse min-w-[760px]">
+                <thead>
+                  <tr className="bg-[#0c1928] text-[11px] uppercase tracking-wider text-[#96A8BF]">
+                    <th className="py-2.5 px-3 font-semibold">#</th>
+                    <th className="py-2.5 px-3 font-semibold">Item</th>
+                    <th className="py-2.5 px-3 font-semibold">Model</th>
+                    <th className="py-2.5 px-3 font-semibold">Colour</th>
+                    <th className="py-2.5 px-3 font-semibold text-center">Required Qty</th>
+                    <th className="py-2.5 px-3 font-semibold">Availability</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.map((it, idx) => {
+                    // Smart availability — NO raw stock numbers shown to Sales.
+                    const reqQty = getRequiredQty(it.id)
+                    const avail = stockCheckAvailability(it.availableStock, reqQty)
+                    return (
+                      <tr
+                        key={it.id}
+                        className="border-t border-white/6 bg-[#0c1928]/40 hover:bg-[#0c1928]/70 transition-colors"
+                      >
+                        <td className="py-3 px-3 text-[12px] text-[#4E6180] font-mono">{idx + 1}</td>
+                        <td className="py-3 px-3">
+                          <div className="font-serif text-[13.5px] font-bold text-[#EDE4D0]">{it.itemName}</div>
+                          {it.fastMoving && (
+                            <span className="inline-block mt-0.5 text-[10px] text-[#E4AF4A]">⚡ Fast Moving</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[12.5px] text-[#E4AF4A]">{it.model}</td>
+                        <td className="py-3 px-3 text-[12.5px] text-[#EDE4D0]">{it.colour || '—'}</td>
+                        <td className="py-3 px-3">
+                          <div className="flex flex-col items-center gap-1">
+                            <input
+                              type="number"
+                              min={1}
+                              value={reqQty}
+                              onChange={(e) => setRequiredQty(it.id, Number(e.target.value))}
+                              className="w-[88px] rounded-lg border border-white/10 bg-[#0c1928] px-2.5 py-1.5 text-center text-[14px] font-bold text-[#E4AF4A] focus:border-[#C8922A]/50 focus:outline-none focus:ring-1 focus:ring-[#C8922A]/30 transition-colors"
+                            />
+                            <span className="text-[10px] text-[#4E6180]">{it.unit || 'pcs'}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div
+                            className="inline-flex items-start gap-2 rounded-lg border px-3 py-2"
+                            style={{
+                              borderColor: `${avail.color}55`,
+                              background: `${avail.color}12`,
+                            }}
+                          >
+                            <span className="text-lg leading-none mt-0.5">{avail.icon}</span>
+                            <div className="min-w-0">
+                              <div
+                                className="font-serif text-[13px] font-bold whitespace-nowrap"
+                                style={{ color: avail.color }}
+                              >
+                                {avail.label}
+                              </div>
+                              {avail.message && (
+                                <div className="text-[11px] text-[#EDE4D0]/90 mt-0.5 leading-snug max-w-[280px]">
+                                  {avail.message}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </Card>
@@ -614,6 +828,55 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
   useEffect(() => {
     if (!billingName && clientName) setBillingName(clientName)
   }, [clientName, billingName])
+
+  // ── Auto-fetch category from master inventory ──
+  // When the user types an itemName or model, debounce-search the master
+  // items (/api/items). On a match, auto-fill category (and itemNumber/
+  // colour if empty). The Category field in the UI is read-only / auto-filled
+  // with a "🔍 auto" badge; if no match, an "— not in master inventory —"
+  // hint is shown so the Sales user knows IT will need to add it.
+  const { data: masterData } = useFetch<{ items: Item[] }>('/api/items')
+  const masterItems = useMemo(() => masterData?.items || [], [masterData])
+  const masterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Signature string so the effect only fires when itemName/model change
+  // (not when category/itemNumber/colour change — those are derived here).
+  const itemsSignature = items.map((i) => `${i.itemName}||${i.model}`).join('::')
+  useEffect(() => {
+    if (!masterItems.length) return
+    if (masterDebounceRef.current) clearTimeout(masterDebounceRef.current)
+    masterDebounceRef.current = setTimeout(() => {
+      setItems((prev) => prev.map((row) => {
+        const q = row.itemName.trim().toLowerCase()
+        const m = row.model.trim().toLowerCase()
+        // Both empty → leave category alone (user cleared everything)
+        if (!q && !m) return row
+        // Find master match: if both itemName & model provided, both must
+        // match (contains); otherwise match on whichever is provided.
+        const match = masterItems.find((mi) => {
+          const miName = mi.itemName.toLowerCase()
+          const miModel = mi.model.toLowerCase()
+          if (q && m) return miName.includes(q) && miModel.includes(m)
+          if (q) return miName.includes(q)
+          if (m) return miModel.includes(m)
+          return false
+        })
+        if (!match) {
+          // Typed something but no match — clear category so the UI shows
+          // the "— not in master inventory —" hint.
+          return { ...row, category: '' }
+        }
+        return {
+          ...row,
+          category: match.category,
+          itemNumber: row.itemNumber || match.model,
+          colour: row.colour || (match.colour || ''),
+        }
+      }))
+    }, 350)
+    return () => {
+      if (masterDebounceRef.current) clearTimeout(masterDebounceRef.current)
+    }
+  }, [itemsSignature, masterItems])
 
   const validate = (): string | null => {
     if (!challanNumber.trim()) return 'Challan number is required'
@@ -885,7 +1148,27 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
               <div key={idx} className="rounded-lg border border-white/7 bg-[#0c1928]/40 p-2.5">
                 <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-12 md:col-span-2">
-                    <Input label={idx === 0 ? 'Category' : undefined} value={it.category} onChange={(v) => updateItem(idx, { category: v })} placeholder="Linen" />
+                    {idx === 0 && <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">Category</span>}
+                    <div
+                      className={`rounded-lg border px-2.5 py-2 min-h-[38px] flex items-center ${
+                        it.category
+                          ? 'border-[#C8922A]/40 bg-[#C8922A]/8'
+                          : 'border-white/10 bg-[#0c1928]/60'
+                      }`}
+                    >
+                      {it.category ? (
+                        <span className="inline-flex items-center gap-1.5 text-[12px] text-[#EDE4D0] font-medium min-w-0">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#C8922A]/25 text-[#E4AF4A] border border-[#C8922A]/40 font-bold flex-shrink-0">🔍 auto</span>
+                          <span className="truncate">{it.category}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10.5px] text-[#4E6180] italic">
+                          {(it.itemName.trim() || it.model.trim())
+                            ? '— not in master inventory —'
+                            : 'auto-filled from item name'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="col-span-12 md:col-span-3">
                     <Input label={idx === 0 ? 'Item Name *' : undefined} value={it.itemName} onChange={(v) => updateItem(idx, { itemName: v })} placeholder="Bath Towel" required />
@@ -1046,19 +1329,20 @@ function UploadResult({ result, onDone, onUploadAnother }: {
 
       {/* Compute real counts including NOT_FOUND items (backend stockSummary
           only counts AVAILABLE/ON_HOLD/WILL_BE_AVAILABLE — PENDING/NOT_FOUND
-          items must be counted as Not Available here). */}
+          items must be counted as Not Available here). NO raw stock numbers
+          are disclosed — only counts of items in each bucket. */}
       {(() => {
         const available = items.filter((ci) => ci.stockStatus === 'AVAILABLE').length
         const partial = items.filter((ci) => ci.stockStatus === 'ON_HOLD').length
         const notAvailable = items.filter((ci) => ci.stockStatus !== 'AVAILABLE' && ci.stockStatus !== 'ON_HOLD').length
         return (
       <>
-      {/* Inventory status summary — clear Available vs Not Available */}
+      {/* Inventory status summary — counts only, no stock numbers */}
       <div className="grid grid-cols-2 gap-2 mb-4">
         <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-3 text-center">
           <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">✅ Available</div>
           <div className="font-serif text-2xl font-bold text-[#3CB87A]">{available}</div>
-          <div className="text-[9px] text-[#4E6180] mt-0.5">in stock now</div>
+          <div className="text-[9px] text-[#4E6180] mt-0.5">item{available === 1 ? '' : 's'} ready to ship</div>
         </div>
         <div className="rounded-lg border border-[#E05050]/30 bg-[#E05050]/10 px-3 py-3 text-center">
           <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold mb-0.5">❌ Not Available</div>
@@ -1104,8 +1388,10 @@ function UploadResult({ result, onDone, onUploadAnother }: {
         </div>
       )}
 
-      {/* Per-item inventory status — clear Available / Not Available per model */}
-      <SectionTitle icon="🔍" title="Per-Item Inventory Status" sub={`Challan ${challan.challanNumber} — model-wise availability`} />
+      {/* Per-item availability — smart badge + message, NO raw stock qty
+          (only the partial case shows "X available, Y remaining" because
+          the user explicitly asked for that to plan back-orders). */}
+      <SectionTitle icon="🔍" title="Per-Item Availability" sub={`Challan ${challan.challanNumber} — model-wise availability`} />
       <div className="rounded-lg border border-white/7 overflow-hidden">
         <table className="w-full text-[12px]">
           <thead>
@@ -1113,13 +1399,12 @@ function UploadResult({ result, onDone, onUploadAnother }: {
               <th className="py-2 px-3">Item</th>
               <th className="py-2 px-3">Model #</th>
               <th className="py-2 px-3 text-right">Need</th>
-              <th className="py-2 px-3 text-right">In Stock</th>
-              <th className="py-2 px-3">Inventory Status</th>
+              <th className="py-2 px-3">Availability</th>
             </tr>
           </thead>
           <tbody>
             {items.map((ci) => {
-              const info = stockStatusInfo(ci.stockStatus, ci.status, ci.stockRemark, ci.availableQty)
+              const info = smartStockInfo(ci.stockStatus, ci.status, ci.availableQty, ci.quantity)
               return (
                 <tr key={ci.id} className="border-b border-white/5">
                   <td className="py-2 px-3 text-[#EDE4D0]">
@@ -1128,7 +1413,6 @@ function UploadResult({ result, onDone, onUploadAnother }: {
                   </td>
                   <td className="py-2 px-3 text-[#96A8BF] font-mono">{ci.model || ci.itemNumber || '—'}</td>
                   <td className="py-2 px-3 text-right text-[#EDE4D0] font-semibold">{ci.quantity}</td>
-                  <td className="py-2 px-3 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
                   <td className="py-2 px-3">
                     <span
                       className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"
@@ -1137,8 +1421,8 @@ function UploadResult({ result, onDone, onUploadAnother }: {
                       <span className="text-[13px]">{info.icon}</span>
                       {info.label}
                     </span>
-                    {info.detail && (
-                      <div className="text-[10px] text-[#4E6180] mt-0.5">{info.detail}</div>
+                    {info.message && (
+                      <div className="text-[10px] text-[#96A8BF] mt-0.5 leading-relaxed">{info.message}</div>
                     )}
                   </td>
                 </tr>
@@ -1291,7 +1575,6 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                             <th className="py-2 px-2.5">Item</th>
                             <th className="py-2 px-2.5">Model #</th>
                             <th className="py-2 px-2.5 text-right">Need</th>
-                            <th className="py-2 px-2.5 text-right">In Stock</th>
                             <th className="py-2 px-2.5">Inventory Status</th>
                           </tr>
                         </thead>
@@ -1303,7 +1586,6 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                                 <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
                                 <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || ci.itemNumber || '—'}</td>
                                 <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
-                                <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
                                 <td className="py-1.5 px-2.5">
                                   <span
                                     className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"
@@ -1449,6 +1731,26 @@ function BillsTab({ user }: { user: SessionUser }) {
             {/* Ready bills first */}
             {withBills.length > 0 && (
               <div className="space-y-3">
+                {/* "Kindly share with client" banner — eye-catching gold/green */}
+                <div className="rounded-xl border-2 border-[#3CB87A]/45 bg-gradient-to-r from-[#3CB87A]/12 via-[#C8922A]/10 to-[#3CB87A]/12 px-4 py-3.5 shadow-[0_0_18px_rgba(60,184,122,0.18)]">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#C8922A] to-[#E4AF4A] text-xl shadow-md">
+                      📨
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-serif text-[14px] font-bold text-[#E4AF4A]">
+                        Kindly share these bills with the client
+                      </div>
+                      <div className="text-[11.5px] text-[#EDE4D0]/90 mt-0.5 leading-relaxed">
+                        {withBills.length} challan{withBills.length === 1 ? '' : 's'} below have e-way bill &amp; invoice PDFs ready. Please download and forward them to the client so they can verify the dispatch paperwork.
+                      </div>
+                    </div>
+                    <div className="hidden sm:flex flex-col items-end gap-1 flex-shrink-0">
+                      <Badge label="READY" color="#3CB87A" />
+                      <span className="text-[10px] text-[#4E6180]">{withBills.length} pending share</span>
+                    </div>
+                  </div>
+                </div>
                 {withBills.map((c) => <BillCard key={c.id} challan={c} />)}
               </div>
             )}
@@ -2070,5 +2372,207 @@ function ReadonlyField({ label, value, accent }: { label: string; value: string;
         {value}
       </div>
     </label>
+  )
+}
+
+/* ============================================================ */
+/* Tab: Reports — CSV/Excel export                              */
+/* ============================================================ */
+
+function ReportsTab({ user }: { user: SessionUser }) {
+  const now = new Date()
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly'>('monthly')
+  const [month, setMonth] = useState(String(now.getMonth() + 1))
+  const [year, setYear] = useState(String(now.getFullYear()))
+  const [exporting, setExporting] = useState(false)
+  const [exportMsg, setExportMsg] = useState('')
+
+  // Build the dashboard URL used for the preview count.
+  // Weekly → current month (rough preview of the week's containing month).
+  // Monthly → selected month/year. Yearly → selected year.
+  const previewUrl = useMemo(() => {
+    if (period === 'yearly') return `/api/challans/dashboard?role=SALES&userId=${user.id}&year=${year}`
+    if (period === 'weekly') return `/api/challans/dashboard?role=SALES&userId=${user.id}&month=${now.getMonth() + 1}&year=${now.getFullYear()}`
+    return `/api/challans/dashboard?role=SALES&userId=${user.id}&month=${month}&year=${year}`
+  }, [period, month, year, user.id])
+
+  const { data, loading } = useFetch<DashboardData>(previewUrl, [period, month, year])
+  const challanCount = data?.total ?? 0
+
+  const periodLabel = useMemo(() => {
+    if (period === 'weekly') {
+      const day = now.getDay() || 7 // 0=Sun → 7
+      const start = new Date(now)
+      start.setDate(now.getDate() - day + 1)
+      const end = new Date(start)
+      end.setDate(start.getDate() + 6)
+      return `Week of ${start.toLocaleDateString('en-IN')} – ${end.toLocaleDateString('en-IN')}`
+    }
+    if (period === 'yearly') return `Year ${year}`
+    return `${MONTH_FULL[Number(month) - 1]} ${year}`
+  }, [period, month, year])
+
+  // Year options: last year, this year, next year
+  const yearOpts = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
+
+  const handleExport = async () => {
+    setExporting(true)
+    setExportMsg('')
+    try {
+      const params = new URLSearchParams({
+        period,
+        role: 'SALES',
+        userId: user.id,
+      })
+      if (period === 'monthly') params.set('month', month)
+      if (period === 'monthly' || period === 'yearly') params.set('year', year)
+      const url = `/api/reports/export?${params.toString()}`
+      // Trigger a download via a hidden <a download> link
+      const a = document.createElement('a')
+      a.href = url
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setExportMsg(`✓ Export started — your CSV (${challanCount} challan${challanCount === 1 ? '' : 's'}) is downloading. Opens directly in Excel.`)
+    } catch (e: unknown) {
+      setExportMsg(`✕ Export failed: ${e instanceof Error ? e.message : 'Unknown error'}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-5 border-[#C8922A]/35 bg-gradient-to-br from-[#C8922A]/10 via-[#C8922A]/4 to-transparent">
+        <SectionTitle
+          icon="📊"
+          title="Reports & Export"
+          sub="Export your challans as CSV (opens in Excel) — Sales sees only own challans"
+          right={<Badge label="SALES" color="#E4AF4A" />}
+        />
+
+        <div className="space-y-4 mt-4">
+          {/* Period selector */}
+          <div>
+            <span className="block text-[11px] text-[#96A8BF] mb-1.5 font-medium">Period</span>
+            <div className="flex flex-wrap gap-2">
+              {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-lg px-4 py-2 text-[12px] font-semibold transition-all ${
+                    period === p
+                      ? 'bg-gradient-to-r from-[#C8922A] to-[#E4AF4A] text-[#07101f] shadow-md shadow-[#C8922A]/25'
+                      : 'border border-white/10 bg-white/5 text-[#96A8BF] hover:bg-white/10 hover:text-[#EDE4D0]'
+                  }`}
+                >
+                  {p === 'weekly' ? '📅 Weekly' : p === 'monthly' ? '🗓️ Monthly' : '📆 Yearly'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Conditional selectors */}
+          {period === 'monthly' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Select
+                label="Month"
+                value={month}
+                onChange={setMonth}
+                options={MONTH_FULL.map((m, i) => ({ value: String(i + 1), label: m }))}
+              />
+              <Select
+                label="Year"
+                value={year}
+                onChange={setYear}
+                options={yearOpts.map((y) => ({ value: String(y), label: String(y) }))}
+              />
+            </div>
+          )}
+          {period === 'yearly' && (
+            <Select
+              label="Year"
+              value={year}
+              onChange={setYear}
+              options={yearOpts.map((y) => ({ value: String(y), label: String(y) }))}
+            />
+          )}
+          {period === 'weekly' && (
+            <div className="rounded-lg border border-[#4A9EE0]/25 bg-[#4A9EE0]/8 px-3 py-2 text-[11px] text-[#4A9EE0]">
+              📅 Exports the current week (Mon–Sun) — <strong>{periodLabel}</strong>
+            </div>
+          )}
+
+          {/* Preview summary card */}
+          <div className="rounded-xl border border-[#C8922A]/30 bg-[#0c1928]/70 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#C8922A]/25 to-[#E4AF4A]/15 border border-[#C8922A]/30 text-2xl flex-shrink-0">
+                📋
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-[#4E6180] font-semibold">Preview</div>
+                <div className="font-serif text-base font-bold text-[#EDE4D0]">
+                  {loading ? 'Loading preview…' : `${challanCount} challan${challanCount === 1 ? '' : 's'} will be included`}
+                </div>
+                <div className="text-[11px] text-[#96A8BF] mt-0.5">{periodLabel}</div>
+              </div>
+            </div>
+            {!loading && challanCount > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/5 grid grid-cols-3 gap-2 text-[11px]">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#4E6180]">Total Amount</div>
+                  <div className="font-serif text-[#E4AF4A] font-bold">{fmtINR(data?.totalAmount ?? 0)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#4E6180]">Advance</div>
+                  <div className="font-serif text-[#3CB87A] font-bold">{fmtINR(data?.totalAdvance ?? 0)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#4E6180]">Received</div>
+                  <div className="font-serif text-[#3CB87A] font-bold">{fmtINR(data?.totalReceived ?? 0)}</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Export button */}
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={loading || exporting}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#C8922A] to-[#E4AF4A] text-[#07101f] font-bold px-6 py-3.5 text-[14px] hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-[#C8922A]/20"
+          >
+            {exporting ? (
+              <>
+                <span className="inline-block h-4 w-4 rounded-full border-2 border-[#07101f] border-t-transparent animate-spin" />
+                Preparing export…
+              </>
+            ) : (
+              <>
+                <span className="text-lg">⬇</span>
+                Export to Excel (CSV)
+              </>
+            )}
+          </button>
+
+          {!loading && challanCount === 0 && (
+            <div className="rounded-lg border border-[#E09E3C]/30 bg-[#E09E3C]/10 px-3 py-2 text-[12px] text-[#E09E3C] text-center">
+              ⚠ No challans found for {periodLabel}. The export will contain only the header row.
+            </div>
+          )}
+          {exportMsg && (
+            <div className="rounded-lg border border-[#3CB87A]/30 bg-[#3CB87A]/10 px-3 py-2 text-[12px] text-[#3CB87A]">
+              {exportMsg}
+            </div>
+          )}
+
+          <div className="text-[10.5px] text-[#4E6180] leading-relaxed bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2">
+            💡 <strong className="text-[#96A8BF]">Note:</strong> The CSV file opens directly in Excel. It contains one row per challan with all client details, financials, items, and workflow status. A totals row appears at the bottom. The report is filtered to <strong className="text-[#96A8BF]">your challans only</strong> — Admin &amp; Owner can export everyone's.
+          </div>
+        </div>
+      </Card>
+    </div>
   )
 }

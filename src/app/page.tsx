@@ -85,6 +85,7 @@ export default function Home() {
       { id:'challans', label:'All Challans', icon:'🧾' },
       { id:'items', label:'All Items', icon:'📦' },
       { id:'messages', label:'All Messages', icon:'✉️' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     OWNER: [
       { id:'overview', label:'Overview', icon:'📊' },
@@ -92,9 +93,11 @@ export default function Home() {
       { id:'fast', label:'Fast Moving', icon:'⚡' },
       { id:'challans', label:'Challans', icon:'🧾' },
       { id:'pr', label:'Purchase Requests', icon:'📋' },
+      { id:'special', label:'Special Approvals', icon:'🚨' },
       { id:'register', label:'Stock Register', icon:'📋' },
       { id:'forecast', label:'Forecast', icon:'📈' },
       { id:'activity', label:'Activity Log', icon:'📜' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     SALES: [
       { id:'stock-check', label:'Check Stock', icon:'📦' },
@@ -103,6 +106,7 @@ export default function Home() {
       { id:'bills', label:'E-Way & Item Bill', icon:'🧾' },
       { id:'list', label:'My Challans', icon:'📋' },
       { id:'dashboard', label:'Dashboard', icon:'📊' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     ACCOUNT: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },
@@ -110,6 +114,7 @@ export default function Home() {
       { id:'partial', label:'Partial Paid', icon:'🔶' },
       { id:'fullpaid', label:'Full Paid', icon:'✅' },
       { id:'bills', label:'E-Way / Item Bill', icon:'🧾' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     COORDINATOR: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },
@@ -119,12 +124,14 @@ export default function Home() {
       { id:'vehicle', label:'Vehicle Arrangement', icon:'🚛' },
       { id:'review', label:'Final Review', icon:'📸' },
       { id:'bills', label:'Latest Bills', icon:'🧾' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     SUPPORT: [
       { id:'dashboard', label:'Dashboard', icon:'📊' },
       { id:'dispatch', label:'Client Dispatch', icon:'🚚' },
       { id:'tracking', label:'Send Tracking', icon:'📱' },
       { id:'review', label:'Client Reviews', icon:'⭐' },
+      { id:'reports', label:'Reports', icon:'📑' },
     ],
     IT_MANAGER: [
       { id:'items', label:'Item Master', icon:'📦' },

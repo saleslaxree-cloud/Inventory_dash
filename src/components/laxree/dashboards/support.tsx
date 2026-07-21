@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useFetch, apiPost, apiPatch } from '../use-fetch'
 import { Badge, Btn, Card, EmptyState, Input, Modal, SectionTitle, Select, StatCard, Textarea } from '../ui'
 import { fmtINR, fmtDate, STATUS_COLORS, SessionUser } from '../types'
+import { ReportsTab } from './owner'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -167,6 +168,7 @@ export function SupportDashboard({ activeTab }: { user: SessionUser; activeTab: 
       {activeTab === 'dispatch' && <DispatchTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
       {activeTab === 'tracking' && <TrackingTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
       {activeTab === 'review' && <ReviewTab refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
+      {activeTab === 'reports' && <ReportsTab role="SUPPORT" />}
     </div>
   )
 }
@@ -274,30 +276,61 @@ function DispatchTab({ refreshKey, onChanged }: { refreshKey: number; onChanged:
         <StatCard label="Total Active" value={allDispatched.length} accent="#E4AF4A" icon="🚚" sub="On support's plate" />
       </div>
 
-      {/* Newly dispatched section */}
-      <Card className="p-4">
-        <SectionTitle
-          icon="🆕"
-          title="Newly Dispatched"
-          sub="Just handed off by Coordinator — send tracking link next"
-          right={<Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>}
-        />
-        {newlyDispatched.length === 0 ? (
-          <EmptyState icon="✅" title="No new dispatches" sub="Newly dispatched challans from Coordinator will appear here" />
-        ) : (
-          <DispatchList challans={newlyDispatched} onSelect={setSel} />
-        )}
-      </Card>
+      {/* Dispatch & Transit cards — when both are empty, vertically center the empty
+          states so the page does not leave a large blank gap on large screens. */}
+      {allDispatched.length === 0 ? (
+        <Card className="p-6 min-h-[55vh] flex flex-col justify-center">
+          <SectionTitle
+            icon="🚚"
+            title="Client Dispatch"
+            sub="Newly dispatched challans from Coordinator appear here — send tracking links next"
+            right={<Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>}
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1 items-stretch">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[#3CB87A]/25 bg-[#3CB87A]/[0.04] p-6 text-center min-h-[180px]">
+              <div className="text-4xl mb-2 opacity-70">✅</div>
+              <div className="text-sm font-medium text-[#3CB87A]">No new dispatches</div>
+              <div className="text-[11px] text-[#96A8BF] mt-1 max-w-[260px]">
+                Newly dispatched challans from Coordinator will appear here. Send tracking links to move them to "In Transit".
+              </div>
+            </div>
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[#E09E3C]/25 bg-[#E09E3C]/[0.04] p-6 text-center min-h-[180px]">
+              <div className="text-4xl mb-2 opacity-70">📭</div>
+              <div className="text-sm font-medium text-[#E09E3C]">None in transit</div>
+              <div className="text-[11px] text-[#96A8BF] mt-1 max-w-[260px]">
+                Once you send a tracking link to a client, the challan moves here automatically.
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <>
+          {/* Newly dispatched section */}
+          <Card className="p-4">
+            <SectionTitle
+              icon="🆕"
+              title="Newly Dispatched"
+              sub="Just handed off by Coordinator — send tracking link next"
+              right={<Btn size="sm" variant="ghost" onClick={onChanged}>↻ Refresh</Btn>}
+            />
+            {newlyDispatched.length === 0 ? (
+              <EmptyState icon="✅" title="No new dispatches" sub="Newly dispatched challans from Coordinator will appear here" />
+            ) : (
+              <DispatchList challans={newlyDispatched} onSelect={setSel} />
+            )}
+          </Card>
 
-      {/* In transit section */}
-      <Card className="p-4">
-        <SectionTitle icon="📍" title="In Transit" sub="Tracking link already sent to client" />
-        {inTransit.length === 0 ? (
-          <EmptyState icon="📭" title="None in transit" sub="Once you send a tracking link, the challan moves here" />
-        ) : (
-          <DispatchList challans={inTransit} onSelect={setSel} />
-        )}
-      </Card>
+          {/* In transit section */}
+          <Card className="p-4">
+            <SectionTitle icon="📍" title="In Transit" sub="Tracking link already sent to client" />
+            {inTransit.length === 0 ? (
+              <EmptyState icon="📭" title="None in transit" sub="Once you send a tracking link, the challan moves here" />
+            ) : (
+              <DispatchList challans={inTransit} onSelect={setSel} />
+            )}
+          </Card>
+        </>
+      )}
 
       {/* Detail modal */}
       {sel && <DispatchDetailModal challan={sel} onClose={() => setSel(null)} />}
