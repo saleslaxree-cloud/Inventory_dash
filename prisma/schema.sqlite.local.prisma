@@ -1,0 +1,451 @@
+// LaxRee Inventory Management System v4 — Multi-Role Workflow
+// Roles: ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "sqlite"
+  url       = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════
+// USERS & AUTH
+// ═══════════════════════════════════════════
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String   // Department name (e.g. "Sales Department") — Owner = "Ashish Agarwal"
+  role          String   // ADMIN | OWNER | SALES | ACCOUNT | COORDINATOR | SUPPORT | IT_MANAGER
+  phone         String?
+  active        Boolean  @default(true)
+  forcePasswordChange Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  challans          Challan[]
+  purchaseRequests  PurchaseRequest[]
+  prSigned          PurchaseRequest[] @relation("PRSigner")
+  messagesSent      Message[]         @relation("MessageSender")
+  workflowActions   WorkflowStage[]
+  supportChecklists SupportChecklist[]
+  inwardEntries     InwardLog[]
+  outwardEntries    OutwardLog[]
+  stockHolds        StockHold[]
+  accountVerified   Challan[]         @relation("AccountVerifier")
+  coordinatorApproved Challan[]      @relation("CoordinatorApprover")
+  vehicleArranged   Challan[]         @relation("VehicleArranger")
+  billsUploaded     Challan[]         @relation("BillsUploader")
+  auditedItems      ChallanItem[]     @relation("ItemAuditor")
+  warehouseItems    ChallanItem[]     @relation("WarehouseWorker")
+}
+
+// ═══════════════════════════════════════════
+// MASTER INVENTORY (managed by IT Manager / Admin)
+// ═══════════════════════════════════════════
+model Item {
+  id           String   @id @default(cuid())
+  category     String
+  itemName     String
+  model        String
+  colour       String?
+  unit         String   @default("PCS")
+  currentStock Int      @default(0)
+  minStock     Int      @default(5)
+  fastMoving   Boolean  @default(false)
+  inwardCount  Int      @default(0)
+  outwardCount Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  challanItems ChallanItem[]
+  prItems      PurchaseRequestItem[]
+  inwardLogs   InwardLog[]
+  outwardLogs  OutwardLog[]
+  stockHolds   StockHold[]
+}
+
+// ═══════════════════════════════════════════
+// CHALLANS (uploaded by Sales, analyzed by system)
+// ═══════════════════════════════════════════
+model Challan {
+  id                  String   @id @default(cuid())
+  challanNumber       String   @unique
+  quotationNumber     String?
+  clientName          String
+  clientCity          String
+  clientMobile        String?
+  clientLocation      String?
+  expectedDeliveryDate DateTime?
+  date                DateTime @default(now())
+
+  // Billing & shipping details
+  billingName         String?
+  billingAddress      String?
+  shippingAddress     String?
+  gstNumber           String?
+
+  // Financial breakdown
+  amountWithoutGst    Float    @default(0)
+  amountWithGst       Float    @default(0)
+  gstPercentage       Float    @default(18)
+  amountTotal         Float    @default(0)
+  amountAdvance       Float    @default(0)
+  amountReceived      Float    @default(0)
+  packingCharge       Float    @default(0)
+  shippingCharge      Float    @default(0)
+  freightAmount       Float    @default(0)
+  paymentType         String   @default("ADVANCE")
+  paymentStatus       String   @default("PENDING")
+  paymentMode         String?  // FULL | PARTIAL
+
+  // Account verification
+  accountVerified     Boolean  @default(false)
+  accountVerifiedById String?
+  accountVerifiedBy   User?    @relation("AccountVerifier", fields: [accountVerifiedById], references: [id])
+  accountVerifiedAt   DateTime?
+  accountRejected     Boolean  @default(false)
+  accountRejectedById String?
+  accountRejectedAt   DateTime?
+  accountRejectReason String?
+
+  // Coordinator audit & warehouse
+  coordinatorApproved Boolean  @default(false)
+  coordinatorApprovedById String?
+  coordinatorApprovedBy   User? @relation("CoordinatorApprover", fields: [coordinatorApprovedById], references: [id])
+  coordinatorApprovedAt   DateTime?
+  warehouseCompleted  Boolean  @default(false)
+  warehouseCompletedAt DateTime?
+  vehicleArranged     Boolean  @default(false)
+  vehicleArrangedAt   DateTime?
+  vehicleArrangedById String?
+  vehicleArrangedBy   User?    @relation("VehicleArranger", fields: [vehicleArrangedById], references: [id])
+
+  // E-way bill & invoice (uploaded by Account)
+  ewayBillNo          String?
+  ewayBillFile        String?
+  invoiceNo           String?
+  invoiceFile         String?
+  billsUploadedAt     DateTime?
+  billsUploadedById   String?
+  billsUploadedBy     User?    @relation("BillsUploader", fields: [billsUploadedById], references: [id])
+
+  // Dispatch & tracking
+  dispatchDate        DateTime?
+  trackingLink        String?
+  transporterName     String?
+  vehicleNumber       String?
+  dispatchImages      String?  // JSON array of image paths
+
+  // WhatsApp & client communication
+  whatsappSent        Boolean  @default(false)
+  whatsappSentAt      DateTime?
+  emailSent           Boolean  @default(false)
+  emailSentAt         DateTime?
+
+  // Client review
+  reviewRequested     Boolean  @default(false)
+  reviewRequestedAt   DateTime?
+  reviewReceived      String?
+  reviewRating        Int?
+  reviewReceivedAt    DateTime?
+
+  // ── Special dispatch approval (partial-payment workflow)
+  // When a challan has PARTIAL payment and is otherwise ready to dispatch,
+  // the Coordinator can request "special approval" to dispatch despite the
+  // pending balance. The Owner receives an urgent popup with the client's
+  // overview and can approve or reject. Until then, dispatch is blocked.
+  specialDispatchRequested   Boolean   @default(false)
+  specialDispatchRequestedAt DateTime?
+  specialDispatchRequestedById String?
+  specialDispatchReason      String?
+  specialDispatchApproved    Boolean   @default(false)
+  specialDispatchApprovedAt  DateTime?
+  specialDispatchApprovedById String?
+  specialDispatchRejected    Boolean   @default(false)
+  specialDispatchRejectedAt  DateTime?
+
+  // PDF uploaded by sales
+  pdfFileName         String?
+  aiAnalysisData      String?  // JSON: AI-extracted overview
+
+  status              String   @default("UPLOADED")
+
+  uploadedById        String
+  uploadedBy          User     @relation(fields: [uploadedById], references: [id])
+
+  challanItems        ChallanItem[]
+  workflowStages      WorkflowStage[]
+  supportChecklist    SupportChecklist?
+  messages            Message[]
+  purchaseRequests    PurchaseRequest[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model ChallanItem {
+  id          String   @id @default(cuid())
+  challanId   String
+  challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  category    String?
+  itemName    String
+  itemNumber  String?
+  model       String?
+  colour      String?
+  quantity    Int      @default(1)
+  unitPrice   Float    @default(0)
+  totalPrice  Float    @default(0)
+
+  // Stock status (auto-checked on upload)
+  status      String   @default("PENDING")  // MATCHED | NOT_FOUND | WRONG_MODEL
+  stockStatus String   @default("PENDING")  // AVAILABLE | ON_HOLD | WILL_BE_AVAILABLE
+  stockRemark String?
+  expectedAvailabilityDays Int?
+  availableQty Int?
+
+  matchedItemId String?
+  matchedItem Item?    @relation(fields: [matchedItemId], references: [id])
+
+  correctedItemId String?
+  corrected       Boolean @default(false)
+
+  // Coordinator audit (per-item approve/reject)
+  auditStatus    String   @default("PENDING")  // PENDING | APPROVED | REJECTED | ON_HOLD
+  auditNotes     String?
+  auditedAt      DateTime?
+  auditedById    String?
+  auditedBy      User?    @relation("ItemAuditor", fields: [auditedById], references: [id])
+
+  // Warehouse workflow (per-item: quality check → packaging → done)
+  warehouseStatus String  @default("PENDING")  // PENDING | QUALITY_CHECK | PACKAGING | DONE
+  warehouseNotes  String?
+  warehouseDoneAt DateTime?
+  warehouseDoneById String?
+  warehouseDoneBy   User? @relation("WarehouseWorker", fields: [warehouseDoneById], references: [id])
+
+  // Dispatch image (per-item, uploaded by coordinator in final review)
+  dispatchImagePath String?
+
+  createdAt   DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// PURCHASE REQUESTS (auto-raised by Owner)
+// ═══════════════════════════════════════════
+model PurchaseRequest {
+  id          String   @id @default(cuid())
+  prNumber    String   @unique
+  raisedByName String  @default("LaxRee Hotel")
+  raisedById  String
+  raisedBy    User     @relation(fields: [raisedById], references: [id])
+
+  challanId   String?
+  challan     Challan? @relation(fields: [challanId], references: [id])
+
+  status      String   @default("DRAFT")
+  // DRAFT | PENDING_APPROVAL | SIGNED | PROCESSED | PRINTED | REJECTED
+  notes       String?
+
+  // ── Auto-raised PR (when Sales uploads a challan with not-available items)
+  // The system auto-raises a PR in Laxree's name; the Owner just checks,
+  // signs and processes it because the client has already paid in advance.
+  autoRaised      Boolean  @default(false)
+  priority        String   @default("NORMAL")  // URGENT | NORMAL
+  advanceReceived Float    @default(0)          // advance paid by client (₹)
+  clientName      String?
+  challanNumber   String?
+  reason          String?  // why it was raised (e.g. "Out of stock")
+
+  // ── Owner sign-off
+  signedById      String?
+  signedBy        User?    @relation("PRSigner", fields: [signedById], references: [id])
+  signedByName    String?
+  signedAt        DateTime?
+  processedAt     DateTime?
+
+  items       PurchaseRequestItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PurchaseRequestItem {
+  id          String   @id @default(cuid())
+  prId        String
+  pr          PurchaseRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+  itemId      String?
+  item        Item?    @relation(fields: [itemId], references: [id])
+  itemName    String
+  model       String?
+  quantity    Int
+  notes       String?
+}
+
+// ═══════════════════════════════════════════
+// WORKFLOW STAGES / CHECKLIST (per challan)
+// ═══════════════════════════════════════════
+model WorkflowStage {
+  id          String   @id @default(cuid())
+  challanId   String
+  challan     Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  stage       String
+  assignedRole String
+  status      String   @default("PENDING")
+  data        String   @default("{}")
+  notes       String?
+
+  doneById    String?
+  doneBy      User?    @relation(fields: [doneById], references: [id])
+  doneAt      DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// MESSAGES (between roles)
+// ═══════════════════════════════════════════
+model Message {
+  id          String   @id @default(cuid())
+  challanId   String?
+  challan     Challan? @relation(fields: [challanId], references: [id])
+
+  fromRole    String
+  toRole      String
+  fromUserId  String
+  fromUser    User     @relation("MessageSender", fields: [fromUserId], references: [id])
+
+  subject     String
+  body        String
+  attachments String?
+  read        Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// SUPPORT TEAM DISPATCH CHECKLIST
+// ═══════════════════════════════════════════
+model SupportChecklist {
+  id                    String   @id @default(cuid())
+  challanId             String   @unique
+  challan               Challan  @relation(fields: [challanId], references: [id], onDelete: Cascade)
+
+  clientName            String
+  mobileNo              String?
+  location              String?
+  invoiceNo             String?
+  challanNo             String?
+  noOfBoxes             Int?
+  transporterName       String?
+  vehicleTrackingNo     String?
+  driverDetails         String?
+  dispatchDate          DateTime?
+  leadTime              String?
+
+  acknowledgementMessage String?
+  successfulDeliveryMessage String?
+  googleReview          String?
+  generalFeedback       String?
+
+  createdById           String
+  createdBy             User     @relation(fields: [createdById], references: [id])
+
+  status                String   @default("DRAFT")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// INVENTORY TRANSACTIONS (Inward / Outward / Hold)
+// Ported from original HTML inventory system
+// ═══════════════════════════════════════════
+
+// Inward = stock received from vendor
+model InwardLog {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  itemId      String
+  item        Item     @relation(fields: [itemId], references: [id])
+  category    String
+  itemName    String
+  model       String
+  colour      String?
+  quantity    Int
+  unit        String   @default("PCS")
+  vendor      String?
+  billNo      String?
+  remarks     String?
+  enteredById String
+  enteredBy   User     @relation(fields: [enteredById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+// Outward = stock dispatched to client (linked to challan)
+model OutwardLog {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id])
+  category      String
+  itemName      String
+  model         String
+  colour        String?
+  quantity      Int
+  unit          String   @default("PCS")
+  clientName    String
+  challanNumber String?
+  billNumber    String?
+  remarks       String?
+  enteredById   String
+  enteredBy     User     @relation(fields: [enteredById], references: [id])
+  challanId     String?
+  createdAt     DateTime @default(now())
+}
+
+// StockHold = reserve stock for a client (against advance payment)
+model StockHold {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id])
+  category      String
+  itemName      String
+  model         String
+  colour        String?
+  holdQty       Int
+  clientName    String
+  advanceAmount Float    @default(0)
+  remarks       String?
+  status        String   @default("ACTIVE") // ACTIVE | RELEASED | CONVERTED
+  heldById      String
+  heldBy        User     @relation(fields: [heldById], references: [id])
+  challanId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// NOTIFICATIONS (real-time popups per role)
+// ═══════════════════════════════════════════
+model Notification {
+  id          String   @id @default(cuid())
+  toRole      String                       // ACCOUNT | OWNER | SALES | COORDINATOR | SUPPORT | IT_MANAGER | ADMIN | '*'
+  fromRole    String?                      // Role that triggered the notification
+  fromUserId  String?
+  type        String                       // NEW_CHALLAN | PAYMENT_VERIFIED | COORDINATOR_APPROVED | WAREHOUSE_DONE | VEHICLE_ARRANGED | DISPATCHED | BILLS_UPLOADED | REJECTED | INFO
+  title       String
+  body        String
+  icon        String   @default("🔔")
+  challanId   String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([toRole, read, createdAt])
+}
