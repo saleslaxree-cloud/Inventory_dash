@@ -2029,3 +2029,30 @@ Stage Summary:
 - MyChallans table fully reverted to original (In Stock column + numbers in stockStatusInfo details).
 - Check Stock section unchanged from previous commit — Required Qty column after Colour, no stock numbers disclosed.
 - Scope discipline restored: only the Check Stock section has the no-numbers logic, as the user originally requested.
+
+---
+Task ID: prisma-schema-provider-fix
+Agent: main
+Task: Fix Prisma error "Error validating datasource db: the URL must start with the protocol file:" — caused by commit 1b14408 accidentally changing provider from postgresql to sqlite.
+
+Work Log:
+- Root cause: commit 1b14408 changed prisma/schema.prisma provider from "postgresql" to "sqlite" and removed directUrl. On Vercel, DATABASE_URL is a Neon postgres URL, but Prisma with provider=sqlite expects a file: URL → every API route broke with the validation error.
+- Fix 1 (Vercel): restored prisma/schema.prisma to provider="postgresql" + directUrl=env("DATABASE_URL_UNPOOLED"). Committed as 04b2302 and pushed — this fixes Vercel production immediately.
+- Fix 2 (local dev): local .env has DATABASE_URL=file:/home/z/my-project/db/custom.db (sqlite). With the postgres schema, local Prisma client couldn't query the sqlite DB → login returned 401 (findUnique returned null).
+  * Created prisma/schema.sqlite.local.prisma — a sqlite variant of the schema for local dev only.
+  * Updated package.json db:* scripts (db:generate, db:push, db:migrate, db:reset) to use --schema=prisma/schema.sqlite.local.prisma.
+  * Kept postinstall using the default schema.prisma (postgresql) so Vercel's build generates the correct postgres client.
+  * Ran bun run db:generate (sqlite client) → bun run db:push --accept-data-loss → bun run db:seed → 7 users + 293 items + sample challan + 10 PRs seeded.
+- Restored accidentally-modified files (src/app/api/challans/upload/route.ts was deleted by a stray git op; restored from HEAD).
+
+Verification:
+- curl POST /api/auth/login owner@laxree.com/laxree123 → HTTP 200 with user JSON ✓
+- Agent Browser: opened localhost:3000, clicked Sign In → Owner dashboard loaded with Overview, System Health, Action Needed, Stock Distribution sections ✓
+- bun run lint → 0 errors.
+- Vercel: push 88d0925 triggers rebuild; postinstall runs prisma generate (postgres) + prisma db push (Neon) → production will work again.
+
+Stage Summary:
+- Two commits pushed: 04b2302 (schema provider fix for Vercel) + 88d0925 (sqlite local dev schema + scripts).
+- Vercel production: schema.prisma = postgresql, matches DATABASE_URL (Neon) → error resolved.
+- Local dev: prisma/schema.sqlite.local.prisma = sqlite, db:* scripts use it, db/custom.db seeded with full data → local login + all APIs working.
+- postinstall unchanged (uses default schema.prisma = postgres) → Vercel build generates postgres client correctly.
