@@ -144,5 +144,33 @@ Please proceed with coordinator audit → warehouse → vehicle arrangement → 
     icon: '✅',
   })
 
+  // ── PARTIAL PAYMENT: extra follow-up action item for Sales ──
+  // When Account verifies a PARTIAL payment, Sales must chase the client for
+  // the balance. This is IN ADDITION to the PAYMENT_VERIFIED notification above
+  // (status update) — this one is an action item with its own orange popup.
+  if (newStatus === 'PARTIAL') {
+    const balanceAmt = challan.amountTotal - amtReceived
+    const partialBody =
+      `Partial payment verified — please follow up with the client for the balance.\n\n` +
+      `Challan No: ${challan.challanNumber}\n` +
+      `Client: ${challan.clientName}\n` +
+      `Total Amount: ₹${challan.amountTotal.toLocaleString('en-IN')}\n` +
+      `Received: ₹${amtReceived.toLocaleString('en-IN')}\n` +
+      `Balance Pending: ₹${balanceAmt.toLocaleString('en-IN')}\n` +
+      (challan.clientMobile ? `Client Mobile: ${challan.clientMobile}\n` : '') +
+      `\nPlease ask the client to fulfill the full payment.`
+
+    await notify({
+      toRole: 'SALES',
+      fromRole: 'ACCOUNT',
+      fromUserId: user.id,
+      challanId: id,
+      type: 'PARTIAL_PAYMENT_PENDING',
+      title: 'Partial Payment — Follow Up Required',
+      body: partialBody,
+      icon: '⚠️',
+    })
+  }
+
   return NextResponse.json({ ok: true, message: 'Payment verified, sent to Coordinator' })
 }

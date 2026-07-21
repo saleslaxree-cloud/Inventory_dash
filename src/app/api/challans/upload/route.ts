@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/upload
 // Sales uploads a new challan. The server:
@@ -324,6 +325,35 @@ export async function POST(req: NextRequest) {
     })
   } catch {
     // Non-fatal — polling will still deliver the notification
+  }
+
+  // ── 5c. If PARTIAL payment, remind Sales to chase the balance ──
+  // Sales uploaded a challan with only a partial advance. The Account team
+  // will verify, but Sales should start following up with the client
+  // IMMEDIATELY — not wait for verification. This notification shows up in
+  // the Sales notification panel as a to-do with an orange popup.
+  if (paymentStatus === 'PARTIAL') {
+    const balanceAmt = amountTotal - amountAdvance
+    const partialBody =
+      `Partial payment uploaded — follow up with the client for the balance.\n\n` +
+      `Challan No: ${challanNumber}\n` +
+      `Client: ${clientName}\n` +
+      `Total Amount: ₹${amountTotal.toLocaleString('en-IN')}\n` +
+      `Advance Received: ₹${amountAdvance.toLocaleString('en-IN')}\n` +
+      `Balance Pending: ₹${balanceAmt.toLocaleString('en-IN')}\n` +
+      (challan.clientMobile ? `Client Mobile: ${challan.clientMobile}\n` : '') +
+      `\nPlease ask the client to fulfill the full payment.`
+
+    await notify({
+      toRole: 'SALES',
+      fromRole: 'SALES',
+      fromUserId: user.id,
+      challanId: challan.id,
+      type: 'PARTIAL_PAYMENT_PENDING',
+      title: 'Partial Payment Uploaded — Follow Up',
+      body: partialBody,
+      icon: '⚠️',
+    })
   }
 
   // ── 6. Stock-hold for matched AVAILABLE items when advance is paid ─

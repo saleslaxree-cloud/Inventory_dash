@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { notify } from '@/lib/notify'
 
 // POST /api/challans/[id]/special-dispatch/approve
 // Owner approves or rejects a Coordinator's special-dispatch request for a
@@ -40,8 +41,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const updated = await db.challan.update({ where: { id }, data })
 
-  // Notify the Coordinator (and Sales) of the decision
+  // Notify the Coordinator (and Sales) of the decision.
+  // We use the shared `notify()` helper so the DB record is created AND the
+  // socket.io push fires in one shot — previously the popup was only appearing
+  // via the 5s polling fallback (noticeably delayed).
   const decision = action === 'approve' ? 'APPROVED' : 'REJECTED'
+  const notifType = action === 'approve' ? 'SPECIAL_DISPATCH_APPROVED' : 'SPECIAL_DISPATCH_REJECTED'
+  const notifTitle = `${action === 'approve' ? '✅' : '🚫'} Special Dispatch ${decision} — ${challan.challanNumber}`
+  const notifIcon = action === 'approve' ? '✅' : '🚫'
   const notifBody =
     `Owner has ${decision.toLowerCase()} the special dispatch request for challan ${challan.challanNumber}.\n\n` +
     `Client: ${challan.clientName}\n` +
@@ -49,32 +56,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     `Decision: ${decision}\n` +
     (notes ? `Owner's note: ${notes}` : '')
 
-  await db.notification.create({
-    data: {
-      toRole: 'COORDINATOR',
-      fromRole: user.role,
-      fromUserId: user.id,
-      type: action === 'approve' ? 'SPECIAL_DISPATCH_APPROVED' : 'SPECIAL_DISPATCH_REJECTED',
-      title: `${action === 'approve' ? '✅' : '🚫'} Special Dispatch ${decision} — ${challan.challanNumber}`,
-      body: notifBody,
-      icon: action === 'approve' ? '✅' : '🚫',
-      challanId: challan.id,
-      read: false,
-    },
+  await notify({
+    toRole: 'COORDINATOR',
+    fromRole: user.role,
+    fromUserId: user.id,
+    challanId: challan.id,
+    type: notifType,
+    title: notifTitle,
+    body: notifBody,
+    icon: notifIcon,
   })
 
-  // Also notify Sales
-  await db.notification.create({
+  // Also notify Sales (so the rep knows whether dispatch will proceed)
+  await notify({
+    toRole: 'SALES',
+    fromRole: user.role,
+    fromUserId: user.id,
+    challanId: challan.id,
+    type: notifType,
+    title: notifTitle,
+    body: notifBody,
+    icon: notifIcon,
+  })
+
+  // ── Inline message on the challan thread (audit trail) ──
+  // Mirrors what the special-dispatch request route does so the Owner's
+  // decision is recorded permanently on the challan message thread.
+  await db.message.create({
     data: {
-      toRole: 'SALES',
-      fromRole: user.role,
-      fromUserId: user.id,
-      type: action === 'approve' ? 'SPECIAL_DISPATCH_APPROVED' : 'SPECIAL_DISPATCH_REJECTED',
-      title: `${action === 'approve' ? '✅' : '🚫'} Special Dispatch ${decision} — ${challan.challanNumber}`,
-      body: notifBody,
-      icon: action === 'approve' ? '✅' : '🚫',
       challanId: challan.id,
-      read: false,
+      fromRole: user.role,
+      toRole: 'COORDINATOR',
+      fromUserId: user.id,
+      subject: `Special dispatch ${decision.toLowerCase()} — ${challan.challanNumber}`,
+      body:
+        `Owner ${user.name} has ${decision.toLowerCase()} the special dispatch request for challan ${challan.challanNumber} (client: ${challan.clientName}). ` +
+        `Total: ₹${challan.amountTotal.toLocaleString('en-IN')}, received: ₹${challan.amountReceived.toLocaleString('en-IN')}, balance: ₹${(challan.amountTotal - challan.amountReceived).toLocaleString('en-IN')}.` +
+        (notes ? ` Owner's note: ${notes}` : '') +
+        (action === 'approve'
+          ? ' Coordinator may now proceed with vehicle arrangement and dispatch.'
+          : ' Dispatch remains blocked — please follow up with the client for the balance payment.'),
     },
   })
 

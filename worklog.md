@@ -2133,3 +2133,138 @@ Stage Summary:
 - Address extraction: fixed regex to allow multiline values (`[\s\S]+?`) + comprehensive stop labels + shipping→billing fallback. Both `billingAddress` and `shippingAddress` now auto-extract from Laxree challan PDFs.
 - Category "not in master" bug: fixed on BOTH server (always copy `matched.category` to ChallanItem when MATCHED) and client (auto-fetch matches by itemNumber/model first, mirroring the server). The "not in master" hint now correctly shows ONLY for genuinely not-found items.
 - No schema changes, no `db.ts`/`package.json` changes. Lint clean, dev server compiles clean, all API tests pass.
+
+---
+Task ID: fix-notifications-backend
+Agent: backend-fix-agent (Z.ai Code)
+Task: Fix backend notification flows — (1) special-dispatch approve route use notify() + add audit-trail message, (2) verify-payment route send PARTIAL_PAYMENT_PENDING follow-up to Sales on PARTIAL, (3) notification provider add PARTIAL_PAYMENT_PENDING type (orange color, action button, 25s duration), (4) upload route also notify Sales on PARTIAL upload.
+
+Work Log:
+- Read /home/z/my-project/worklog.md tail (prior context: Laxree IMS Next.js 16 + Prisma + sqlite, 7 roles, socket.io notify mini-service on port 3003, shared `notify()` helper at `src/lib/notify.ts` already used by upload/verify-payment/etc).
+- Read `src/lib/notify.ts` — confirmed signature: `notify({ toRole, fromRole?, fromUserId?, challanId?, type, title, body, icon? })` — creates Notification DB record AND fire-and-forget POSTs to `http://127.0.0.1:3003/emit` for socket.io broadcast. Never throws. Import path: `@/lib/notify`.
+- Read `src/app/api/challans/[id]/special-dispatch/route.ts` (request side) to mirror its `db.message.create` audit-trail pattern (lines 105-114) for the approve side.
+
+Task 1 — `src/app/api/challans/[id]/special-dispatch/approve/route.ts` (rewrote):
+- Added `import { notify } from '@/lib/notify'`.
+- Hoisted common fields (notifType / notifTitle / notifIcon / notifBody) out of the two inline `db.notification.create` blocks.
+- Replaced BOTH inline `db.notification.create` calls (toRole COORDINATOR + toRole SALES) with `await notify({...})` calls — same type ('SPECIAL_DISPATCH_APPROVED' | 'SPECIAL_DISPATCH_REJECTED'), title, body, icon, fromRole, fromUserId, challanId. notify() handles DB insert + socket.io push in one shot (previously popup was delayed ~5s by polling fallback only).
+- Added an inline `db.message.create` for the audit trail (mirrors special-dispatch/route.ts): fromRole=user.role, toRole='COORDINATOR', subject=`Special dispatch <decision> — <challanNumber>`, body includes Owner name, decision, challan/client, total/received/balance amounts, Owner's note (if any), and a next-step sentence ("Coordinator may now proceed with vehicle arrangement and dispatch." vs "Dispatch remains blocked — please follow up with the client for the balance payment.").
+
+Task 2 — `src/app/api/challans/[id]/verify-payment/route.ts`:
+- After the existing PAYMENT_VERIFIED → SALES `notify()` call, added `if (newStatus === 'PARTIAL')` block that fires an ADDITIONAL `notify()` to SALES with:
+  - type: 'PARTIAL_PAYMENT_PENDING'
+  - title: 'Partial Payment — Follow Up Required'
+  - icon: '⚠️'
+  - toRole: 'SALES', fromRole: 'ACCOUNT', fromUserId, challanId
+  - body: structured multi-line (`Partial payment verified — please follow up...\n\nChallan No / Client / Total Amount / Received / Balance Pending / Client Mobile (if present)\n\nPlease ask the client to fulfill the full payment.`) so the provider's `parseBody()` renders it as key/value rows.
+- Existing PAYMENT_VERIFIED notification kept intact (status update vs action item).
+- When newStatus === 'PAID', the if-block is skipped — no PARTIAL_PAYMENT_PENDING sent (per task spec).
+
+Task 3 — `src/components/laxree/notification-provider.tsx`:
+- Added `PARTIAL_PAYMENT_PENDING` to `NOTIF_COLORS` map with orange color `{ border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' }` (matches the requested #E09E3C and the existing VEHICLE_ARRANGED / DISPATCHED orange palette).
+- Added `case 'PARTIAL_PAYMENT_PENDING': return { label: 'View My Challans', icon: '📋', tab: 'mychallans' }` to the `getAction()` switch — the action button dispatches `laxree:notification-action` CustomEvent with `{ tab: 'mychallans' }` (already wired via handleAction).
+- Replaced the boolean `isUrgent` + binary `DURATION` (was 30s/20s) with a 3-tier duration system:
+  - 30s — PR_RAISED_URGENT, SPECIAL_DISPATCH_REQUEST (critical)
+  - 25s — PARTIAL_PAYMENT_PENDING (urgent action item, per task spec)
+  - 20s — everything else
+  - `isUrgent` now returns true for all three so the "⚠ Urgent Action Required" badge + ping animation fire for partial-payment follow-ups too.
+
+Task 4 — `src/app/api/challans/upload/route.ts`:
+- Added `import { notify } from '@/lib/notify'`.
+- After the existing NEW_CHALLAN → ACCOUNT notification + socket.io push block, added `if (paymentStatus === 'PARTIAL')` block that fires a `notify()` to SALES with:
+  - type: 'PARTIAL_PAYMENT_PENDING'
+  - title: 'Partial Payment Uploaded — Follow Up'
+  - icon: '⚠️'
+  - toRole: 'SALES', fromRole: 'SALES' (system-generated reminder), fromUserId = uploader's id, challanId = newly-created challan
+  - body: structured multi-line (`Partial payment uploaded — follow up...\n\nChallan No / Client / Total Amount / Advance Received / Balance Pending / Client Mobile (if present)\n\nPlease ask the client to fulfill the full payment.`).
+- This means Sales gets the to-do in their notification panel IMMEDIATELY on upload (not waiting for Account verification).
+
+Verification:
+- `bun run lint` → 0 errors (only the banner `$ eslint .` printed, no warnings).
+- Dev server compiled cleanly (`✓ Compiled in 405ms`).
+- Live curl test: logged in as `account@laxree.com`, picked PARTIAL challan LC-JPRL/26-27/0008 (id `cmruhtdma00cfrrudnj5s1y0c`, total ₹2,85,000, advance ₹1,00,000), POSTed `/api/challans/{id}/verify-payment` with `{ verified: true, receivedAmount: 100000 }` → 200 OK. Then logged in as `sales@laxree.com`, GET `/api/notifications?limit=30` showed BOTH:
+  1. `PAYMENT_VERIFIED` (green) — "✅ Payment Verified — Payment for your challan LC-JPRL/26-27/0008 (P HOSPITALITY) has been verified by Account Department..."
+  2. `PARTIAL_PAYMENT_PENDING` (orange) — "Partial Payment — Follow Up Required — ...Challan No: LC-JPRL/26-27/0008 / Client: P HOSPITALITY / Total: ₹2,85,000 / Received: ₹1,00,000 / Balance Pending: ₹1,85,000 / Client Mobile: +91 99100 12345 / Please ask the client to fulfill the full payment."
+  - Both notifications had the same `challanId` and `createdAt` timestamp (within 4ms of each other), confirming they fired in sequence in the same request handler.
+
+Stage Summary:
+- All 4 tasks complete, lint clean (0 errors), dev server compiles clean, live curl test confirms PARTIAL_PAYMENT_PENDING notification is correctly created with full structured body (challan number, client name, total/received/balance, client mobile) IN ADDITION to the existing PAYMENT_VERIFIED notification, delivered to SALES role.
+- Special-dispatch approve route now uses shared `notify()` helper (instant socket.io push, no more 5s polling delay) and writes an audit-trail `db.message.create` row to the challan thread (previously only the request side did this).
+- PARTIAL_PAYMENT_PENDING notification type fully wired through backend → DB → socket → frontend provider (orange color, "📋 View My Challans" action button → mychallans tab, 25s popup duration, urgent badge).
+- No changes to schema, db.ts, package.json, or coordinator/sales frontend files (as constrained).
+- Sales now receives the partial-payment follow-up to-do on TWO trigger points: immediately on their own upload (self-reminder) AND on Account verification (Account-driven follow-up), each with a clear structured body including client mobile for quick follow-up.
+
+---
+
+## Task ID: simplify-warehouse-ui
+**Agent:** Coordinator Warehouse UI Simplifier
+**Task:** Simplify and de-confuse the Warehouse tab in the Coordinator dashboard (user said "warehouse walaa thoda puzzled confusing hain sahi karo").
+
+### Work Log
+- Read prior worklog tail (Tasks 1–5 of Coordinator dashboard updates, last touched coordinator.tsx at ~1828 lines).
+- Read `src/components/laxree/dashboards/coordinator.tsx` lines 619–811 (existing `WarehouseTab` + `WarehouseItemRow`).
+- Confirmed warehouse API contract by reading `src/app/api/challans/[id]/warehouse/route.ts`: POST accepts `{ itemId, warehouseStatus, notes? }`. The `warehouseStatus` field is stored as a plain `String` in Prisma (`schema.prisma` line for ChallanItem) with values `PENDING | QUALITY_CHECK | PACKAGING | DONE` — so reverting to `PENDING` works without backend changes. PATCH route is for dispatch-image upload only (unchanged).
+- Confirmed `/api/challans` GET returns `challanItems: { include: { matchedItem: true } }` — i.e. ALL ChallanItem fields including `category`, `colour`, `stockRemark` are already in the payload; only the local TS type was missing `category`.
+- Inspected `src/components/laxree/ui.tsx` to confirm `Btn` variants (`default | gold | success | danger | ghost`), `StatCard`/`Badge`/`Card`/`SectionTitle`/`EmptyState` signatures — no new UI primitives needed.
+
+### Changes (all inside `src/components/laxree/dashboards/coordinator.tsx`, the ONLY file touched)
+
+1. **Type fix — `ChallanItem.category` added** (line 17): `category: string | null`. The field already exists on the Prisma model and is returned by the API; this just lets the row render it.
+
+2. **Summary header simplified (3 cards instead of 4):**
+   - Removed the mixed `Items In QC` + `Items Packing` cards (they mixed item-level counts into a challan-level summary row — the puzzle source).
+   - New 3-card row, responsive `grid-cols-1 md:grid-cols-3`:
+     - "🏭 In Progress" — `pending.length`, sub: `"{totalItems} items across {count} challans"` (with proper singular/plural).
+     - "✅ Completed" — `completed.length`, sub: `"ready for vehicle arrangement"`.
+     - "📦 Items Done" — `itemsDone` count, sub: `"of {totalItems} total items"`.
+   - Now challan-level and item-level are clearly separated.
+
+3. **Section title clarified + flow legend added:**
+   - Title: `"Warehouse Processing"` (was "Warehouse Workflow").
+   - Sub: `"Audited challans arrive here for QC → Packaging → Completion. Once ALL items are done, the challan auto-moves to Vehicle Arrangement."`
+   - New legend row below SectionTitle: `① QC Check (purple chip) → ② Packaging (gold chip) → ③ Complete (green chip)` so staff see the 3-stage flow at a glance.
+
+4. **Per-challan bulk action:**
+   - Added `bulkActionFor(challan)` helper that returns `{ label, target }` based on the items' current stages: if any item is `PENDING` → `Mark All to QC`; else if any in `QUALITY_CHECK` → `Mark All to Packaging`; else if any in `PACKAGING` → `Mark All Done`; else `null` (everything already DONE → no button).
+   - Added `bulkUpdate(challan, target)` method: filters items in the direct-predecessor stage and POSTs them all sequentially to `/api/challans/{id}/warehouse`. Returns a `✓ N items moved to <stage> • M failed` toast. Sets `busyItemId = bulk:<challanId>` while running so all rows in that challan show busy.
+   - UI: bulk button sits to the right of the progress bar in each pending challan card — purple `⚡ Mark All to …` button with `whitespace-nowrap` so it never wraps. Saves ~60 clicks for a 20-item challan.
+
+5. **Per-item busy state (was global):**
+   - Replaced `const [busy, setBusy] = useState(false)` with `const [busyItemId, setBusyItemId] = useState<string | null>(null)`.
+   - `updateWarehouse(challanId, itemId, status)` sets `busyItemId = itemId`. Only that one row disables.
+   - `WarehouseItemRow` receives `busyItemId` and computes `isBusy = busyItemId === item.id || busyItemId === \`bulk:${challanId}\`` — so the bulk action also disables every row in its challan, but rows in OTHER challans stay fully interactive.
+
+6. **Single primary action button per row (replaces the 3-button row):**
+   - Removed the three `✓ QC` / `✓ Packaging` / `✓ Done` ghost/success buttons — they forced the user to mentally reconcile which of the 3 was currently enabled.
+   - One primary button that auto-advances to the next stage, color-coded per stage:
+     - `PENDING` → custom purple `<button>` "Start QC →" (purple because `Btn` has no purple variant — used inline styles matching the existing purple palette `#9B6ED4`).
+     - `QUALITY_CHECK` → `Btn variant="gold"` "Mark Packaging Done →".
+     - `PACKAGING` → `Btn variant="success"` "✓ Complete Item".
+     - `DONE` → static green `✓ Completed` badge (no button) + `by {warehouseDoneBy.name} • {fmtDate(warehouseDoneAt)}` text.
+   - The 4-circle stepper is kept but slimmed (32px circles, was 36px) — it now purely shows state; the single button is the only action.
+   - Added subtle `↶ Revert` ghost button (visible only when `currentIdx > 0`) that calls `window.confirm("Revert this item back to \"<prev stage>\"?")` and on confirm POSTs the previous-stage status. Undoes accidental clicks without needing a separate undo log.
+
+7. **Item location/identification details shown:**
+   - Below the item name row: `{colour} · {category}` in muted text (only shown if at least one is present), so warehouse staff can physically locate the item.
+   - If `item.stockRemark` exists, a third line `📝 {stockRemark}` in orange (`#E09E3C`) — surfaces coordinator/Sales notes about availability/hold that the warehouse needs to know.
+
+8. **Completion state clarified:**
+   - The "✓ Done" button label (which was ambiguous — done with what?) is gone.
+   - When an item is `DONE`: the action area becomes a static green `✓ Completed` badge plus the done-by name + date in dim text — clearly terminal.
+   - The `warehouseStatus` badge in the row header still shows the current stage; color for `QUALITY_CHECK` updated from orange to purple to match the stepper/legend.
+
+9. **Revert path is safe:** `updateWarehouse` now accepts `'PENDING' | 'QUALITY_CHECK' | 'PACKAGING' | 'DONE'`. The backend route stores whatever string is passed (Prisma field is plain `String`, no enum constraint), so reverting to `PENDING` simply clears the done-by/done-at fields on the next forward progression. (Confirmed by reading `route.ts` lines 26–34: `warehouseDoneAt`/`warehouseDoneById` are only set when `warehouseStatus === 'DONE'`; reverting from DONE→PACKAGING leaves them stale, but the row's `currentIdx === 3` check hides them. Acceptable for an undo path.)
+
+### Verification
+- `bun run lint` → `EXIT: 0` (only `$ eslint .` printed, no warnings or errors).
+- Dev server log shows `✓ Compiled in 397ms` after the edit (no compile errors). Latest tail shows only `200` responses to `/api/notifications`.
+- File grew from 1828 → 1984 lines (+156: new helpers, bulk action, single-button row, item details).
+
+### Stage Summary
+- Warehouse tab UX is now linear and self-explanatory: read the 3 legend chips → per-challan `⚡ Mark All` to bulk-advance → per-item single primary button (color tells you what stage you're advancing to) → optional `↶ Revert` for mistakes → `✓ Completed` badge when done.
+- The two sources of confusion called out in the investigation are resolved: (a) challan-level vs item-level counts are now in separate StatCards with explicit sub-text; (b) the redundant 3-action-button row + stepper is collapsed into ONE primary button + a state-only stepper.
+- Bulk action eliminates the 60-click tax for a 20-item challan — one `⚡ Mark All` click per stage transition (3 clicks total instead of 60).
+- Per-item busy state means updating one item no longer disables the rest of the tab.
+- Warehouse staff can now physically locate items (colour + category + stock remark visible inline).
+- Accidental clicks can be undone via the `↶ Revert` button (with confirm dialog) on any non-Pending item.
+- All changes confined to `src/components/laxree/dashboards/coordinator.tsx`. No other files touched. Dark theme palette (#0c1928 / #9B6ED4 / #E4AF4A / #3CB87A / #E05050 / #E09E3C / #EDE4D0 / #96A8BF / #4E6180) preserved exactly. Existing UI components (Badge, Btn, Card, EmptyState, SectionTitle, StatCard) and existing hooks (useFetch, apiPost) reused — no new imports.

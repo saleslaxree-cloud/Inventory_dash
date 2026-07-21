@@ -222,10 +222,24 @@ function BigNotificationModal({
   onDismiss: () => void
 }) {
   const color = NOTIF_COLORS[n.type] || NOTIF_COLORS.INFO
-  const isUrgent = n.type === 'PR_RAISED_URGENT' || n.type === 'SPECIAL_DISPATCH_REQUEST'
+  // Urgent types — show the "⚠ Urgent Action Required" badge + ping animation.
+  // PARTIAL_PAYMENT_PENDING is urgent too (Sales must follow up for balance),
+  // but slightly less critical than PR / special-dispatch → shorter duration.
+  const isUrgent =
+    n.type === 'PR_RAISED_URGENT' ||
+    n.type === 'SPECIAL_DISPATCH_REQUEST' ||
+    n.type === 'PARTIAL_PAYMENT_PENDING'
   const [progress, setProgress] = useState(100)
-  // Urgent PR popups stay longer (30s) so Sir has time to read & act.
-  const DURATION = isUrgent ? 30000 : 20000
+  // Auto-dismiss duration by severity:
+  //   30s — critical urgent (PR auto-raised, special-dispatch approval)
+  //   25s — important action item (partial payment follow-up)
+  //   20s — regular notifications
+  const DURATION =
+    n.type === 'PR_RAISED_URGENT' || n.type === 'SPECIAL_DISPATCH_REQUEST'
+      ? 30000
+      : n.type === 'PARTIAL_PAYMENT_PENDING'
+        ? 25000
+        : 20000
 
   useEffect(() => {
     const start = Date.now()
@@ -469,6 +483,10 @@ function getAction(n: AppNotification): { label: string; icon: string; tab: stri
       return { label: 'View Dispatch', icon: '🚚', tab: 'vehicle' }
     case 'SPECIAL_DISPATCH_REJECTED':
       return { label: 'View Challan', icon: '📋', tab: 'process' }
+    case 'PARTIAL_PAYMENT_PENDING':
+      // Sales must follow up with the client for the balance — send them to
+      // their own challans list so they can pick the client & call them.
+      return { label: 'View My Challans', icon: '📋', tab: 'mychallans' }
     case 'PAYMENT_VERIFIED':
       // Coordinator should start audit; Sales just views
       if (n.toRole === 'COORDINATOR') return { label: 'Start Audit', icon: '🔍', tab: 'process' }
@@ -495,6 +513,7 @@ const NOTIF_COLORS: Record<string, { border: string; accent: string; glow: strin
   SPECIAL_DISPATCH_REQUEST:  { border: '#E05050', accent: '#FF6B6B', glow: 'rgba(224,80,80,0.55)' },
   SPECIAL_DISPATCH_APPROVED: { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
   SPECIAL_DISPATCH_REJECTED: { border: '#E05050', accent: '#F07070', glow: 'rgba(224,80,80,0.45)' },
+  PARTIAL_PAYMENT_PENDING:   { border: '#E09E3C', accent: '#F0B85C', glow: 'rgba(224,158,60,0.45)' },
   PAYMENT_VERIFIED:          { border: '#3CB87A', accent: '#5BD49A', glow: 'rgba(60,184,122,0.45)' },
   COORDINATOR_APPROVED:      { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },
   WAREHOUSE_DONE:            { border: '#9B6ED4', accent: '#B894E8', glow: 'rgba(155,110,212,0.45)' },

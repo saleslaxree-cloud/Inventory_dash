@@ -14,6 +14,7 @@ type ChallanItem = {
   itemName: string
   model: string | null
   colour: string | null
+  category: string | null
   quantity: number
   unitPrice: number
   totalPrice: number
@@ -618,7 +619,8 @@ function AuditDetail({
 // ─────────────────────────────────────────────
 function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
   const { data, loading, refresh } = useFetch<{ challans: Challan[] }>('/api/challans?coordinatorApproved=true', [refreshKey])
-  const [busy, setBusy] = useState(false)
+  // Per-item busy state: holds either a ChallanItem id (single update) or `bulk:<challanId>` (bulk update).
+  const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
 
   if (loading) return <Loading />
@@ -627,17 +629,53 @@ function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged
   const pending = data.challans.filter((c) => c.coordinatorApproved && !c.warehouseCompleted)
   const completed = data.challans.filter((c) => c.warehouseCompleted)
 
-  const updateWarehouse = async (challanId: string, itemId: string, warehouseStatus: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE') => {
-    setBusy(true); setMsg('')
+  const totalItems = pending.reduce((s, c) => s + c.challanItems.length, 0)
+  const itemsDone = pending.reduce((s, c) => s + c.challanItems.filter((i) => i.warehouseStatus === 'DONE').length, 0)
+
+  const updateWarehouse = async (
+    challanId: string,
+    itemId: string,
+    warehouseStatus: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE' | 'PENDING',
+  ) => {
+    setBusyItemId(itemId); setMsg('')
     try {
       await apiPost(`/api/challans/${challanId}/warehouse`, { itemId, warehouseStatus })
-      setMsg(`✓ Item moved to ${warehouseStatus.replace(/_/g, ' ')}`)
+      setMsg(`✓ Item moved to ${warehouseStatus === 'PENDING' ? 'Pending' : warehouseStatus.replace(/_/g, ' ')}`)
       refresh(); onChanged()
     } catch (e: unknown) {
       setMsg(`✕ ${e instanceof Error ? e.message : 'Failed'}`)
     } finally {
-      setBusy(false)
+      setBusyItemId(null)
     }
+  }
+
+  // Bulk-advance every item in `challan` whose current stage is the direct predecessor of `target`.
+  // E.g. target='QUALITY_CHECK' advances all PENDING items; target='PACKAGING' advances all QC items; etc.
+  const bulkUpdate = async (
+    challan: Challan,
+    target: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE',
+  ) => {
+    const fromStatus = target === 'QUALITY_CHECK' ? 'PENDING'
+      : target === 'PACKAGING' ? 'QUALITY_CHECK'
+      : 'PACKAGING'
+    const items = challan.challanItems.filter((i) => (i.warehouseStatus || 'PENDING') === fromStatus)
+    if (items.length === 0) return
+    setBusyItemId(`bulk:${challan.id}`); setMsg('')
+    let ok = 0; let fail = 0
+    for (const i of items) {
+      try {
+        await apiPost(`/api/challans/${challan.id}/warehouse`, { itemId: i.id, warehouseStatus: target })
+        ok++
+      } catch {
+        fail++
+      }
+    }
+    setMsg(
+      `✓ ${ok} item${ok === 1 ? '' : 's'} moved to ${target.replace(/_/g, ' ')}`
+      + (fail ? ` • ${fail} failed` : ''),
+    )
+    refresh(); onChanged()
+    setBusyItemId(null)
   }
 
   return (
@@ -648,16 +686,46 @@ function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged
         }`}>{msg}</div>
       )}
 
-      {/* Summary header — totals */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="In Progress"   value={pending.length}   icon="🏭" accent="#E09E3C" sub="Audited, awaiting QC + packaging" />
-        <StatCard label="Completed"     value={completed.length} icon="✅" accent="#3CB87A" sub="Ready for vehicle arrangement" />
-        <StatCard label="Items In QC"   value={pending.reduce((s, c) => s + c.challanItems.filter((i) => i.warehouseStatus === 'QUALITY_CHECK').length, 0)} icon="🔬" accent="#9B6ED4" sub="Currently in quality check" />
-        <StatCard label="Items Packing" value={pending.reduce((s, c) => s + c.challanItems.filter((i) => i.warehouseStatus === 'PACKAGING').length, 0)} icon="📦" accent="#E4AF4A" sub="Currently being packed" />
+      {/* Summary header — challan-level + item-level clearly separated */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <StatCard
+          label="In Progress"
+          value={pending.length}
+          icon="🏭"
+          accent="#E09E3C"
+          sub={`${totalItems} item${totalItems === 1 ? '' : 's'} across ${pending.length} challan${pending.length === 1 ? '' : 's'}`}
+        />
+        <StatCard
+          label="Completed"
+          value={completed.length}
+          icon="✅"
+          accent="#3CB87A"
+          sub="ready for vehicle arrangement"
+        />
+        <StatCard
+          label="Items Done"
+          value={itemsDone}
+          icon="📦"
+          accent="#9B6ED4"
+          sub={`of ${totalItems} total item${totalItems === 1 ? '' : 's'}`}
+        />
       </div>
 
       <Card className="p-4">
-        <SectionTitle icon="🏭" title="Warehouse Workflow" sub="Only audited challans appear here — once all items are DONE, the challan moves to Vehicle Arrangement" />
+        <SectionTitle
+          icon="🏭"
+          title="Warehouse Processing"
+          sub="Audited challans arrive here for QC → Packaging → Completion. Once ALL items are done, the challan auto-moves to Vehicle Arrangement."
+        />
+        {/* Flow legend */}
+        <div className="flex items-center gap-2 text-[10.5px] text-[#96A8BF] mb-3 flex-wrap">
+          <span className="inline-flex items-center gap-1 rounded-md bg-[#9B6ED4]/10 border border-[#9B6ED4]/20 px-2 py-0.5 text-[#9B6ED4] font-semibold">① QC Check</span>
+          <span className="text-[#4E6180]">→</span>
+          <span className="inline-flex items-center gap-1 rounded-md bg-[#E4AF4A]/10 border border-[#E4AF4A]/20 px-2 py-0.5 text-[#E4AF4A] font-semibold">② Packaging</span>
+          <span className="text-[#4E6180]">→</span>
+          <span className="inline-flex items-center gap-1 rounded-md bg-[#3CB87A]/10 border border-[#3CB87A]/20 px-2 py-0.5 text-[#3CB87A] font-semibold">③ Complete</span>
+        </div>
+
         {pending.length === 0 ? (
           <EmptyState icon="🏭" title="Nothing in warehouse" sub="Audited challans will appear here for QC + packaging" />
         ) : (
@@ -666,20 +734,36 @@ function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged
               const doneCount = c.challanItems.filter((i) => i.warehouseStatus === 'DONE').length
               const totalCount = c.challanItems.length
               const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+              const bulk = bulkActionFor(c)
+              const challanBusy = busyItemId === `bulk:${c.id}`
               return (
                 <div key={c.id} className="rounded-lg border border-white/7 bg-white/[0.02] p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
+                  <div className="flex items-center justify-between mb-2 gap-2">
+                    <div className="min-w-0">
                       <span className="font-mono text-[12px] text-[#E4AF4A] font-semibold">{c.challanNumber}</span>
                       <span className="text-[12px] text-[#EDE4D0] ml-2">{c.clientName}</span>
                       <span className="text-[10px] text-[#96A8BF] ml-2">{c.clientCity}</span>
                     </div>
                     <Badge label={`${doneCount}/${totalCount} done`} color={pct === 100 ? '#3CB87A' : '#E09E3C'} />
                   </div>
-                  {/* Progress bar */}
-                  <div className="h-1.5 rounded-full bg-white/5 overflow-hidden mb-3">
-                    <div className="h-full bg-gradient-to-r from-[#C8922A] to-[#E4AF4A] transition-all" style={{ width: `${pct}%` }} />
+
+                  {/* Progress bar + bulk action */}
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-1.5 flex-1 rounded-full bg-white/5 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-[#C8922A] to-[#E4AF4A] transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    {bulk && (
+                      <button
+                        type="button"
+                        disabled={challanBusy}
+                        onClick={() => bulkUpdate(c, bulk.target)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all px-3 py-1.5 text-[11px] bg-[#9B6ED4]/15 border border-[#9B6ED4]/40 text-[#9B6ED4] hover:bg-[#9B6ED4]/25 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                      >
+                        {challanBusy ? 'Updating…' : `⚡ ${bulk.label}`}
+                      </button>
+                    )}
                   </div>
+
                   {/* Items */}
                   <div className="space-y-2">
                     {c.challanItems.map((ci) => (
@@ -687,7 +771,7 @@ function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged
                         key={ci.id}
                         challanId={c.id}
                         item={ci}
-                        busy={busy}
+                        busyItemId={busyItemId}
                         onUpdate={updateWarehouse}
                       />
                     ))}
@@ -719,13 +803,28 @@ function WarehouseTab({ refreshKey, onChanged }: { refreshKey: number; onChanged
   )
 }
 
+/** Decide what bulk action (if any) applies to a pending challan based on its items' current stages. */
+function bulkActionFor(challan: Challan): { label: string; target: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE' } | null {
+  const items = challan.challanItems
+  if (items.some((i) => (i.warehouseStatus || 'PENDING') === 'PENDING')) {
+    return { label: 'Mark All to QC', target: 'QUALITY_CHECK' }
+  }
+  if (items.some((i) => i.warehouseStatus === 'QUALITY_CHECK')) {
+    return { label: 'Mark All to Packaging', target: 'PACKAGING' }
+  }
+  if (items.some((i) => i.warehouseStatus === 'PACKAGING')) {
+    return { label: 'Mark All Done', target: 'DONE' }
+  }
+  return null // every item is DONE
+}
+
 function WarehouseItemRow({
-  challanId, item, busy, onUpdate,
+  challanId, item, busyItemId, onUpdate,
 }: {
   challanId: string
   item: ChallanItem
-  busy: boolean
-  onUpdate: (challanId: string, itemId: string, status: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE') => void
+  busyItemId: string | null
+  onUpdate: (challanId: string, itemId: string, status: 'QUALITY_CHECK' | 'PACKAGING' | 'DONE' | 'PENDING') => void
 }) {
   const stages: { key: string; label: string }[] = [
     { key: 'PENDING',       label: 'Pending' },
@@ -734,24 +833,53 @@ function WarehouseItemRow({
     { key: 'DONE',          label: 'Done' },
   ]
   const currentIdx = stages.findIndex((s) => s.key === (item.warehouseStatus || 'PENDING'))
+  const isBusy = busyItemId === item.id || busyItemId === `bulk:${challanId}`
+
+  // Primary action button — single click advances one stage
+  const nextStage = currentIdx < 3 ? stages[currentIdx + 1] : null
+  const handleAdvance = () => {
+    if (!nextStage) return
+    onUpdate(challanId, item.id, nextStage.key as 'QUALITY_CHECK' | 'PACKAGING' | 'DONE')
+  }
+  const handleRevert = () => {
+    if (currentIdx <= 0) return
+    const prev = stages[currentIdx - 1]
+    if (window.confirm(`Revert this item back to "${prev.label}"?`)) {
+      onUpdate(challanId, item.id, prev.key as 'QUALITY_CHECK' | 'PACKAGING' | 'DONE' | 'PENDING')
+    }
+  }
+
+  // Item location hint — colour · category (+ stock remark on its own line)
+  const metaParts: string[] = []
+  if (item.colour) metaParts.push(item.colour)
+  if (item.category) metaParts.push(item.category)
 
   return (
     <div className="rounded-md border border-white/5 bg-white/[0.02] p-3">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
-          <span className="text-[12px] text-[#EDE4D0] font-medium">{item.itemName}</span>
-          <span className="text-[11px] text-[#96A8BF] ml-2">×{item.quantity}</span>
-          {item.model && <span className="text-[10px] text-[#4E6180] ml-2 font-mono">{item.model}</span>}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[12px] text-[#EDE4D0] font-medium">{item.itemName}</span>
+            <span className="text-[11px] text-[#96A8BF]">×{item.quantity}</span>
+            {item.model && <span className="text-[10px] text-[#4E6180] font-mono">{item.model}</span>}
+          </div>
+          {/* Location / identification hint for warehouse staff */}
+          {metaParts.length > 0 && (
+            <div className="text-[10px] text-[#96A8BF] mt-0.5">{metaParts.join(' · ')}</div>
+          )}
+          {item.stockRemark && (
+            <div className="text-[10px] text-[#E09E3C] mt-0.5">📝 {item.stockRemark}</div>
+          )}
         </div>
         <Badge label={(item.warehouseStatus || 'PENDING').replace(/_/g, ' ')} color={
           item.warehouseStatus === 'DONE' ? '#3CB87A'
           : item.warehouseStatus === 'PACKAGING' ? '#E4AF4A'
-          : item.warehouseStatus === 'QUALITY_CHECK' ? '#E09E3C'
+          : item.warehouseStatus === 'QUALITY_CHECK' ? '#9B6ED4'
           : '#96A8BF'
         } />
       </div>
 
-      {/* Polished horizontal stepper — circles + connectors + checkmarks */}
+      {/* Polished horizontal stepper — pure state display, no actions */}
       <div className="flex items-start mb-3 px-1">
         {stages.map((s, idx) => {
           const isComplete = idx < currentIdx
@@ -762,11 +890,11 @@ function WarehouseItemRow({
               {/* Step circle + label */}
               <div className="flex flex-col items-center gap-1.5 flex-shrink-0 w-16">
                 <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold border-2 transition-all ${
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold border-2 transition-all ${
                     isComplete
-                      ? 'bg-[#3CB87A] border-[#3CB87A] text-[#07101f] shadow-[0_0_12px_rgba(60,184,122,0.45)]'
+                      ? 'bg-[#3CB87A] border-[#3CB87A] text-[#07101f] shadow-[0_0_10px_rgba(60,184,122,0.4)]'
                       : isCurrent
-                        ? 'bg-[#9B6ED4]/15 border-[#9B6ED4] text-[#9B6ED4] shadow-[0_0_12px_rgba(155,110,212,0.45)]'
+                        ? 'bg-[#9B6ED4]/15 border-[#9B6ED4] text-[#9B6ED4] shadow-[0_0_10px_rgba(155,110,212,0.4)]'
                         : 'bg-white/5 border-white/10 text-[#4E6180]'
                   }`}
                 >
@@ -778,7 +906,7 @@ function WarehouseItemRow({
               </div>
               {/* Connector line — horizontally aligned with circle center */}
               {!isLast && (
-                <div className="flex-1 h-0.5 mx-1 self-start mt-[17px] rounded-full overflow-hidden bg-white/10">
+                <div className="flex-1 h-0.5 mx-1 self-start mt-[15px] rounded-full overflow-hidden bg-white/10">
                   <div
                     className={`h-full transition-all duration-300 ${
                       isComplete ? 'bg-[#3CB87A] w-full' : isCurrent ? 'bg-gradient-to-r from-[#9B6ED4] to-[#9B6ED4]/30 w-full' : 'w-0'
@@ -791,21 +919,49 @@ function WarehouseItemRow({
         })}
       </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-1.5">
-        <Btn size="sm" variant="ghost" disabled={busy || currentIdx >= 1} onClick={() => onUpdate(challanId, item.id, 'QUALITY_CHECK')}>
-          ✓ QC
-        </Btn>
-        <Btn size="sm" variant="ghost" disabled={busy || currentIdx >= 2 || currentIdx < 1} onClick={() => onUpdate(challanId, item.id, 'PACKAGING')}>
-          ✓ Packaging
-        </Btn>
-        <Btn size="sm" variant="success" disabled={busy || currentIdx >= 3 || currentIdx < 2} onClick={() => onUpdate(challanId, item.id, 'DONE')}>
-          ✓ Done
-        </Btn>
+      {/* Single primary action — auto-advances to next stage (or shows completed state) */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        {currentIdx === 3 ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold bg-[#3CB87A]/15 border border-[#3CB87A]/30 text-[#3CB87A]">
+              ✓ Completed
+            </span>
+            {item.warehouseDoneBy && (
+              <span className="text-[10px] text-[#4E6180]">
+                by {item.warehouseDoneBy.name} • {fmtDate(item.warehouseDoneAt)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 flex-wrap">
+            {currentIdx === 0 && (
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={handleAdvance}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all px-3 py-1.5 text-[11px] bg-[#9B6ED4]/15 border border-[#9B6ED4]/30 text-[#9B6ED4] hover:bg-[#9B6ED4]/25 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isBusy ? 'Updating…' : 'Start QC →'}
+              </button>
+            )}
+            {currentIdx === 1 && (
+              <Btn size="sm" variant="gold" disabled={isBusy} onClick={handleAdvance}>
+                {isBusy ? 'Updating…' : 'Mark Packaging Done →'}
+              </Btn>
+            )}
+            {currentIdx === 2 && (
+              <Btn size="sm" variant="success" disabled={isBusy} onClick={handleAdvance}>
+                {isBusy ? 'Updating…' : '✓ Complete Item'}
+              </Btn>
+            )}
+            {currentIdx > 0 && (
+              <Btn size="sm" variant="ghost" disabled={isBusy} onClick={handleRevert}>
+                ↶ Revert
+              </Btn>
+            )}
+          </div>
+        )}
       </div>
-      {item.warehouseDoneBy && (
-        <div className="text-[10px] text-[#4E6180] mt-1.5">Done by {item.warehouseDoneBy.name} • {fmtDate(item.warehouseDoneAt)}</div>
-      )}
     </div>
   )
 }
