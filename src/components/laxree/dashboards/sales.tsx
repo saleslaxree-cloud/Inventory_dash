@@ -167,14 +167,14 @@ function stockStatusInfo(stockStatus: string, matchStatus?: string, remark?: str
         label: 'Available',
         icon: '✅',
         color: '#3CB87A',
-        detail: remark || 'In stock — ready to ship',
+        detail: remark || `${availableQty ?? 0} in stock`,
       }
     case 'ON_HOLD':
       return {
         label: 'Partial Available',
         icon: '🔶',
         color: '#E09E3C',
-        detail: remark || 'Partial stock — remaining will be available in 24-30 days once order is finalized',
+        detail: remark || `Only ${availableQty ?? 0} available — rest on back-order`,
       }
     case 'WILL_BE_AVAILABLE':
       return {
@@ -1575,6 +1575,7 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                             <th className="py-2 px-2.5">Item</th>
                             <th className="py-2 px-2.5">Model #</th>
                             <th className="py-2 px-2.5 text-right">Need</th>
+                            <th className="py-2 px-2.5 text-right">In Stock</th>
                             <th className="py-2 px-2.5">Inventory Status</th>
                           </tr>
                         </thead>
@@ -1586,6 +1587,7 @@ function MyChallansTab({ user }: { user: SessionUser }) {
                                 <td className="py-1.5 px-2.5 text-[#EDE4D0]">{ci.itemName}</td>
                                 <td className="py-1.5 px-2.5 text-[#96A8BF] font-mono">{ci.model || ci.itemNumber || '—'}</td>
                                 <td className="py-1.5 px-2.5 text-right">{ci.quantity}</td>
+                                <td className="py-1.5 px-2.5 text-right text-[#96A8BF]">{ci.availableQty ?? '—'}</td>
                                 <td className="py-1.5 px-2.5">
                                   <span
                                     className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"

@@ -1999,3 +1999,33 @@ Stage Summary:
 - Full-available case shows "Yes Available".
 - None-available case shows "Will be available soon once order is finalized".
 - Ready to push to GitHub + Vercel.
+
+---
+Task ID: revert-mychallans-only-checkstock
+Agent: main
+Task: Revert MyChallans table changes — user clarified Required Qty column + no-remaining-qty logic was ONLY for the Check Stock section, NOT MyChallans. MyChallans should keep its original "In Stock" column showing raw availableQty.
+
+Work Log:
+- Read src/components/laxree/dashboards/sales.tsx to find MyChallans per-item table (line ~1572).
+- Reverted: re-added "In Stock" column header and the ci.availableQty cell to the MyChallans per-item table (was wrongly removed in previous commit).
+- Reverted stockStatusInfo() helper: restored `${availableQty ?? 0} in stock` (AVAILABLE) and `Only ${availableQty ?? 0} available — rest on back-order` (ON_HOLD) details — these are used by MyChallans and SHOULD show numbers there.
+- Kept Check Stock changes intact:
+  * stockCheckAvailability() still shows NO numbers — partial case message: "Partial stock available — remaining quantity will be available in 24-30 days once order is finalized".
+  * Check Stock table still has columns: # | Item | Model | Colour | Required Qty | Availability (Required Qty right after Colour).
+- Kept smartStockInfo() (used by Upload Result) with no numbers in partial case — that section is part of the Sales upload flow the user wanted cleaned up.
+
+Verification (Agent Browser):
+- Sales → Check Stock → Banquet Furniture → Stage → LRBF-534 → 8*4 FT:
+  * Table columns: #, ITEM, MODEL, COLOUR, REQUIRED QTY, AVAILABILITY ✓
+  * Required Qty column right after Colour ✓
+  * Entered 99999 → "🔶 Partial Available — Partial stock available, remaining quantity will be available in 24-30 days once order is finalized" (no numbers) ✓
+- Sales → My Challans → expanded LC-JPRL/26-27/0008:
+  * Per-item table columns: ITEM, MODEL #, NEED, IN STOCK, INVENTORY STATUS ✓
+  * In Stock column restored with raw availableQty values ✓
+
+Lint: 0 errors, 0 warnings. Dev server clean.
+
+Stage Summary:
+- MyChallans table fully reverted to original (In Stock column + numbers in stockStatusInfo details).
+- Check Stock section unchanged from previous commit — Required Qty column after Colour, no stock numbers disclosed.
+- Scope discipline restored: only the Check Stock section has the no-numbers logic, as the user originally requested.
