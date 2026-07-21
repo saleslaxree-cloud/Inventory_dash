@@ -131,6 +131,9 @@ export async function POST(req: NextRequest) {
     if (!matched) {
       matchedItemRows.push({
         ...it,
+        // NOT_FOUND — keep whatever the PDF/Sales user sent (usually null).
+        // The frontend will show "not in master inventory" for this item.
+        category: it.category,
         status: 'NOT_FOUND',
         stockStatus: 'PENDING',
         stockRemark: 'Item not found in master inventory — IT Manager to add it',
@@ -173,6 +176,14 @@ export async function POST(req: NextRequest) {
 
     matchedItemRows.push({
       ...it,
+      // MATCHED / WRONG_MODEL — ALWAYS use the master Item's category. The PDF
+      // extraction always sets category=null (it has no category info), and
+      // the Sales user's auto-suggest may have failed (e.g. when the PDF's
+      // itemName doesn't match the master's itemName verbatim, even though the
+      // model number does). Since we successfully matched against the master,
+      // the master category is authoritative — copy it through so the
+      // frontend never shows "not in master" for a matched item.
+      category: matched.category || it.category,
       status,
       stockStatus,
       stockRemark,

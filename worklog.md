@@ -2056,3 +2056,80 @@ Stage Summary:
 - Vercel production: schema.prisma = postgresql, matches DATABASE_URL (Neon) → error resolved.
 - Local dev: prisma/schema.sqlite.local.prisma = sqlite, db:* scripts use it, db/custom.db seeded with full data → local login + all APIs working.
 - postinstall unchanged (uses default schema.prisma = postgres) → Vercel build generates postgres client correctly.
+
+---
+Task ID: pdf-extraction-fix
+Agent: general-purpose (PDF + Category Bugs)
+Task: Fix two bugs in the Sales → Upload Challan flow: (1) Shipping & Billing address NOT auto-extracted from uploaded Laxree challan PDF; (2) Item category shows "not in master inventory" for item model LRWA-382 even though the item IS matched (stock shows) — the category should auto-fetch from the master Item, not show "not in master".
+
+Work Log:
+
+**Bug 1 — Address extraction (root cause):** The regex patterns in `src/lib/pdf-text-extract.ts` used `.+?` for the value capture, but `.` does NOT match `\n` by default. Since the PDF text reconstruction (line-based by Y-coordinate) wraps long addresses across MULTIPLE reconstructed lines, the regex could only capture the value up to end-of-line — and then the lookahead `(?=\s+(?:stop_labels|$))` failed because the next line started with continuation text (e.g. "GANDHINAGAR, JAMMU..."), not a stop label. Result: `billingAddress` and `shippingAddress` both returned `null`. The `billingName` happened to work because its value sits on a single line.
+
+Verified against the real sample PDF at `upload/challan - CASACONNECT INNOVATIONS PRIVATE LIMITED.pdf`. Raw text (reconstructed) for the address block:
+```
+Billing Name : CASACONNECT INNOVATIONS PRIVATE LIMITED Shipping Address : HOUSE NO.334-A,SHASTRI NAGAR,
+Billing Address : HOUSE NO.334-A,SHASTRI NAGAR, GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE
+GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE 180004
+180004 Transportation Term : PLS DISPATCH
+```
+The shipping address value spans lines 1-4; the billing address value spans lines 2-4. The old regex captured nothing.
+
+**Fix 1 — `src/lib/pdf-text-extract.ts`:**
+- `billingName`: changed `(.+?)` → `([^\n]+?)` (explicit "no newlines") and added `Billing\s+Address|Mobile|Quotation|Site\s+Add|Kind\s+Attention|Dated|Transportation` to the stop-label alternation so it stops at any next field label on the same line.
+- `billingAddress`: changed `(.+?)` → `([\s\S]+?)` (matches newlines) and added `Transportation|GSTIN|Mobile|Quotation|Site\s+Add|Kind\s+Attention|Dated|Laxree\s+Amenities|CHALLAN|Terms|Freight|Packing|Total|Grand|Discount` to stop labels. Now captures the full multi-line address.
+- `shippingAddress`: changed `(.+?)` → `([\s\S]+?)`, added `Billing\s+Address|Billing\s+Name|GSTIN|Mobile|...` as stop labels (because in the Laxree layout "Shipping Address" appears BEFORE "Billing Address" on the same reconstructed line), and added a third pattern for `Consignee :` label.
+- Added a fallback: if shipping is missing or contains < 6 digits (no PIN code), fall back to billing address (in most Laxree challans shipping == billing).
+
+Result on the sample PDF:
+```
+billingName: "CASACONNECT INNOVATIONS PRIVATE LIMITED"
+billingAddress: "HOUSE NO.334-A,SHASTRI NAGAR, GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE 180004 180004"
+shippingAddress: "HOUSE NO.334-A,SHASTRI NAGAR, GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE GANDHINAGAR, JAMMU JAMMU AND KASHMIR-PIN CODE 180004 180004"
+```
+(Addresses have some duplication because the PDF's two-column layout interleaves shipping/billing continuation lines on the same reconstructed line — unavoidable with text-based PDF extraction. The user can edit the form fields to clean up.)
+
+**Bug 2 — "not in master" for matched item (root cause):** DB query confirmed `LRWA-382` exists in master inventory (`Item` table: itemName="Lobby Soap Dispenser", category="Lobby Items", currentStock=169, colour="WHITE"). The server-side upload route DID match it (status=MATCHED, stockStatus=AVAILABLE) by `itemNumber`. But:
+
+1. **Server-side bug** (`src/app/api/challans/upload/route.ts`): The matched-item row used `...it` spread, which copies `it.category` from the request body. The PDF extraction always sets `category: null` (it has no category info), so the ChallanItem was created with `category: null` even when the item was MATCHED against a master Item that HAS a category.
+
+2. **Client-side bug** (`src/components/laxree/dashboards/sales.tsx`): The auto-fetch-category effect (line ~844) tried to match each row against `/api/items` (masterItems) using BOTH `itemName` AND `model` (when both provided). The PDF's itemName ("MANUAL SOAP DISPENSER LEAKAGE PROOF MADE ABS MATERIAL CAPACITY: 350ML PRODUCT SIZE: 75*130*215MM") doesn't contain the master's short itemName ("Lobby Soap Dispenser") verbatim → `miName.includes(q)` returns false → match fails → category cleared → UI shows "— not in master inventory —". Meanwhile the SERVER matched by `itemNumber` alone (LRWA-382 → LRWA-382 exact) → MATCHED → stock shows. Contradiction.
+
+**Fix 2a — `src/app/api/challans/upload/route.ts`:** When pushing to `matchedItemRows`, set `category: matched.category || it.category` for MATCHED/WRONG_MODEL items (always authoritative copy from master Item), and `category: it.category` for NOT_FOUND items (leave as-is, usually null). Added explanatory comments.
+
+**Fix 2b — `src/components/laxree/dashboards/sales.tsx`:** Rewrote the auto-fetch matching to mirror the server-side upload route's matching priority:
+1. `itemNumber` exact match on master `model`
+2. `model` exact match on master `model`
+3. `itemNumber` includes master `model`
+4. `model` includes master `model`
+5. `itemName` exact match
+6. `itemName` includes match
+This eliminates the "both itemName AND model must match" requirement that broke for PDF rows with long descriptions. Also added `itemNumber` to the `itemsSignature` so the effect fires when PDF extraction sets the itemNumber (not just itemName/model). When matched, also backfills `model` from master if empty.
+
+Now for LRWA-382 the auto-fetch will:
+- Match by `itemNumber="LRWA-382"` (exact) against master `model="LRWA-382"` → MATCH
+- Set `category = "Lobby Items"`, `itemNumber = "LRWA-382"`, `colour = "WHITE"`
+- UI shows "🔍 auto Lobby Items" badge instead of "— not in master inventory —"
+
+The "not in master" hint is now correctly shown ONLY for genuinely not-found items (no itemNumber/model/itemName match against master), which is the intended behavior. Post-upload, the UploadResult and MyChallans tables show `ci.category` below the item name — with the server-side fix, this is now populated as "Lobby Items" for matched items.
+
+**Files touched (3):**
+- `src/lib/pdf-text-extract.ts` — regex patterns for billingName / billingAddress / shippingAddress + shipping→billing fallback
+- `src/app/api/challans/upload/route.ts` — always copy `matched.category` to ChallanItem when MATCHED/WRONG_MODEL
+- `src/components/laxree/dashboards/sales.tsx` — client-side auto-fetch now matches by itemNumber/model first (mirroring server)
+
+**Verification:**
+- `bun run lint` → 0 errors, 0 warnings.
+- Dev server compiles clean (`✓ Compiled in 325ms`); no errors in `dev.log`.
+- DB query: `LRWA-382` confirmed in master with category="Lobby Items", currentStock=169.
+- End-to-end API test (real sample PDF):
+  - `POST /api/challans/extract` → 200, returns `billingName`, `billingAddress`, `shippingAddress` all populated (previously all null except billingName).
+  - `POST /api/challans/upload` with LRWA-382 (category=null in request) → 200, ChallanItem returned with `category="Lobby Items"`, `status="MATCHED"`, `stockStatus="AVAILABLE"`, `availableQty=159`. No more contradiction.
+  - `POST /api/challans/upload` with LRXX-999 (non-existent) → 200, ChallanItem returned with `category=null`, `status="NOT_FOUND"`, `stockStatus="PENDING"` — correct, "not in master" should show for this item.
+  - `GET /api/items` → 293 items, includes LRWA-382 with category="Lobby Items".
+- Test challans cleaned up from DB.
+
+Stage Summary:
+- Address extraction: fixed regex to allow multiline values (`[\s\S]+?`) + comprehensive stop labels + shipping→billing fallback. Both `billingAddress` and `shippingAddress` now auto-extract from Laxree challan PDFs.
+- Category "not in master" bug: fixed on BOTH server (always copy `matched.category` to ChallanItem when MATCHED) and client (auto-fetch matches by itemNumber/model first, mirroring the server). The "not in master" hint now correctly shows ONLY for genuinely not-found items.
+- No schema changes, no `db.ts`/`package.json` changes. Lint clean, dev server compiles clean, all API tests pass.

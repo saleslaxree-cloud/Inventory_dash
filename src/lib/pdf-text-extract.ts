@@ -595,23 +595,39 @@ export function extractChallanFields(
   ])
 
   // ── Billing Name ──
-  // Stop at: Shipping, GST, PO No, Phone, or end of line
+  // Value is on the same line as the label. Stop at the next label or end of line.
+  // Use [^\n] so we don't bleed across lines (which would mix in other fields).
   const billingName = extractField(text, [
-    /Billing\s+Name\s*[:\-]\s*(.+?)(?=\s+(?:Shipping\s+Address|GST|PO\s+No|Phone|M\/S|$))/i,
-    /Bill\s+To\s*[:\-]\s*(.+?)(?=\s+(?:Address|GST|Phone|$))/i,
-    /Customer\s+Name\s*[:\-]\s*(.+?)(?=\s+(?:Address|GST|Phone|$))/i,
+    /Billing\s+Name\s*[:\-]\s*([^\n]+?)(?=\s+(?:Shipping\s+Address|Billing\s+Address|GST|PO\s+No|PO\s+Date|Phone|Mobile|M\/S|Quotation|Site\s+Add|Kind\s+Attention|Dated|Transportation|$))/i,
+    /Bill\s+To\s*[:\-]\s*([^\n]+?)(?=\s+(?:Address|GST|Phone|$))/i,
+    /Customer\s+Name\s*[:\-]\s*([^\n]+?)(?=\s+(?:Address|GST|Phone|$))/i,
   ])
 
   // ── Billing Address ──
+  // Value can span MULTIPLE lines (PDF text reconstruction wraps long addresses
+  // across several reconstructed lines). Use [\s\S]+? so '.' matches newlines,
+  // and stop at any next-field label.
   const billingAddress = extractField(text, [
-    /Billing\s+Address\s*[:\-]\s*(.+?)(?=\s+(?:Shipping\s+Address|PO\s+No|GST\s+No|Phone|M\/S|$))/i,
+    /Billing\s+Address\s*[:\-]\s*([\s\S]+?)(?=\s+(?:Shipping\s+Address|Transportation|PO\s+No|PO\s+Date|GST\s+No|GSTIN|Phone|Mobile|M\/S|Quotation|Site\s+Add|Kind\s+Attention|Dated|Laxree\s+Amenities|CHALLAN|Terms|Freight|Packing|Total|Grand|Discount|$))/i,
   ])
 
   // ── Shipping Address ──
-  const shippingAddress = extractField(text, [
-    /Shipping\s+Address\s*[:\-]\s*(.+?)(?=\s+(?:Transportation|PO\s+Date|Phone|M\/S|$))/i,
-    /Ship\s+To\s*[:\-]\s*(.+?)(?=\s+(?:Transportation|Phone|$))/i,
+  // Also multiline. In the Laxree layout, "Shipping Address :" appears BEFORE
+  // "Billing Address :" on the same line, so we stop at "Billing Address" (or
+  // any other next-field label) to avoid mixing the two.
+  let shippingAddress = extractField(text, [
+    /Shipping\s+Address\s*[:\-]\s*([\s\S]+?)(?=\s+(?:Billing\s+Address|Billing\s+Name|Transportation|PO\s+No|PO\s+Date|GST\s+No|GSTIN|Phone|Mobile|M\/S|Quotation|Site\s+Add|Kind\s+Attention|Dated|Laxree\s+Amenities|CHALLAN|Terms|Freight|Packing|Total|Grand|Discount|$))/i,
+    /Ship\s+To\s*[:\-]\s*([\s\S]+?)(?=\s+(?:Transportation|Phone|Mobile|$))/i,
+    /Consignee\s*[:\-]\s*([\s\S]+?)(?=\s+(?:Transportation|Phone|Mobile|$))/i,
   ])
+
+  // If shipping address is missing or too short (e.g. only the first line was
+  // captured because "Billing Address" appeared right after it on the next
+  // reconstructed line), fall back to the billing address. In most Laxree
+  // challans shipping == billing, so this is a safe fallback.
+  if ((!shippingAddress || shippingAddress.replace(/[^0-9]/g, '').length < 6) && billingAddress) {
+    shippingAddress = billingAddress
+  }
 
   // ── GST Number — try label first, then generic fallback ──
   let gstNumber = extractField(text, [

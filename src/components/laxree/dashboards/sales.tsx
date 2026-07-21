@@ -838,9 +838,9 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
   const { data: masterData } = useFetch<{ items: Item[] }>('/api/items')
   const masterItems = useMemo(() => masterData?.items || [], [masterData])
   const masterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Signature string so the effect only fires when itemName/model change
-  // (not when category/itemNumber/colour change — those are derived here).
-  const itemsSignature = items.map((i) => `${i.itemName}||${i.model}`).join('::')
+  // Signature string so the effect only fires when itemName/model/itemNumber change
+  // (not when category/colour change — those are derived here).
+  const itemsSignature = items.map((i) => `${i.itemName}||${i.model}||${i.itemNumber}`).join('::')
   useEffect(() => {
     if (!masterItems.length) return
     if (masterDebounceRef.current) clearTimeout(masterDebounceRef.current)
@@ -848,27 +848,47 @@ function UploadTab({ user, onDone }: { user: SessionUser; onDone: () => void }) 
       setItems((prev) => prev.map((row) => {
         const q = row.itemName.trim().toLowerCase()
         const m = row.model.trim().toLowerCase()
-        // Both empty → leave category alone (user cleared everything)
-        if (!q && !m) return row
-        // Find master match: if both itemName & model provided, both must
-        // match (contains); otherwise match on whichever is provided.
-        const match = masterItems.find((mi) => {
-          const miName = mi.itemName.toLowerCase()
-          const miModel = mi.model.toLowerCase()
-          if (q && m) return miName.includes(q) && miModel.includes(m)
-          if (q) return miName.includes(q)
-          if (m) return miModel.includes(m)
-          return false
-        })
+        const n = row.itemNumber.trim().toLowerCase()
+        // All empty → leave category alone (user cleared everything)
+        if (!q && !m && !n) return row
+        // ── Match priority (mirrors the server-side upload route) ──
+        //   1. itemNumber / model EXACT  (most specific — e.g. "LRWA-382")
+        //   2. itemNumber / model INCLUDES
+        //   3. itemName EXACT
+        //   4. itemName INCLUDES
+        // Previously this required BOTH itemName & model to match when both
+        // were present. That broke for PDF-extracted rows where the model
+        // number matches exactly but the PDF's itemName (a long description)
+        // doesn't contain the master's short itemName — the server still
+        // matched the item (showing stock), but the client auto-suggest
+        // failed and showed "not in master inventory". Matching on
+        // itemNumber/model first (just like the server) eliminates that
+        // contradiction.
+        const match =
+          // 1. itemNumber exact
+          (n && masterItems.find((mi) => (mi.model || '').toLowerCase() === n)) ||
+          // 1b. model exact
+          (m && masterItems.find((mi) => (mi.model || '').toLowerCase() === m)) ||
+          // 2. itemNumber includes
+          (n && masterItems.find((mi) => (mi.model || '').toLowerCase().includes(n))) ||
+          // 2b. model includes
+          (m && masterItems.find((mi) => (mi.model || '').toLowerCase().includes(m))) ||
+          // 3. itemName exact
+          (q && masterItems.find((mi) => mi.itemName.toLowerCase() === q)) ||
+          // 4. itemName includes
+          (q && masterItems.find((mi) => mi.itemName.toLowerCase().includes(q))) ||
+          undefined
         if (!match) {
           // Typed something but no match — clear category so the UI shows
-          // the "— not in master inventory —" hint.
+          // the "— not in master inventory —" hint. This is the correct
+          // case to show that hint: the item genuinely isn't in master.
           return { ...row, category: '' }
         }
         return {
           ...row,
           category: match.category,
           itemNumber: row.itemNumber || match.model,
+          model: row.model || match.model,
           colour: row.colour || (match.colour || ''),
         }
       }))
