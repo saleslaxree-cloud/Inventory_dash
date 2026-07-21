@@ -6,8 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider  = "sqlite"
+  provider  = "postgresql"
   url       = env("DATABASE_URL")
+  // directUrl uses the UNPOOLED connection (required for migrations; the
+  // pooled `url` is used for runtime queries). On Vercel this is provided
+  // as DATABASE_URL_UNPOOLED. Locally, set DIRECT_URL in .env if needed.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 // ═══════════════════════════════════════════
